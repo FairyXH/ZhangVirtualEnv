@@ -4,6 +4,7 @@ import io.github.fairyxh.VirtualEnv.core.EnvStateCache
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.lang.reflect.Method
+import java.util.HashSet
 
 /**
  * Framework API Hook Adapter（第一层：覆盖普通应用）。
@@ -38,6 +39,56 @@ class FrameworkEnvHookAdapter(
         hookTelephonyGetAllCellInfo(classLoader)
         hookBleStartScan(classLoader)
         hookWifiGetScanResults(classLoader)
+        hookSensorRegister(classLoader)
+    }
+
+    /** 步频模拟注入器（进程内单例）。 */
+    private val stepInjector = StepSensorInjector(cache)
+
+    // ---------- 步频：SensorManager.registerListener ----------
+
+    private fun hookSensorRegister(classLoader: ClassLoader) {
+        val clazz = HookSupport.findClass(classLoader, "android.hardware.SensorManager") ?: return
+        var hooked = 0
+        HookSupport.findMethods(clazz, "registerListener")
+            .filter { it.parameterCount in 3..6 }
+            .forEach { method ->
+                if (method.parameterTypes[1].simpleName != "Sensor") return@forEach
+                val ok = registrar.register(method) { chain ->
+                    val original = chain.proceed()
+                    try {
+                        val listener = chain.getArg(0)
+                        val sensor = chain.getArg(1)
+                        val type = sensor.javaClass.getMethod("getType").invoke(sensor) as? Int ?: -1
+                        stepInjector.onListenerRegistered(listener, sensor, type)
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "step register hook failed", t)
+                    }
+                    original
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked SensorManager.registerListener(${method.parameterCount} params)")
+                }
+            }
+        HookSupport.findMethods(clazz, "unregisterListener")
+            .filter { it.parameterCount in 1..2 }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val listener = chain.getArg(0)
+                    try {
+                        stepInjector.onListenerUnregistered(listener)
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "step unregister hook failed", t)
+                    }
+                    chain.proceed()
+                    null
+                }
+                if (ok) {
+                    ZLog.i(TAG_SCOPE, "hooked SensorManager.unregisterListener(${method.parameterCount} params)")
+                }
+            }
+        if (hooked == 0) ZLog.w(TAG_SCOPE, "SensorManager.registerListener candidates not found")
     }
 
     // ---------- 基站：TelephonyManager.getAllCellInfo ----------
@@ -266,8 +317,11 @@ class FrameworkEnvHookAdapter(
         }
     }
 
+    /**
+     * 构造虚拟 BLE 扫描结果：优先使用采集的附近设备（devices），
+     * 再合并已配对设备（bonded），两者均支持。
+     */
     private fun buildScanResults(data: JSONObject): List<Any> {
-        val devices = data.optJSONArray("bonded") ?: data.optJSONArray("devices") ?: return emptyList()
         val resultClass = Class.forName("android.bluetooth.le.ScanResult")
         val ctor = resultClass.getConstructor(
             Class.forName("android.bluetooth.BluetoothDevice"),
@@ -283,10 +337,10 @@ class FrameworkEnvHookAdapter(
         val advBytes = byteArrayOf(0x02, 0x01, 0x1A)
 
         val result = mutableListOf<Any>()
-        for (i in 0 until devices.length()) {
-            val d = devices.optJSONObject(i) ?: continue
+        val seen = HashSet<String>()
+        fun addEntry(d: JSONObject) {
             val address = d.optString("address", "")
-            if (address.isBlank()) continue
+            if (address.isBlank() || !seen.add(address)) return
             try {
                 val device = getRemoteDevice.invoke(null, address)
                 val record = parseFromBytes.invoke(null, advBytes)
@@ -301,6 +355,12 @@ class FrameworkEnvHookAdapter(
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "build scan result $address failed", t)
             }
+        }
+        data.optJSONArray("devices")?.let { arr ->
+            for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
+        }
+        data.optJSONArray("bonded")?.let { arr ->
+            for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
         }
         return result
     }

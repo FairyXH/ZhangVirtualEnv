@@ -3,6 +3,7 @@ package io.github.fairyxh.VirtualEnv.app.collect
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
 import android.content.Context
 import android.location.GnssStatus
 import android.location.Location
@@ -10,6 +11,8 @@ import android.location.LocationManager
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.CellIdentityGsm
 import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
@@ -22,8 +25,9 @@ import org.json.JSONObject
 /**
  * 真实环境采集器（控制端）。
  *
- * 采集当前设备的位置、基站、WiFi、蓝牙、GNSS 状态，输出 JSON。
- * 采集结果用于后续保存为 Environment Package 并套用到模拟。
+ * 采集当前设备的位置、基站、WiFi、蓝牙（含附近 BLE 设备）、GNSS 状态，输出 JSON。
+ * 输出结构即 Hook 层消费的数据格式（networks/cells/bonded+devices），
+ * 采集结果保存为快照后可被 /api/env/use 直接加载到模拟引擎。
  *
  * 注：CellIdentity 相关 API 各版本差异大，运行时已按 SDK_INT 分支处理，
  * 此处集中抑制 NewApi 以便统一在运行时判断。
@@ -34,6 +38,7 @@ class EnvironmentCollector(private val context: Context) {
     companion object {
         private const val TAG_SCOPE = "Collect"
         private const val SCAN_TIMEOUT_MS = 4000L
+        private const val MAX_NEARBY = 20
     }
 
     @SuppressLint("MissingPermission")
@@ -43,9 +48,11 @@ class EnvironmentCollector(private val context: Context) {
         result.put("location", collectLocation())
         result.put("cell", collectCell())
         result.put("wifi", collectWifi())
-        result.put("bluetooth", collectBluetooth())
         result.put("gnss", collectGnss())
-        onDone(result)
+        collectBluetooth { bt ->
+            result.put("bluetooth", bt)
+            onDone(result)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -175,7 +182,7 @@ class EnvironmentCollector(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun collectBluetooth(): JSONObject {
+    private fun collectBluetooth(onDone: (JSONObject) -> Unit) {
         val bm = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter: BluetoothAdapter? = bm.adapter
         val out = JSONObject()
@@ -191,11 +198,86 @@ class EnvironmentCollector(private val context: Context) {
             }
             out.put("bonded", arr)
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "collectBluetooth failed", t)
+            ZLog.w(TAG_SCOPE, "collectBluetooth bonded failed", t)
             out.put("bonded", JSONArray())
-            out.put("error", t.message)
         }
-        return out
+
+        val scanner = try {
+            adapter?.bluetoothLeScanner
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "bluetoothLeScanner unavailable", t)
+            null
+        }
+        if (scanner == null) {
+            out.put("devices", JSONArray())
+            onDone(out)
+            return
+        }
+
+        // 附近 BLE 设备扫描：回调异步收集，超时后停止并返回
+        val devices = JSONArray()
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        var callback: ScanCallback? = null
+
+        fun finish() {
+            try {
+                callback?.let { scanner.stopScan(it) }
+            } catch (_: Throwable) {
+            }
+            out.put("devices", devices)
+            onDone(out)
+        }
+
+        callback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: android.bluetooth.le.ScanResult) {
+                if (devices.length() >= MAX_NEARBY) return
+                val item = JSONObject()
+                val device = result.device
+                item.put("address", device.address)
+                item.put("rssi", result.rssi)
+                item.put("txPower", result.txPower)
+                val name = result.scanRecord?.deviceName ?: device.name
+                item.put("name", name ?: "")
+                result.scanRecord?.manufacturerSpecificData?.let { map ->
+                    val sb = StringBuilder()
+                    for (i in 0 until map.size()) {
+                        val key = map.keyAt(i)
+                        val value = map.valueAt(i)
+                        sb.append(String.format("%04X:", key))
+                        value.forEach { sb.append(String.format("%02X", it)) }
+                        sb.append(";")
+                    }
+                    item.put("manufacturerData", sb.toString())
+                }
+                result.scanRecord?.serviceUuids?.let { uuids ->
+                    if (uuids.isNotEmpty()) {
+                        val ua = JSONArray()
+                        uuids.forEach { ua.put(it.toString()) }
+                        item.put("serviceUuids", ua)
+                    }
+                }
+                devices.put(item)
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                ZLog.w(TAG_SCOPE, "ble scan failed code=$errorCode")
+                finish()
+            }
+        }
+
+        val timeout = Runnable { finish() }
+        mainHandler.postDelayed(timeout, SCAN_TIMEOUT_MS)
+        try {
+            scanner.startScan(callback)
+            ZLog.i(TAG_SCOPE, "ble nearby scan started")
+        } catch (t: Throwable) {
+            mainHandler.removeCallbacks(timeout)
+            ZLog.w(TAG_SCOPE, "ble startScan failed", t)
+            out.put("devices", devices)
+            out.put("error", t.message)
+            onDone(out)
+        }
     }
 
     @SuppressLint("MissingPermission")

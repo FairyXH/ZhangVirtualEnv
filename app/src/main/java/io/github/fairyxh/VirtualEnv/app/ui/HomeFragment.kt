@@ -27,12 +27,23 @@ class HomeFragment : Fragment() {
         private const val TAG_SCOPE = "UI"
         private const val REQ_PERMISSIONS = 1001
 
-        private val REQUIRED_PERMISSIONS = arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_WIFI_STATE,
-            Manifest.permission.READ_PHONE_STATE,
-        )
+        private val REQUIRED_PERMISSIONS: Array<String>
+            get() {
+                val base = mutableListOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_WIFI_STATE,
+                    Manifest.permission.READ_PHONE_STATE,
+                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    base.add(Manifest.permission.BLUETOOTH_SCAN)
+                    base.add(Manifest.permission.BLUETOOTH_CONNECT)
+                } else {
+                    base.add(Manifest.permission.BLUETOOTH)
+                    base.add(Manifest.permission.BLUETOOTH_ADMIN)
+                }
+                return base.toTypedArray()
+            }
     }
 
     private lateinit var statusDot: View
@@ -263,7 +274,9 @@ class HomeFragment : Fragment() {
         sb.append("\n")
         sb.append("基站: ").append(cell?.optJSONArray("cells")?.length() ?: 0).append(" 个\n")
         sb.append("WiFi: ").append(wifi?.optJSONArray("networks")?.length() ?: 0).append(" 个\n")
-        sb.append("蓝牙: ").append(bt?.optJSONArray("bonded")?.length() ?: 0).append(" 个已配对\n")
+        val bondedCount = bt?.optJSONArray("bonded")?.length() ?: 0
+        val nearbyCount = bt?.optJSONArray("devices")?.length() ?: 0
+        sb.append("蓝牙: 已配对 ").append(bondedCount).append(" 个 · 附近 ").append(nearbyCount).append(" 个\n")
         val gnssCount = gnss?.optInt("satelliteCount", 0) ?: 0
         sb.append("GNSS: ").append(gnss?.optString("available", "false")).append(
             if (gnssCount > 0) {
