@@ -10,8 +10,11 @@ import java.lang.reflect.Method
  * 核心思路：CellIdentityCdma 携带 baseStationLatitude / baseStationLongitude
  * 字段，地图 SDK 读取后发往厂商服务器，服务器按基站坐标换算即得到虚拟位置。
  *
- * ColorOS/Android 15 实测：CellInfo* 有 public no-arg 构造 + setter；
- * CellIdentityCdma 优先尝试 7 参公开构造，失败回退 no-arg + setter。
+ * Oplus/Android 15 实测签名（JADX framework.jar 确认）：
+ * - CellIdentityCdma(int nid, int sid, int bid, int lon, int lat, String alphal, String alphas)
+ *   —— 第 4 参是经度、第 5 参是纬度；字段为 final，无 setter，必须用 7 参构造。
+ * - CellInfoCdma(int, boolean registered, long timestamp, CellIdentityCdma, CellSignalStrengthCdma)
+ * - CellSignalStrengthCdma() no-arg public
  */
 object VirtualCellFactory {
 
@@ -29,16 +32,29 @@ object VirtualCellFactory {
     fun buildCellInfoCdma(latitude: Double, longitude: Double): Any? {
         return try {
             val infoClass = Class.forName(CELL_INFO_CDMA)
-            val info = newInstance(infoClass) ?: return null
-            call(info, "setRegistered", true)
-            call(info, "setTimeStamp", System.nanoTime())
-            callQuiet(info, "setCellConnectionStatus", 0)
             val identity = buildCellIdentityCdma(latitude, longitude) ?: return null
-            call(info, "setCellIdentity", identity)
             val signal = newInstance(Class.forName(CELL_SIGNAL_CDMA))
-            if (signal != null) {
-                callQuiet(info, "setCellSignalStrength", signal)
+            // 1. 5 参构造（registered=true, timestamp 新鲜）
+            try {
+                val ctor = infoClass.getConstructor(
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                    Long::class.javaPrimitiveType,
+                    Class.forName(CELL_IDENTITY_CDMA),
+                    Class.forName(CELL_SIGNAL_CDMA)
+                )
+                val info = ctor.newInstance(0, true, System.nanoTime(), identity, signal)
+                ZLog.d(TAG_SCOPE, "CellInfoCdma via 5-arg ctor lat=$latitude lon=$longitude")
+                return info
+            } catch (_: NoSuchMethodException) {
             }
+            // 2. no-arg + setCellIdentity/setCellSignalStrength
+            val info = newInstance(infoClass) ?: return null
+            call(info, "setCellIdentity", identity)
+            if (signal != null) {
+                call(info, "setCellSignalStrength", signal)
+            }
+            ZLog.d(TAG_SCOPE, "CellInfoCdma via no-arg ctor+setters lat=$latitude lon=$longitude")
             info
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "build CellInfoCdma failed", t)
@@ -47,46 +63,24 @@ object VirtualCellFactory {
     }
 
     /**
-     * 构造携带虚拟经纬度的 CellIdentityCdma。
-     *
-     * 优先 7 参公开构造（networkId, systemId, baseStationId, baseStationLatitude,
-     * baseStationLongitude, alphanumeric, operatorAlpha）；失败回退 no-arg + setter。
+     * 构造携带虚拟经纬度的 CellIdentityCdma（7 参公开构造，顺序 nid/sid/bid/lon/lat）。
      */
     fun buildCellIdentityCdma(latitude: Double, longitude: Double): Any? {
         return try {
             val cls = Class.forName(CELL_IDENTITY_CDMA)
-            // 1. 7 参构造（API 30+ 公开签名）
-            try {
-                val ctor = cls.getConstructor(
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    String::class.java,
-                    String::class.java
-                )
-                val identity = ctor.newInstance(
-                    Int.MAX_VALUE,
-                    Int.MAX_VALUE,
-                    Int.MAX_VALUE,
-                    (latitude * 14400.0).toInt(),
-                    (longitude * 14400.0).toInt(),
-                    null,
-                    null
-                )
-                ZLog.d(TAG_SCOPE, "CellIdentityCdma via 7-arg ctor lat=$latitude lon=$longitude")
-                return identity
-            } catch (_: NoSuchMethodException) {
-            }
-            // 2. no-arg + setter（Oplus 15 支持）
-            val identity = newInstance(cls) ?: return null
-            callQuiet(identity, "setNetworkId", Int.MAX_VALUE)
-            callQuiet(identity, "setSystemId", Int.MAX_VALUE)
-            callQuiet(identity, "setBasestationId", Int.MAX_VALUE)
-            callQuiet(identity, "setBasestationLatitude", (latitude * 14400.0).toInt())
-            callQuiet(identity, "setBasestationLongitude", (longitude * 14400.0).toInt())
-            ZLog.d(TAG_SCOPE, "CellIdentityCdma via no-arg ctor+setters lat=$latitude lon=$longitude")
+            val ctor = cls.getConstructor(
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java,
+                String::class.java
+            )
+            val lonQ = (longitude * 14400.0).toInt()
+            val latQ = (latitude * 14400.0).toInt()
+            val identity = ctor.newInstance(Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, lonQ, latQ, null, null)
+            ZLog.d(TAG_SCOPE, "CellIdentityCdma 7-arg ctor lon=$lonQ lat=$latQ")
             identity
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "build CellIdentityCdma failed", t)
@@ -104,29 +98,18 @@ object VirtualCellFactory {
     }
 
     private fun call(target: Any, name: String, value: Any) {
-        val m = target.javaClass.getMethod(name, value.javaClass)
-        m.invoke(target, value)
+        val m = findMethod(target.javaClass, name, 1) ?: return
+        m.invoke(target, boxFor(m, value))
     }
 
-    private fun callQuiet(target: Any, name: String, value: Any) {
-        try {
-            val candidates = target.javaClass.methods.filter { it.name == name && it.parameterCount == 1 }
-            for (m in candidates) {
-                try {
-                    m.invoke(target, boxFor(m, value))
-                    return
-                } catch (_: Throwable) {
-                }
-            }
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "call $name failed on ${target.javaClass.name}", t)
-        }
+    private fun findMethod(clazz: Class<*>, name: String, paramCount: Int): Method? {
+        return clazz.methods.firstOrNull { it.name == name && it.parameterCount == paramCount }
     }
 
     private fun boxFor(m: Method, value: Any): Any {
         val param = m.parameterTypes[0]
         return when {
-            param == java.lang.Boolean.TYPE -> value
+            param == java.lang.Boolean.TYPE && value is Boolean -> value
             param == java.lang.Integer.TYPE && value is Int -> value
             param == java.lang.Long.TYPE && value is Long -> value
             param == Int::class.java -> (value as Number).toInt()
