@@ -138,6 +138,9 @@ class ApiServer(
                 path == "/api/env-snapshot/create" && method == "POST" -> envSnapshotCreate(body)
                 path == "/api/env-snapshot/list" && method == "GET" -> envSnapshotList()
                 path == "/api/env-snapshot/delete" && method == "POST" -> envSnapshotDelete(body)
+                path == "/api/env/use" && method == "POST" -> envUse(body)
+                path == "/api/env/clear" && method == "POST" -> envClear(body)
+                path == "/api/env/status" && method == "GET" -> envStatus()
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -268,6 +271,27 @@ class ApiServer(
         } else {
             ApiResult.error("env snapshot not found: $id")
         }
+    }
+
+    private fun envUse(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val snapshot = backend.useEnvSnapshot(id)
+            ?: return ApiResult.error("env snapshot not found or unsupported: $id")
+        ZLog.i(TAG_SCOPE, "env use id=$id type=${snapshot.optString("type")}")
+        return ApiResult.ok("applied", snapshot)
+    }
+
+    private fun envClear(body: String): ApiResult {
+        val json = JSONObject(body)
+        val type = json.optString("type", "")
+        if (type.isBlank()) return ApiResult.error("type required")
+        backend.clearEnv(type)
+        return ApiResult.ok("cleared")
+    }
+
+    private fun envStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.envStatusJson())
     }
 
     private fun locationStatus(): ApiResult {

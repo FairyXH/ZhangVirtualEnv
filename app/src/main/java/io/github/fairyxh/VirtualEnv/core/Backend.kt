@@ -3,6 +3,7 @@ package io.github.fairyxh.VirtualEnv.core
 import android.location.Location
 import io.github.fairyxh.VirtualEnv.core.engine.LocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.SinglePointLocationEngine
+import io.github.fairyxh.VirtualEnv.core.engine.EnvStateEngine
 import io.github.fairyxh.VirtualEnv.core.model.LocationState
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -60,6 +61,11 @@ class Backend private constructor(private val dataDir: File) {
         private set
     lateinit var profileManager: ProfileManager
         private set
+
+    /** 虚拟 WiFi / 基站 / BLE 环境状态（Hook 层只读快照）。 */
+    val wifiEngine = EnvStateEngine("wifi")
+    val cellEngine = EnvStateEngine("cell")
+    val bleEngine = EnvStateEngine("ble")
 
     @Volatile
     var apiServer: ApiServer? = null
@@ -187,5 +193,60 @@ class Backend private constructor(private val dataDir: File) {
 
     fun deleteEnvSnapshot(id: Long): Boolean {
         return databaseManager.deleteEnvSnapshot(id)
+    }
+
+    // ---------- 虚拟环境加载（App 控制端调用） ----------
+
+    /**
+     * 一键使用环境快照：把已保存的 env_snapshot 数据加载到对应模拟引擎。
+     *
+     * @return 加载的快照 JSON；快照不存在或类型不支持时返回 null
+     */
+    fun useEnvSnapshot(id: Long): org.json.JSONObject? {
+        val snapshot = databaseManager.queryEnvSnapshots()
+            .firstOrNull { it.optLong("id", -1L) == id }
+            ?: return null
+        val type = snapshot.optString("type", "")
+        val data = snapshot.optJSONObject("data") ?: return null
+        when (type) {
+            "wifi" -> wifiEngine.update(data)
+            "cell" -> cellEngine.update(data)
+            "ble" -> bleEngine.update(data)
+            "collect" -> loadCollectSnapshot(data)
+            else -> return null
+        }
+        ZLog.i(TAG_SCOPE, "env snapshot used id=$id type=$type")
+        return snapshot
+    }
+
+    /** 一键采集包：拆分到 wifi / cell / ble 引擎（gnss/sensor 后续 Phase 接入）。 */
+    private fun loadCollectSnapshot(data: org.json.JSONObject) {
+        data.optJSONObject("wifi")?.let { wifiEngine.update(it) }
+        data.optJSONObject("cell")?.let { cellEngine.update(it) }
+        data.optJSONObject("bluetooth")?.let { bleEngine.update(it) }
+    }
+
+    /** 清除指定类型的虚拟环境。 */
+    fun clearEnv(type: String) {
+        when (type) {
+            "wifi" -> wifiEngine.clear()
+            "cell" -> cellEngine.clear()
+            "ble" -> bleEngine.clear()
+            "collect" -> {
+                wifiEngine.clear()
+                cellEngine.clear()
+                bleEngine.clear()
+            }
+        }
+        ZLog.i(TAG_SCOPE, "env cleared type=$type")
+    }
+
+    /** 当前虚拟环境状态（App 展示用）。 */
+    fun envStatusJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("wifi", wifiEngine.statusJson())
+            put("cell", cellEngine.statusJson())
+            put("ble", bleEngine.statusJson())
+        }
     }
 }

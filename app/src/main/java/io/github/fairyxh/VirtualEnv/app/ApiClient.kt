@@ -127,6 +127,21 @@ object ApiClient {
         return post("/api/env-snapshot/delete", body)
     }
 
+    // ---------- 虚拟环境 ----------
+
+    /** 一键使用环境快照：加载到对应模拟引擎。 */
+    fun useEnvSnapshot(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/env/use", body)
+    }
+
+    fun clearEnv(type: String): ApiResult {
+        val body = JSONObject().apply { put("type", type) }
+        return post("/api/env/clear", body)
+    }
+
+    fun getEnvStatus(): ApiResult = get("/api/env/status")
+
     private fun get(path: String): ApiResult {
         return request("GET", path, null)
     }

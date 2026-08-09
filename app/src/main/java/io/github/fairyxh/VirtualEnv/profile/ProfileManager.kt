@@ -149,4 +149,10 @@ class ProfileManager(private val dataDir: File) {
         val hooks = current?.optJSONObject(KEY_HOOKS) ?: return JSONObject()
         return hooks.optJSONObject(KEY_LOCATION) ?: JSONObject()
     }
+
+    /** 返回指定环境类型的 hook 配置（wifi/cell/ble/gnss/sensor）。 */
+    fun envHookConfig(type: String): JSONObject {
+        val hooks = current?.optJSONObject(KEY_HOOKS) ?: return JSONObject()
+        return hooks.optJSONObject(type) ?: JSONObject()
+    }
 }
