@@ -22,6 +22,14 @@
     <string name="home_collect_desc">采集当前设备的位置、基站、WiFi、蓝牙、GNSS 状态，保存为环境包</string>
     <string name="home_collect_button">开始采集</string>
     <string name="home_collect_running">采集进行中…</string>
+    <string name="home_collect_name_hint">采集名称，如：公司门口 1</string>
+    <string name="home_collect_remark_hint">备注（可选）</string>
+    <string name="home_collect_save">保存采集</string>
+    <string name="home_collect_name_required">请输入采集名称</string>
+    <string name="home_collect_none">请先完成一次采集</string>
+    <string name="home_collect_saved">采集已保存</string>
+    <string name="home_saved_title">已保存采集</string>
+    <string name="home_saved_empty">暂无已保存采集</string>
 
     <!-- Location -->
     <string name="location_title">位置模拟</string>

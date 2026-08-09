@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
@@ -39,9 +40,15 @@ class HomeFragment : Fragment() {
     private lateinit var statusDetail: TextView
     private lateinit var collectButton: Button
     private lateinit var collectResult: TextView
+    private lateinit var collectNameInput: android.widget.EditText
+    private lateinit var collectRemarkInput: android.widget.EditText
+    private lateinit var saveCollectButton: Button
+    private lateinit var savedCollectEmpty: TextView
+    private lateinit var savedCollectList: android.widget.LinearLayout
 
     private val executor = Executors.newSingleThreadExecutor()
     private var collector: EnvironmentCollector? = null
+    private var lastCollectResult: JSONObject? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_home, container, false)
@@ -50,16 +57,24 @@ class HomeFragment : Fragment() {
         statusDetail = root.findViewById(R.id.statusDetail)
         collectButton = root.findViewById(R.id.collectButton)
         collectResult = root.findViewById(R.id.collectResult)
+        collectNameInput = root.findViewById(R.id.collectNameInput)
+        collectRemarkInput = root.findViewById(R.id.collectRemarkInput)
+        saveCollectButton = root.findViewById(R.id.saveCollectButton)
+        savedCollectEmpty = root.findViewById(R.id.savedCollectEmpty)
+        savedCollectList = root.findViewById(R.id.savedCollectList)
         collector = EnvironmentCollector(requireContext())
 
         collectButton.setOnClickListener { startCollect() }
+        saveCollectButton.setOnClickListener { saveCollect() }
         refreshBackendStatus()
+        refreshSavedCollects()
         return root
     }
 
     override fun onResume() {
         super.onResume()
         refreshBackendStatus()
+        refreshSavedCollects()
     }
 
     private fun refreshBackendStatus() {
@@ -112,6 +127,7 @@ class HomeFragment : Fragment() {
         collectResult.visibility = View.VISIBLE
         executor.execute {
             collector?.collectAll { result ->
+                lastCollectResult = result
                 requireActivity().runOnUiThread {
                     collectButton.isEnabled = true
                     collectResult.text = summarize(result)
@@ -120,6 +136,102 @@ class HomeFragment : Fragment() {
                 }
             }
         }
+    }
+
+    // ---------- 已保存采集 ----------
+
+    private fun saveCollect() {
+        val name = collectNameInput.text.toString().trim()
+        if (name.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_collect_name_required, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val result = lastCollectResult
+        if (result == null) {
+            Toast.makeText(requireContext(), R.string.home_collect_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val remark = collectRemarkInput.text.toString().trim()
+        executor.execute {
+            val apiResult = ApiClient.createEnvSnapshot(name, remark, "collect", result)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), apiResult.message, Toast.LENGTH_SHORT).show()
+                if (apiResult.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    collectNameInput.text.clear()
+                    collectRemarkInput.text.clear()
+                    refreshSavedCollects()
+                }
+            }
+        }
+    }
+
+    private fun refreshSavedCollects() {
+        executor.execute {
+            val result = ApiClient.listEnvSnapshots()
+            requireActivity().runOnUiThread {
+                renderSavedCollects(result)
+            }
+        }
+    }
+
+    private fun renderSavedCollects(result: io.github.fairyxh.VirtualEnv.core.model.ApiResult) {
+        savedCollectList.removeAllViews()
+        val snapshots = result.data?.optJSONArray("snapshots") ?: return
+        val collects = mutableListOf<JSONObject>()
+        for (i in 0 until snapshots.length()) {
+            val item = snapshots.optJSONObject(i) ?: continue
+            if (item.optString("type", "") == "collect") collects.add(item)
+        }
+        savedCollectEmpty.visibility = if (collects.isEmpty()) View.VISIBLE else View.GONE
+        if (collects.isEmpty()) return
+
+        collects.forEach { item ->
+            val row = layoutInflater.inflate(R.layout.item_saved_collect, savedCollectList, false)
+            row.findViewById<TextView>(R.id.collectName).text = item.optString("name", "")
+            val remark = item.optString("remark", "")
+            val remarkView = row.findViewById<TextView>(R.id.collectRemark)
+            if (remark.isBlank()) {
+                remarkView.visibility = View.GONE
+            } else {
+                remarkView.text = getString(R.string.location_point_remark_format, remark)
+            }
+            row.findViewById<TextView>(R.id.collectMeta).text = formatTime(item.optLong("createTime", 0L))
+            row.findViewById<Button>(R.id.useButton).setOnClickListener {
+                showCollectDetail(item)
+            }
+            row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
+                deleteCollect(item.optLong("id"))
+            }
+            savedCollectList.addView(row)
+        }
+    }
+
+    private fun showCollectDetail(item: JSONObject) {
+        val data = item.optJSONObject("data")
+        val detail = if (data != null) summarize(data) else "无数据"
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle(item.optString("name", ""))
+            .setMessage(detail)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun deleteCollect(id: Long) {
+        executor.execute {
+            val result = ApiClient.deleteEnvSnapshot(id)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    refreshSavedCollects()
+                }
+            }
+        }
+    }
+
+    private fun formatTime(millis: Long): String {
+        if (millis <= 0) return ""
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        return fmt.format(java.util.Date(millis))
     }
 
     private fun summarize(result: JSONObject): String {
@@ -142,9 +254,10 @@ class HomeFragment : Fragment() {
         sb.append("基站: ").append(cell?.optJSONArray("cells")?.length() ?: 0).append(" 个\n")
         sb.append("WiFi: ").append(wifi?.optJSONArray("networks")?.length() ?: 0).append(" 个\n")
         sb.append("蓝牙: ").append(bt?.optJSONArray("bonded")?.length() ?: 0).append(" 个已配对\n")
+        val gnssCount = gnss?.optInt("satelliteCount", 0) ?: 0
         sb.append("GNSS: ").append(gnss?.optString("available", "false")).append(
-            if (gnss?.optInt("satelliteCount", 0) ?: 0 > 0) {
-                " (${gnss.optInt("satelliteCount")} 颗卫星)"
+            if (gnssCount > 0) {
+                " ($gnssCount 颗卫星)"
             } else {
                 ""
             }
