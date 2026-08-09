@@ -176,7 +176,8 @@ class ApiServer(
 
     private fun routeList(): ApiResult {
         val data = JSONObject()
-        data.put("routes", org.json.JSONArray(backend.listRoutes().map { it.toString() }))
+        // JSONArray(Collection) 直接放入 JSONObject 元素，避免 toString 变成字符串数组
+        data.put("routes", org.json.JSONArray(backend.listRoutes()))
         return ApiResult.ok("ok", data)
     }
 
@@ -217,7 +218,7 @@ class ApiServer(
 
     private fun locationPointList(): ApiResult {
         val data = JSONObject()
-        data.put("points", org.json.JSONArray(backend.listLocationPoints().map { it.toString() }))
+        data.put("points", org.json.JSONArray(backend.listLocationPoints()))
         return ApiResult.ok("ok", data)
     }
 
@@ -259,7 +260,7 @@ class ApiServer(
 
     private fun envSnapshotList(): ApiResult {
         val data = JSONObject()
-        data.put("snapshots", org.json.JSONArray(backend.listEnvSnapshots().map { it.toString() }))
+        data.put("snapshots", org.json.JSONArray(backend.listEnvSnapshots()))
         return ApiResult.ok("ok", data)
     }
 
