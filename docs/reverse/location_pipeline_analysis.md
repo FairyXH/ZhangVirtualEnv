@@ -105,13 +105,23 @@ onReportLocation(虚拟 LocationResult)
 
 数据来源：`Backend.currentLocation()`（`SinglePointLocationEngine.buildLocation` 每次刷新 time/elapsedRealtimeNanos，避免被客户端判定过期）。
 
-## 6. 测试结果（当前基线）
+## 6. 测试结果
+
+### 6.1 注入前基线（2026-08-09 22:35）
 
 - [x] 系统层 Location hook 已生效（passive/network last location = 虚拟）
 - [x] WiFi/基站网络定位阻断生效（百度扫描 WiFi 拿空列表）
-- [x] 百度 gps 收到位置数 = 0（注入前基线）
-- [ ] 注入后：百度 gps locations > 0 且为虚拟坐标（待验证）
-- [ ] 注入后：GMS fused passive 持续收到虚拟位置（待验证）
+- [x] 百度 gps 收到位置数 = 0（31 分钟 0 个位置）
+
+### 6.2 注入后（2026-08-09 22:48，adb reboot 后）
+
+- [x] `fix inject [gps] -> virtual` / `fix inject [passive] -> virtual` 每秒命中
+- [x] `provider onReportLocation -> virtual` + `LocationListenerTransport deliver -> virtual` 高频分发
+- [x] 百度 gps `locations = 22`（重启后 18 秒内），passive 段百度 `locations = 32`
+- [x] Event Log：`gps provider delivered location[1] to 10352/com.baidu.BaiduMap` 连续交付
+- [x] gps provider last location：null → 虚拟 `31.21****,121.49****`
+- [x] GMS `network_location_provider` passive `locations = 9`（fused 缓存数据源已虚拟）
+- [x] 无 system_server 崩溃、无 LSPosed 安全模式
 - [ ] 百度/微信 UI 位置为虚拟（用户观察，不做截图）
 
 ## 7. 风险与对策
