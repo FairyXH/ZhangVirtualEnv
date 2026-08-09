@@ -26,9 +26,32 @@ class VirtualEnvEntry : XposedModule() {
     }
 
     private var backend: Backend? = null
+    private var appCache: io.github.fairyxh.VirtualEnv.core.EnvStateCache? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onModuleLoaded process=${param.processName} systemServer=${param.isSystemServer}")
+        if (param.isSystemServer) return
+
+        // App 进程：安装第一层 Framework API Hook（Telephony / BLE / WiFi）。
+        // 虚拟环境状态保存在 system_server Backend，此处通过 EnvStateCache 轮询获取。
+        try {
+            if (appCache != null) return
+            val cache = io.github.fairyxh.VirtualEnv.core.EnvStateCache()
+            appCache = cache
+            val registrar = HookRegistrar { method, interceptor ->
+                try {
+                    hook(method).intercept(interceptor)
+                    true
+                } catch (t: Throwable) {
+                    ZLog.e(TAG_SCOPE, "app hook register failed: ${method.declaringClass.name}.${method.name}", t)
+                    false
+                }
+            }
+            FrameworkEnvHookAdapter(cache, registrar).install(ClassLoader.getSystemClassLoader())
+            log(Log.INFO, TAG, "[$TAG_SCOPE] framework env hooks installed for ${param.processName}")
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "[$TAG_SCOPE] framework env hook install failed", t)
+        }
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
