@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Apple-style light palette -->
+    <color name="bg_primary">#F2F2F7</color>
+    <color name="bg_secondary">#FFFFFF</color>
+    <color name="bg_tertiary">#E5E5EA</color>
+    <color name="text_primary">#1D1D1F</color>
+    <color name="text_secondary">#86868B</color>
+    <color name="text_tertiary">#AEAEB2</color>
+    <color name="separator">#1C000000</color>
+    <color name="accent">#0071E3</color>
+    <color name="accent_press">#0A5DC2</color>
+    <color name="success">#34C759</color>
+    <color name="warning">#FF9500</color>
+    <color name="danger">#FF3B30</color>
+    <color name="card_fill">#F2FFFFFF</color>
+    <color name="card_border">#1A000000</color>
+    <color name="glass_fill">#CCF2F2F7</color>
+    <color name="glass_border">#40FFFFFF</color>
+    <color name="glass_highlight">#66FFFFFF</color>
+    <color name="glass_shadow">#14000000</color>
+    <color name="tab_icon_normal">#8E8E93</color>
+    <color name="tab_icon_active">#0071E3</color>
+    <color name="overlay_scrim">#59000000</color>
+</resources>

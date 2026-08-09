@@ -2,6 +2,7 @@ package io.github.fairyxh.VirtualEnv.core
 
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -126,6 +127,8 @@ class ApiServer(
                 path == "/api/location/set" && method == "POST" -> locationSet(body)
                 path == "/api/location/enable" && method == "POST" -> locationEnable(body)
                 path == "/api/system/info" && method == "GET" -> systemInfo()
+                path == "/api/route/create" && method == "POST" -> routeCreate(body)
+                path == "/api/route/list" && method == "GET" -> routeList()
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -139,6 +142,28 @@ class ApiServer(
             put("running", true)
             put("location", backend.locationState().toJson())
         }
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun routeCreate(body: String): ApiResult {
+        val json = JSONObject(body)
+        val name = json.optString("name", "")
+        val pointsArr = json.optJSONArray("points") ?: JSONArray()
+        if (name.isBlank() || pointsArr.length() < 2) {
+            return ApiResult.error("name and at least 2 points required")
+        }
+        val pointsJson = pointsArr.toString()
+        val speed = json.optDouble("speed", 3.5)
+        val stepFrequency = json.optInt("stepFrequency", 120)
+        val id = backend.createRoute(name, pointsJson, speed, stepFrequency)
+        ZLog.i(TAG_SCOPE, "route created id=$id name=$name points=${pointsArr.length()}")
+        val data = JSONObject().apply { put("id", id) }
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun routeList(): ApiResult {
+        val data = JSONObject()
+        data.put("routes", org.json.JSONArray(backend.listRoutes().map { it.toString() }))
         return ApiResult.ok("ok", data)
     }
 

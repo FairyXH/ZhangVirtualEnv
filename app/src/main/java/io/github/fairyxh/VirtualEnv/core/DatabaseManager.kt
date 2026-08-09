@@ -66,4 +66,51 @@ class DatabaseManager(private val dbFile: File) {
             db = null
         }
     }
+
+    // ---------- Route CRUD ----------
+
+    /** 插入一条路线，返回新行 id。 */
+    fun insertRoute(name: String, pointsJson: String, speed: Double, stepFrequency: Int): Long {
+        val values = android.content.ContentValues().apply {
+            put(COL_NAME, name)
+            put(COL_POINTS, pointsJson)
+            put(COL_SPEED, speed)
+            put(COL_STEP_FREQUENCY, stepFrequency)
+            put(COL_CREATE_TIME, System.currentTimeMillis())
+        }
+        return open().insert(TABLE_ROUTE, null, values)
+    }
+
+    /** 查询全部路线（按创建时间倒序）。 */
+    fun queryRoutes(): List<org.json.JSONObject> {
+        val result = mutableListOf<org.json.JSONObject>()
+        val cursor = open().query(
+            TABLE_ROUTE,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "$COL_CREATE_TIME DESC"
+        )
+        cursor?.use {
+            val idIdx = it.getColumnIndexOrThrow(COL_ID)
+            val nameIdx = it.getColumnIndexOrThrow(COL_NAME)
+            val pointsIdx = it.getColumnIndexOrThrow(COL_POINTS)
+            val speedIdx = it.getColumnIndexOrThrow(COL_SPEED)
+            val stepIdx = it.getColumnIndexOrThrow(COL_STEP_FREQUENCY)
+            val createIdx = it.getColumnIndexOrThrow(COL_CREATE_TIME)
+            while (it.moveToNext()) {
+                val obj = org.json.JSONObject()
+                obj.put("id", it.getLong(idIdx))
+                obj.put("name", it.getString(nameIdx))
+                obj.put("points", org.json.JSONArray(it.getString(pointsIdx)))
+                obj.put("speed", it.getDouble(speedIdx))
+                obj.put("stepFrequency", it.getInt(stepIdx))
+                obj.put("createTime", it.getLong(createIdx))
+                result.add(obj)
+            }
+        }
+        return result
+    }
 }

@@ -127,4 +127,14 @@ class Backend private constructor(private val dataDir: File) {
         apiServer?.stop()
         apiServer = null
     }
+
+    // ---------- Route API（App 控制端调用） ----------
+
+    fun createRoute(name: String, pointsJson: String, speed: Double, stepFrequency: Int): Long {
+        return databaseManager.insertRoute(name, pointsJson, speed, stepFrequency)
+    }
+
+    fun listRoutes(): List<org.json.JSONObject> {
+        return databaseManager.queryRoutes()
+    }
 }

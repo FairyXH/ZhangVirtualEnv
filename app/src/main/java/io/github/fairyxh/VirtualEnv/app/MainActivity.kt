@@ -1,108 +1,108 @@
 package io.github.fairyxh.VirtualEnv.app
 
-import android.app.Activity
 import android.os.Bundle
-import android.widget.Button
-import android.widget.EditText
-import android.widget.Switch
-import android.widget.TextView
-import android.widget.Toast
+import androidx.fragment.app.FragmentActivity
 import io.github.fairyxh.VirtualEnv.R
+import io.github.fairyxh.VirtualEnv.app.ui.HomeFragment
+import io.github.fairyxh.VirtualEnv.app.ui.LocationSimFragment
+import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
+import io.github.fairyxh.VirtualEnv.app.ui.EnvFragment
+import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
 import io.github.fairyxh.VirtualEnv.util.ZLog
-import java.util.concurrent.Executors
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.fragment.app.Fragment
 
 /**
- * 控制端主界面（Phase 1）。
+ * 控制端主界面（单 Activity + Fragment 导航 + 液态玻璃底栏）。
  *
- * 纯 UI：展示 Backend 状态、配置单点坐标、开关虚拟定位。
- * 所有操作经 [ApiClient] 调用 Backend，不直接访问配置/数据库。
+ * 底栏五个入口：
+ * - 主页（模块状态 / 一键采集）
+ * - 位置模拟
+ * - 路线模拟（地图绘制）
+ * - 环境（基站 / WiFi / GNSS 骨架）
+ * - 设置（高德 Key 配置等）
  */
-class MainActivity : Activity() {
+class MainActivity : FragmentActivity() {
 
-    private lateinit var backendStatus: TextView
-    private lateinit var profileInfo: TextView
-    private lateinit var enableSwitch: Switch
-    private lateinit var latitudeInput: EditText
-    private lateinit var longitudeInput: EditText
-    private lateinit var applyButton: Button
-    private lateinit var statusText: TextView
+    companion object {
+        private const val TAG_SCOPE = "UI"
+        private val TAB_ICONS = intArrayOf(
+            R.drawable.ic_tab_home,
+            R.drawable.ic_tab_location,
+            R.drawable.ic_tab_route,
+            R.drawable.ic_tab_env,
+            R.drawable.ic_tab_settings,
+        )
+        private val TAB_LABELS = intArrayOf(
+            R.string.tab_home,
+            R.string.tab_location,
+            R.string.tab_route,
+            R.string.tab_env,
+            R.string.tab_settings,
+        )
+    }
 
-    private val executor = Executors.newSingleThreadExecutor()
-
-    /** 防止状态回填触发 listener 回环。 */
-    private var updatingFromBackend = false
+    private lateinit var bottomBar: LinearLayout
+    private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        bottomBar = findViewById(R.id.bottomBar)
+        buildBottomBar()
 
-        backendStatus = findViewById(R.id.backendStatus)
-        profileInfo = findViewById(R.id.profileInfo)
-        enableSwitch = findViewById(R.id.enableSwitch)
-        latitudeInput = findViewById(R.id.latitudeInput)
-        longitudeInput = findViewById(R.id.longitudeInput)
-        applyButton = findViewById(R.id.applyButton)
-        statusText = findViewById(R.id.statusText)
-
-        enableSwitch.setOnCheckedChangeListener { _, checked ->
-            if (updatingFromBackend) return@setOnCheckedChangeListener
-            executor.execute {
-                val result = ApiClient.setLocationEnabled(checked)
-                runOnUiThread {
-                    Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-
-        applyButton.setOnClickListener {
-            val lat = latitudeInput.text.toString().toDoubleOrNull()
-            val lon = longitudeInput.text.toString().toDoubleOrNull()
-            if (lat == null || lon == null) {
-                Toast.makeText(this, "请输入有效的经纬度", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            executor.execute {
-                val result = ApiClient.setLocation(lat, lon, 0f, 0f)
-                runOnUiThread {
-                    Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                    refreshStatus()
-                }
-            }
-        }
-
-        refreshStatus()
-    }
-
-    private fun refreshStatus() {
-        executor.execute {
-            val reachable = ApiClient.ping()
-            runOnUiThread {
-                backendStatus.text = if (reachable) "Backend: 已连接" else "Backend: 未连接"
-            }
-            if (!reachable) return@execute
-            val status = ApiClient.getLocationStatus()
-            runOnUiThread {
-                val data = status.data
-                if (data != null) {
-                    val enabled = data.optBoolean("enabled", false)
-                    updatingFromBackend = true
-                    enableSwitch.isChecked = enabled
-                    updatingFromBackend = false
-                    latitudeInput.setText(data.optDouble("latitude", 0.0).toString())
-                    longitudeInput.setText(data.optDouble("longitude", 0.0).toString())
-                    statusText.text = "状态: ${if (enabled) "已启用" else "未启用"} " +
-                        "位置: ${data.optDouble("latitude", 0.0)}, ${data.optDouble("longitude", 0.0)}"
-                }
-            }
-            val info = ApiClient.getSystemInfo()
-            runOnUiThread {
-                profileInfo.text = "API: ${info.data?.optString("phase", "-")}"
-            }
+        if (savedInstanceState == null) {
+            switchTab(0, false)
         }
     }
 
-    override fun onDestroy() {
-        executor.shutdown()
-        super.onDestroy()
+    private fun buildBottomBar() {
+        bottomBar.removeAllViews()
+        TAB_LABELS.indices.forEach { index ->
+            val item = layoutInflater.inflate(R.layout.item_tab, bottomBar, false)
+            item.findViewById<android.widget.ImageView>(R.id.tabIcon).setImageResource(TAB_ICONS[index])
+            item.findViewById<TextView>(R.id.tabLabel).setText(TAB_LABELS[index])
+            item.setOnClickListener { switchTab(index, true) }
+            bottomBar.addView(item, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        }
+        updateTabVisual(currentTab)
+    }
+
+    private fun switchTab(index: Int, animate: Boolean) {
+        if (currentTab == index) return
+        currentTab = index
+        val fragment: Fragment = when (index) {
+            0 -> HomeFragment()
+            1 -> LocationSimFragment()
+            2 -> RouteSimFragment()
+            3 -> EnvFragment()
+            else -> SettingsFragment()
+        }
+        supportFragmentManager.beginTransaction()
+            .setCustomAnimations(
+                R.anim.fade_in, R.anim.fade_out,
+                R.anim.fade_in, R.anim.fade_out
+            )
+            .replace(R.id.fragmentContainer, fragment, "tab$index")
+            .commit()
+        updateTabVisual(index)
+        ZLog.d(TAG_SCOPE, "switch tab -> $index")
+    }
+
+    private fun updateTabVisual(active: Int) {
+        for (i in 0 until bottomBar.childCount) {
+            val item = bottomBar.getChildAt(i)
+            val icon = item.findViewById<android.widget.ImageView>(R.id.tabIcon)
+            val label = item.findViewById<TextView>(R.id.tabLabel)
+            val activeNow = i == active
+            icon.setColorFilter(
+                if (activeNow) getColor(R.color.tab_icon_active) else getColor(R.color.tab_icon_normal)
+            )
+            label.setTextColor(
+                if (activeNow) getColor(R.color.tab_icon_active) else getColor(R.color.tab_icon_normal)
+            )
+        }
     }
 }

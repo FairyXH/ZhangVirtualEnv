@@ -36,7 +36,14 @@ android {
     packaging {
         resources {
             merges += "META-INF/xposed/*"
-            excludes += "**"
+            excludes += "META-INF/versions/**"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
+        }
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
@@ -49,4 +56,10 @@ android {
 dependencies {
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
+
+    // AndroidX Fragment（控制端 UI 导航）
+    implementation(libs.androidx.fragment)
+
+    // 高德地图 SDK（本地 jar，含 3DMap/Search/Location）
+    implementation(files("libs/AMap3DMap.jar"))
 }

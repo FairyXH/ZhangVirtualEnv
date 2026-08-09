@@ -2,4 +2,86 @@
 <resources>
     <string name="app_name">ZhangVirtualEnvironment</string>
     <string name="module_description">Android Environment Replay Framework</string>
+
+    <!-- Bottom bar -->
+    <string name="tab_home">主页</string>
+    <string name="tab_location">位置</string>
+    <string name="tab_route">路线</string>
+    <string name="tab_env">环境</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- Home -->
+    <string name="home_subtitle">Android Environment Replay Framework</string>
+    <string name="home_status_title">模块状态</string>
+    <string name="home_status_checking">正在检测…</string>
+    <string name="home_status_ok">模块已激活，Backend 运行中</string>
+    <string name="home_status_detail">Phase %1$s · 虚拟定位 %2$s</string>
+    <string name="home_status_offline">模块未激活 / Backend 未运行</string>
+    <string name="home_status_offline_detail">请在 LSPosed 中启用模块并重启，作用域需包含系统框架</string>
+    <string name="home_collect_title">一键采集</string>
+    <string name="home_collect_desc">采集当前设备的位置、基站、WiFi、蓝牙、GNSS 状态，保存为环境包</string>
+    <string name="home_collect_button">开始采集</string>
+    <string name="home_collect_running">采集进行中…</string>
+
+    <!-- Location -->
+    <string name="location_title">位置模拟</string>
+    <string name="location_subtitle">单点虚拟定位 · 经 Backend 统一管理</string>
+    <string name="location_switch_title">启用虚拟定位</string>
+    <string name="location_switch_desc">开启后目标应用将读取虚拟位置</string>
+    <string name="location_coord_title">单点坐标</string>
+    <string name="location_latitude">纬度 (latitude)</string>
+    <string name="location_longitude">经度 (longitude)</string>
+    <string name="location_apply">应用位置</string>
+    <string name="location_status_title">当前状态</string>
+    <string name="location_status_empty">尚未获取状态</string>
+    <string name="location_status_value">%1$s · %2$.6f, %3$.6f</string>
+    <string name="location_status_offline">Backend 未连接</string>
+    <string name="location_invalid">请输入有效的经纬度</string>
+    <string name="location_enabled">已启用</string>
+    <string name="location_disabled">未启用</string>
+
+    <!-- Settings -->
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">应用标识与高德地图配置</string>
+    <string name="settings_identity_title">应用标识</string>
+    <string name="settings_identity_desc">用于高德开放平台创建 APP 时填写</string>
+    <string name="settings_package_label">包名 (PackageName)</string>
+    <string name="settings_sha1_label">SHA1 校验值</string>
+    <string name="settings_sha1_unknown">读取失败</string>
+    <string name="settings_copy">复制</string>
+    <string name="settings_copied">已复制</string>
+    <string name="settings_amap_title">高德地图 Key</string>
+    <string name="settings_amap_desc">在开放平台配置 Key 后填入，用于地图显示与路线绘制</string>
+    <string name="settings_amap_key_label">API Key</string>
+    <string name="settings_amap_key_hint">请输入高德 API Key</string>
+    <string name="settings_amap_security_label">安全码 (SHA1 后置)</string>
+    <string name="settings_amap_security_hint">可选：Key 的后半段安全码</string>
+    <string name="settings_amap_save">保存 Key</string>
+    <string name="settings_amap_saved">已保存，重启应用后生效</string>
+    <string name="settings_amap_key_empty">请输入 API Key</string>
+
+    <!-- Route -->
+    <string name="route_title">路线模拟</string>
+    <string name="route_subtitle">地图点击绘制路线 · 保存后可用于路线模拟</string>
+    <string name="route_draw_hint">点击地图添加路径点</string>
+    <string name="route_points_count">已添加 %1$d 个路径点</string>
+    <string name="route_name_hint">路线名称，如：学校→公园</string>
+    <string name="route_clear">清空</string>
+    <string name="route_save">保存路线</string>
+    <string name="route_name_required">请输入路线名称</string>
+    <string name="route_points_required">至少需要 2 个路径点</string>
+
+    <!-- Env -->
+    <string name="env_title">环境模拟</string>
+    <string name="env_subtitle">基站 / WiFi / GNSS 环境模拟入口</string>
+    <string name="env_pending">待开发</string>
+    <string name="env_cell_title">基站模拟</string>
+    <string name="env_cell_desc">MCC / MNC / TAC / CID / PCI / RSRP</string>
+    <string name="env_cell_coming">Phase 3 实现</string>
+    <string name="env_wifi_title">WiFi 模拟</string>
+    <string name="env_wifi_desc">SSID / BSSID / RSSI / Frequency</string>
+    <string name="env_wifi_coming">Phase 3 实现</string>
+    <string name="env_gnss_title">GNSS 模拟</string>
+    <string name="env_gnss_desc">卫星状态 / 星历 / 信噪比</string>
+    <string name="env_gnss_coming">Phase 4 实现</string>
 </resources>

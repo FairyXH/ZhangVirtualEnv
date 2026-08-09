@@ -51,6 +51,23 @@ object ApiClient {
 
     fun getSystemInfo(): ApiResult = get("/api/system/info")
 
+    fun createRoute(name: String, points: List<com.amap.api.maps.model.LatLng>): ApiResult {
+        val arr = org.json.JSONArray()
+        points.forEach { p ->
+            arr.put(org.json.JSONObject().apply {
+                put("lat", p.latitude)
+                put("lon", p.longitude)
+            })
+        }
+        val body = JSONObject().apply {
+            put("name", name)
+            put("points", arr)
+        }
+        return post("/api/route/create", body)
+    }
+
+    fun listRoutes(): ApiResult = get("/api/route/list")
+
     private fun get(path: String): ApiResult {
         return request("GET", path, null)
     }

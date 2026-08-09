@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Spacing rhythm: 4/8/16/24/48 -->
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">16dp</dimen>
+    <dimen name="space_lg">24dp</dimen>
+    <dimen name="space_xl">48dp</dimen>
+
+    <!-- Corner radius -->
+    <dimen name="radius_card">18dp</dimen>
+    <dimen name="radius_sheet">28dp</dimen>
+    <dimen name="radius_control">12dp</dimen>
+    <dimen name="radius_pill">980dp</dimen>
+
+    <!-- Type scale -->
+    <dimen name="text_hero">34sp</dimen>
+    <dimen name="text_title">24sp</dimen>
+    <dimen name="text_headline">17sp</dimen>
+    <dimen name="text_body">15sp</dimen>
+    <dimen name="text_caption">13sp</dimen>
+    <dimen name="text_tiny">11sp</dimen>
+
+    <!-- Bottom glass bar -->
+    <dimen name="tab_bar_height">68dp</dimen>
+    <dimen name="tab_bar_bottom_margin">14dp</dimen>
+    <dimen name="tab_bar_horizontal_margin">16dp</dimen>
+    <dimen name="tab_bar_radius">26dp</dimen>
+    <dimen name="tab_icon_size">26dp</dimen>
+    <dimen name="tab_label_size">10sp</dimen>
+
+    <!-- Touch target -->
+    <dimen name="touch_min">48dp</dimen>
+</resources>

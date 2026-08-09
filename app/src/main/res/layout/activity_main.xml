@@ -1,81 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:background="@color/bg_primary"
+    tools:context=".app.MainActivity">
 
-    <TextView
-        android:id="@+id/title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        tools:ignore="HardcodedText" />
-
-    <TextView
-        android:id="@+id/backendStatus"
+    <!-- Fragment container -->
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/fragmentContainer"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Backend: 未连接"
-        tools:ignore="HardcodedText" />
+        android:layout_height="match_parent"
+        android:layout_marginBottom="@dimen/tab_bar_height" />
 
-    <TextView
-        android:id="@+id/profileInfo"
+    <!-- Liquid-glass bottom bar -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="Profile: -"
-        tools:ignore="HardcodedText" />
+        android:layout_height="@dimen/tab_bar_height"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/tab_bar_horizontal_margin"
+        android:layout_marginEnd="@dimen/tab_bar_horizontal_margin"
+        android:layout_marginBottom="@dimen/tab_bar_bottom_margin"
+        android:background="@drawable/bg_glass_bar"
+        android:elevation="16dp"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        tools:ignore="ContentDescription" />
 
-    <Switch
-        android:id="@+id/enableSwitch"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="启用虚拟定位" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="纬度 (latitude)" />
-
-    <EditText
-        android:id="@+id/latitudeInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="31.2304"
-        android:inputType="numberDecimal|numberSigned" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="经度 (longitude)" />
-
-    <EditText
-        android:id="@+id/longitudeInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="121.4737"
-        android:inputType="numberDecimal|numberSigned" />
-
-    <Button
-        android:id="@+id/applyButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="应用单点位置" />
-
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="尚未设置位置"
-        android:textSize="14sp" />
-</LinearLayout>
+</FrameLayout>
