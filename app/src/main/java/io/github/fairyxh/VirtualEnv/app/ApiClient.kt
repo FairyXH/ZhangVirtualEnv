@@ -187,6 +187,59 @@ object ApiClient {
 
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
+    // ---------- Recording ----------
+
+    fun startRecording(name: String, remark: String = ""): ApiResult {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("remark", remark)
+        }
+        return post("/api/recording/start", body)
+    }
+
+    /** 追加一帧采集数据（collectAll 输出格式）。 */
+    fun appendRecordingFrame(id: Long, frame: org.json.JSONObject): ApiResult {
+        val body = JSONObject().apply {
+            put("id", id)
+            put("frame", frame)
+        }
+        return post("/api/recording/append", body)
+    }
+
+    fun stopRecording(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/recording/stop", body)
+    }
+
+    fun listRecordings(): ApiResult = get("/api/recording/list")
+
+    fun getRecordingFrames(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/recording/get", body)
+    }
+
+    fun deleteRecording(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/recording/delete", body)
+    }
+
+    /** 播放录像列表（顺序播放），loop 表示末尾循环。 */
+    fun playRecordings(ids: List<Long>, loop: Boolean): ApiResult {
+        val body = JSONObject().apply {
+            put("ids", org.json.JSONArray(ids))
+            put("loop", loop)
+        }
+        return post("/api/recording/play", body)
+    }
+
+    fun pauseRecordingPlayback(): ApiResult = post("/api/recording/pause", JSONObject())
+
+    fun resumeRecordingPlayback(): ApiResult = post("/api/recording/resume", JSONObject())
+
+    fun stopRecordingPlayback(): ApiResult = post("/api/recording/stop-play", JSONObject())
+
+    fun getRecordingStatus(): ApiResult = get("/api/recording/status")
+
     private fun get(path: String): ApiResult {
         return request("GET", path, null)
     }

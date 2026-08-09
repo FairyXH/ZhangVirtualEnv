@@ -6,6 +6,7 @@ import io.github.fairyxh.VirtualEnv.core.engine.SinglePointLocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.EnvStateEngine
 import io.github.fairyxh.VirtualEnv.core.engine.RouteEngine
 import io.github.fairyxh.VirtualEnv.core.engine.JoystickEngine
+import io.github.fairyxh.VirtualEnv.core.engine.RecordingEngine
 import io.github.fairyxh.VirtualEnv.core.model.LocationState
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -75,6 +76,10 @@ class Backend private constructor(private val dataDir: File) {
     val cellEngine = EnvStateEngine("cell")
     val bleEngine = EnvStateEngine("ble")
 
+    /** 环境录制与回放引擎。 */
+    lateinit var recordingEngine: RecordingEngine
+        private set
+
     @Volatile
     var apiServer: ApiServer? = null
         private set
@@ -86,6 +91,7 @@ class Backend private constructor(private val dataDir: File) {
         environmentManager = DefaultEnvironmentManager(databaseManager)
         locationEngine = SinglePointLocationEngine()
         profileManager = ProfileManager(dataDir)
+        recordingEngine = RecordingEngine(databaseManager, this)
 
         // 恢复上次持久化的单点位置与开关
         if (configManager.isLocationEnabled()) {
@@ -318,5 +324,51 @@ class Backend private constructor(private val dataDir: File) {
             put("cell", cellEngine.statusJson())
             put("ble", bleEngine.statusJson())
         }
+    }
+
+    // ---------- Recording API（App 控制端调用） ----------
+
+    fun startRecording(name: String, remark: String): Long {
+        return recordingEngine.startRecording(name, remark)
+    }
+
+    fun appendRecordingFrame(id: Long, frame: org.json.JSONObject): Boolean {
+        return recordingEngine.appendFrame(frame)
+    }
+
+    fun stopRecording(id: Long): Boolean {
+        return if (id > 0) recordingEngine.stopRecording() else false
+    }
+
+    fun listRecordings(): List<org.json.JSONObject> {
+        return recordingEngine.listRecordings()
+    }
+
+    fun getRecordingFrames(id: Long): List<org.json.JSONObject> {
+        return recordingEngine.getFrames(id)
+    }
+
+    fun deleteRecording(id: Long): Boolean {
+        return recordingEngine.deleteRecording(id)
+    }
+
+    fun playRecordings(ids: List<Long>, loop: Boolean): Boolean {
+        return recordingEngine.play(ids, loop)
+    }
+
+    fun pauseRecordingPlayback() {
+        recordingEngine.pausePlayback()
+    }
+
+    fun resumeRecordingPlayback() {
+        recordingEngine.resumePlayback()
+    }
+
+    fun stopRecordingPlayback() {
+        recordingEngine.stopPlayback()
+    }
+
+    fun recordingStatusJson(): org.json.JSONObject {
+        return recordingEngine.statusJson()
     }
 }

@@ -17,11 +17,13 @@ class DatabaseManager(private val dbFile: File) {
 
     companion object {
         private const val TAG_SCOPE = "Core"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
 
         const val TABLE_ROUTE = "route"
         const val TABLE_LOCATION_POINT = "location_point"
         const val TABLE_ENV_SNAPSHOT = "env_snapshot"
+        const val TABLE_RECORDING = "recording"
+        const val TABLE_RECORDING_FRAME = "recording_frame"
 
         const val COL_ID = "id"
         const val COL_NAME = "name"
@@ -35,6 +37,12 @@ class DatabaseManager(private val dbFile: File) {
         const val COL_LONGITUDE = "longitude"
         const val COL_TYPE = "type"
         const val COL_DATA = "data"
+
+        const val COL_DURATION_MS = "duration_ms"
+        const val COL_FRAME_COUNT = "frame_count"
+        const val COL_RECORDING_ID = "recording_id"
+        const val COL_SEQ = "seq"
+        const val COL_TIMESTAMP_MS = "timestamp_ms"
 
         private const val SQL_CREATE_ROUTE =
             "CREATE TABLE IF NOT EXISTS $TABLE_ROUTE (" +
@@ -66,6 +74,28 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_DATA TEXT NOT NULL," +
                 "$COL_CREATE_TIME INTEGER NOT NULL" +
                 ")"
+
+        private const val SQL_CREATE_RECORDING =
+            "CREATE TABLE IF NOT EXISTS $TABLE_RECORDING (" +
+                "$COL_ID INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "$COL_NAME TEXT NOT NULL," +
+                "$COL_REMARK TEXT DEFAULT ''," +
+                "$COL_DURATION_MS INTEGER NOT NULL DEFAULT 0," +
+                "$COL_FRAME_COUNT INTEGER NOT NULL DEFAULT 0," +
+                "$COL_CREATE_TIME INTEGER NOT NULL" +
+                ")"
+
+        private const val SQL_CREATE_RECORDING_FRAME =
+            "CREATE TABLE IF NOT EXISTS $TABLE_RECORDING_FRAME (" +
+                "$COL_ID INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "$COL_RECORDING_ID INTEGER NOT NULL," +
+                "$COL_SEQ INTEGER NOT NULL," +
+                "$COL_TIMESTAMP_MS INTEGER NOT NULL," +
+                "$COL_DATA TEXT NOT NULL" +
+                ")"
+
+        private const val SQL_INDEX_RECORDING_FRAME =
+            "CREATE INDEX IF NOT EXISTS idx_recording_frame ON $TABLE_RECORDING_FRAME($COL_RECORDING_ID, $COL_SEQ)"
     }
 
     private val lock = Any()
@@ -85,6 +115,9 @@ class DatabaseManager(private val dbFile: File) {
             opened.execSQL(SQL_CREATE_ROUTE)
             opened.execSQL(SQL_CREATE_LOCATION_POINT)
             opened.execSQL(SQL_CREATE_ENV_SNAPSHOT)
+            opened.execSQL(SQL_CREATE_RECORDING)
+            opened.execSQL(SQL_CREATE_RECORDING_FRAME)
+            opened.execSQL(SQL_INDEX_RECORDING_FRAME)
             migrate(opened)
             db = opened
             ZLog.i(TAG_SCOPE, "DatabaseManager opened ${dbFile.absolutePath}, version=$DATABASE_VERSION")
@@ -328,6 +361,111 @@ class DatabaseManager(private val dbFile: File) {
 
     /** 删除一条环境快照。 */
     fun deleteEnvSnapshot(id: Long): Boolean {
-        return open().delete(TABLE_ENV_SNAPSHOT, "$COL_ID=?", arrayOf(id.toString())) > 0
+        return open().delete(TABLE_ENV_SNAPSHOT, "$COL_ID=?",
+            arrayOf(id.toString())) > 0
+    }
+
+    // ---------- Recording CRUD ----------
+
+    /** 创建一条录像记录，返回 id。 */
+    fun insertRecording(name: String, remark: String): Long {
+        val values = android.content.ContentValues().apply {
+            put(COL_NAME, name)
+            put(COL_REMARK, remark)
+            put(COL_DURATION_MS, 0L)
+            put(COL_FRAME_COUNT, 0)
+            put(COL_CREATE_TIME, System.currentTimeMillis())
+        }
+        return open().insert(TABLE_RECORDING, null, values)
+    }
+
+    /** 更新录像元信息（停止录制时写入时长与帧数）。 */
+    fun updateRecordingMeta(id: Long, durationMs: Long, frameCount: Int) {
+        val values = android.content.ContentValues().apply {
+            put(COL_DURATION_MS, durationMs)
+            put(COL_FRAME_COUNT, frameCount)
+        }
+        open().update(TABLE_RECORDING, values, "$COL_ID=?", arrayOf(id.toString()))
+    }
+
+    /** 插入一帧录像数据。 */
+    fun insertRecordingFrame(recordingId: Long, seq: Int, timestampMs: Long, dataJson: String) {
+        val values = android.content.ContentValues().apply {
+            put(COL_RECORDING_ID, recordingId)
+            put(COL_SEQ, seq)
+            put(COL_TIMESTAMP_MS, timestampMs)
+            put(COL_DATA, dataJson)
+        }
+        open().insert(TABLE_RECORDING_FRAME, null, values)
+    }
+
+    /** 查询全部录像（按创建时间倒序）。 */
+    fun queryRecordings(): List<org.json.JSONObject> {
+        val result = mutableListOf<org.json.JSONObject>()
+        val cursor = open().query(
+            TABLE_RECORDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "$COL_CREATE_TIME DESC"
+        )
+        cursor?.use {
+            val idIdx = it.getColumnIndexOrThrow(COL_ID)
+            val nameIdx = it.getColumnIndexOrThrow(COL_NAME)
+            val remarkIdx = it.getColumnIndexOrThrow(COL_REMARK)
+            val durationIdx = it.getColumnIndexOrThrow(COL_DURATION_MS)
+            val countIdx = it.getColumnIndexOrThrow(COL_FRAME_COUNT)
+            val createIdx = it.getColumnIndexOrThrow(COL_CREATE_TIME)
+            while (it.moveToNext()) {
+                val obj = org.json.JSONObject()
+                obj.put("id", it.getLong(idIdx))
+                obj.put("name", it.getString(nameIdx))
+                obj.put("remark", it.getString(remarkIdx))
+                obj.put("durationMs", it.getLong(durationIdx))
+                obj.put("frameCount", it.getInt(countIdx))
+                obj.put("createTime", it.getLong(createIdx))
+                result.add(obj)
+            }
+        }
+        return result
+    }
+
+    /** 查询录像帧（按 seq 升序）。 */
+    fun queryRecordingFrames(recordingId: Long): List<org.json.JSONObject> {
+        val result = mutableListOf<org.json.JSONObject>()
+        val cursor = open().query(
+            TABLE_RECORDING_FRAME,
+            null,
+            "$COL_RECORDING_ID=?",
+            arrayOf(recordingId.toString()),
+            null,
+            null,
+            "$COL_SEQ ASC"
+        )
+        cursor?.use {
+            val seqIdx = it.getColumnIndexOrThrow(COL_SEQ)
+            val tsIdx = it.getColumnIndexOrThrow(COL_TIMESTAMP_MS)
+            val dataIdx = it.getColumnIndexOrThrow(COL_DATA)
+            while (it.moveToNext()) {
+                val obj = org.json.JSONObject()
+                obj.put("seq", it.getInt(seqIdx))
+                obj.put("timestampMs", it.getLong(tsIdx))
+                obj.put("data", org.json.JSONObject(it.getString(dataIdx)))
+                result.add(obj)
+            }
+        }
+        return result
+    }
+
+    /** 删除一条录像及其帧数据。 */
+    fun deleteRecording(id: Long): Boolean {
+        val db = open()
+        val deleted = db.delete(TABLE_RECORDING, "$COL_ID=?", arrayOf(id.toString())) > 0
+        if (deleted) {
+            db.delete(TABLE_RECORDING_FRAME, "$COL_RECORDING_ID=?", arrayOf(id.toString()))
+        }
+        return deleted
     }
 }

@@ -150,6 +150,17 @@ class ApiServer(
                 path == "/api/env/use" && method == "POST" -> envUse(body)
                 path == "/api/env/clear" && method == "POST" -> envClear(body)
                 path == "/api/env/status" && method == "GET" -> envStatus()
+                path == "/api/recording/start" && method == "POST" -> recordingStart(body)
+                path == "/api/recording/append" && method == "POST" -> recordingAppend(body)
+                path == "/api/recording/stop" && method == "POST" -> recordingStop(body)
+                path == "/api/recording/list" && method == "GET" -> recordingList()
+                path == "/api/recording/get" && method == "POST" -> recordingGet(body)
+                path == "/api/recording/delete" && method == "POST" -> recordingDelete(body)
+                path == "/api/recording/play" && method == "POST" -> recordingPlay(body)
+                path == "/api/recording/pause" && method == "POST" -> recordingPause()
+                path == "/api/recording/resume" && method == "POST" -> recordingResume()
+                path == "/api/recording/stop-play" && method == "POST" -> recordingStopPlay()
+                path == "/api/recording/status" && method == "GET" -> recordingStatus()
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -362,6 +373,94 @@ class ApiServer(
 
     private fun envStatus(): ApiResult {
         return ApiResult.ok("ok", backend.envStatusJson())
+    }
+
+    // ---------- Recording ----------
+
+    private fun recordingStart(body: String): ApiResult {
+        val json = JSONObject(body)
+        val name = json.optString("name", "")
+        if (name.isBlank()) return ApiResult.error("name required")
+        val remark = json.optString("remark", "")
+        val id = backend.startRecording(name, remark)
+        ZLog.i(TAG_SCOPE, "recording start id=$id name=$name")
+        val data = JSONObject().apply { put("id", id) }
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun recordingAppend(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val frame = json.optJSONObject("frame") ?: return ApiResult.error("frame required")
+        val ok = backend.appendRecordingFrame(id, frame)
+        return if (ok) ApiResult.ok("ok") else ApiResult.error("no active recording")
+    }
+
+    private fun recordingStop(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        return if (backend.stopRecording(id)) {
+            ApiResult.ok("stopped")
+        } else {
+            ApiResult.error("no active recording")
+        }
+    }
+
+    private fun recordingList(): ApiResult {
+        val data = JSONObject()
+        data.put("recordings", org.json.JSONArray(backend.listRecordings()))
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun recordingGet(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val data = JSONObject()
+        data.put("frames", org.json.JSONArray(backend.getRecordingFrames(id)))
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun recordingDelete(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        return if (backend.deleteRecording(id)) {
+            ApiResult.ok("deleted")
+        } else {
+            ApiResult.error("recording not found: $id")
+        }
+    }
+
+    private fun recordingPlay(body: String): ApiResult {
+        val json = JSONObject(body)
+        val idsArr = json.optJSONArray("ids") ?: JSONArray()
+        val ids = mutableListOf<Long>()
+        for (i in 0 until idsArr.length()) ids.add(idsArr.optLong(i, -1L))
+        if (ids.isEmpty()) return ApiResult.error("ids required")
+        val loop = json.optBoolean("loop", false)
+        return if (backend.playRecordings(ids, loop)) {
+            ApiResult.ok("playing")
+        } else {
+            ApiResult.error("no playable recordings")
+        }
+    }
+
+    private fun recordingPause(): ApiResult {
+        backend.pauseRecordingPlayback()
+        return ApiResult.ok("paused")
+    }
+
+    private fun recordingResume(): ApiResult {
+        backend.resumeRecordingPlayback()
+        return ApiResult.ok("resumed")
+    }
+
+    private fun recordingStopPlay(): ApiResult {
+        backend.stopRecordingPlayback()
+        return ApiResult.ok("stopped")
+    }
+
+    private fun recordingStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.recordingStatusJson())
     }
 
     private fun locationStatus(): ApiResult {
