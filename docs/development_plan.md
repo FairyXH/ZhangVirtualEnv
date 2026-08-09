@@ -1,0 +1,92 @@
+# ZhangVirtualEnvironment 开发计划
+
+> 项目：Android Environment Replay Framework（LSPosed API 101）
+> 包名：`io.github.fairyxh.VirtualEnv`
+> 仓库：`D:\Files\Develop\Android\ZhangVirtualProject\ZhangVirtualEnv`
+
+## 总览
+
+基于 LSPosed API 101 的系统级环境虚拟化平台，采用三层架构：
+
+```
+APP 控制端（纯 UI）
+    ↓ API / IPC
+Backend Core（核心服务、Engine、配置、数据库）
+    ↓ 同步调用
+LSPosed Hook Adapter（接口适配，不保存业务状态）
+    ↓
+Android Framework / system_server / GMS
+```
+
+## 阶段规划
+
+### Phase 1：后端服务框架 + 单点定位（当前）
+
+目标：建立可运行的三层骨架，打通 `APP → ApiServer → Backend → Engine → Hook Adapter` 全链路，实现单点虚拟定位。
+
+- [x] 包名迁移 `io.github.fairyxh.VirtualEnv`（namespace / applicationId / Kotlin 包 / Manifest / LSPosed 入口 / YukiHook 配置 / 文件路径）
+- [ ] core/ 模块骨架
+  - ApiServer：本地 HTTP API 服务（`/api/location/*`、`/api/config/*`、`/api/status`）
+  - ConfigManager：配置读写（开关、单点坐标、Profile 选择）
+  - DatabaseManager：SQLite 数据库（route 表 + 配置表）
+  - TimelineEngine：时间轴/播放引擎接口 + 基础状态机
+  - EnvironmentManager：环境数据管理接口 + 占位实现
+- [ ] hook/ 模块
+  - LSPosed 入口（API 101 `XposedModule`）
+  - Location Hook Adapter：`LocationManagerService.getLastLocation`、`GnssLocationProvider.onReportLocation`
+- [ ] app/ 控制端基础结构
+  - MainActivity：开关 + 经纬度输入 + 状态显示
+  - ApiClient：HTTP 调用 Backend
+- [ ] Profile 机制：`profiles/android14.json`、`android15.json`、`default.json`
+- [ ] docs/reverse/目标类分析.md（Location 相关逆向记录）
+- [ ] 编译通过 + Git commit
+
+### Phase 2：路线模拟 + 地图可视化 + 摇杆
+
+- Route Engine：路线存储、插值、轨迹生成
+- Timeline Engine 完整实现（开始/暂停/跳转/倍速）
+- 高德地图 SDK 集成：单点选点、路线 Polyline 绘制/编辑、GPX 导入导出
+- 摇杆移动模拟（Velocity Vector → Location Generator）
+- API：`/api/route/*`、`/api/location/start|stop`
+- GPS provider 主动注入（无真实 GPS 信号时也能输出位置）
+
+### Phase 3：基站 / WiFi / BLE / Sensor
+
+- Cell Engine：MCC/MNC/TAC/CID/PCI/RSRP（TelephonyManager / TelephonyRegistry / PhoneInterfaceManager）
+- Wifi Engine：SSID/BSSID/RSSI/Frequency（WifiManager / WifiServiceImpl）
+- BLE Engine：Beacon UUID/Major/Minor/RSSI（BluetoothLeScanner / BluetoothManagerService）
+- Sensor Engine：加速度 / 陀螺仪 / 步频（SensorManager / SensorService）
+- 采集系统（Collector）与模拟开关
+
+### Phase 4：GNSS + 环境录制回放
+
+- GNSS Engine：GnssStatus / GnssMeasurementsEvent 模拟（仅 Android 数据层）
+- ReplayEngine：环境包录制与回放（location.db / cell.db / wifi.db / ble.db / sensor.db / gnss.db）
+- EnvironmentManager 完整实现
+
+### Phase 5：多版本 Profile 自动适配
+
+- adapter/Android11..Android15 差异适配
+- 按 `Build.VERSION.SDK_INT` / `Build.FINGERPRINT` / `ro.product.device` 选择 Profile
+- default.json 回退机制
+- GMS FusedLocationProvider 适配
+
+## 架构约束（硬性）
+
+1. Hook 层禁止保存业务状态、禁止处理路线逻辑。
+2. UI 禁止直接修改模拟数据、禁止直接访问数据库。
+3. 核心逻辑必须有接口（`LocationEngine`、`TimelineEngine` 等）。
+4. 单一类不超过 500 行，单一职责。
+5. 不使用 `Android14LocationHook.kt` / `Android15LocationHook.kt` 式复制，统一 Core + Adapter + Profile。
+6. 作用域最小化：默认仅系统框架/定位服务等必要作用域，不主动加入第三方 APP。
+
+## 数据流（Phase 1 单点定位）
+
+```
+App UI → POST /api/location/set {latitude, longitude}
+    → ApiServer → Backend → ConfigManager 保存
+目标 APP → LocationManager.getLastLocation
+    → Hook Adapter → Backend.getLocationEngine().current()
+    → SinglePointLocationEngine 生成 android.location.Location
+    → 返回虚拟 Location
+```
