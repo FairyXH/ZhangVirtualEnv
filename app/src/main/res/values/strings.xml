@@ -39,6 +39,21 @@
     <string name="location_invalid">请输入有效的经纬度</string>
     <string name="location_enabled">已启用</string>
     <string name="location_disabled">未启用</string>
+    <string name="location_map_hint">点击地图选点</string>
+    <string name="location_map_init_failed">地图初始化失败，请检查高德 Key 与隐私同意</string>
+    <string name="location_point_name_hint">地点名称，如：公司</string>
+    <string name="location_point_remark_hint">备注（可选），如：工位 3 楼</string>
+    <string name="location_point_save">保存此点</string>
+    <string name="location_point_name_required">请输入地点名称</string>
+    <string name="location_point_saved">地点已保存</string>
+    <string name="location_saved_title">已保存地点</string>
+    <string name="location_saved_empty">暂无已保存地点</string>
+    <string name="location_point_use">使用</string>
+    <string name="location_point_delete">删除</string>
+    <string name="location_point_deleted">已删除</string>
+    <string name="location_point_applied">已应用：%1$s</string>
+    <string name="location_point_remark_format">备注：%1$s</string>
+    <string name="location_point_coord_format">%1$.6f, %2$.6f</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
