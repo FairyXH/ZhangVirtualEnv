@@ -149,9 +149,8 @@ class LocationHookAdapter(
             val virtual: Location? = backend.currentLocation()
             if (virtual != null) {
                 try {
-                    // 构造 LocationResult.wrap(virtual) 替换上报位置
-                    val wrapMethod = locationResultClass.getMethod("wrap", Location::class.java)
-                    val virtualResult = wrapMethod.invoke(null, virtual)
+                    // 构造 LocationResult 替换上报位置（兼容 AOSP wrap(Location) 与 ColorOS wrap(List)）
+                    val virtualResult = createLocationResult(locationResultClass, virtual)
                     chain.proceed(arrayOf(virtualResult))
                     ZLog.d(TAG_SCOPE, "provider onReportLocation -> virtual ${virtual.latitude},${virtual.longitude}")
                 } catch (t: Throwable) {
@@ -166,6 +165,35 @@ class LocationHookAdapter(
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $className.onReportLocation")
         }
+    }
+
+    /**
+     * 反射构造 LocationResult。
+     *
+     * Android 15 AOSP：LocationResult.wrap(Location)
+     * ColorOS/Oplus 15：LocationResult.wrap(List<Location>)（已实测，见真机日志）
+     * 兜底：LocationResult.create(List<Location>)
+     */
+    private fun createLocationResult(locationResultClass: Class<*>, location: Location): Any {
+        // 1. wrap(Location)
+        try {
+            val m = locationResultClass.getMethod("wrap", Location::class.java)
+            return m.invoke(null, location)
+        } catch (_: NoSuchMethodException) {
+        }
+        // 2. wrap(List)
+        try {
+            val m = locationResultClass.getMethod("wrap", List::class.java)
+            return m.invoke(null, listOf(location))
+        } catch (_: NoSuchMethodException) {
+        }
+        // 3. create(List)
+        try {
+            val m = locationResultClass.getMethod("create", List::class.java)
+            return m.invoke(null, listOf(location))
+        } catch (_: NoSuchMethodException) {
+        }
+        throw NoSuchMethodException("no LocationResult factory: wrap(Location)/wrap(List)/create(List)")
     }
 
     // ---------- GPS provider 上报兜底：GnssLocationProvider.onReportLocation ----------
