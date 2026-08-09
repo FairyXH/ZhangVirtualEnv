@@ -53,8 +53,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private lateinit var mapContainer: FrameLayout
     private lateinit var privacyPrompt: View
     private lateinit var routeNameInput: EditText
+    private lateinit var routeRemarkInput: EditText
     private lateinit var drawHint: TextView
     private lateinit var locateButton: Button
+    private lateinit var savedRoutesEmpty: TextView
+    private lateinit var savedRouteList: android.widget.LinearLayout
 
     private var mapView: MapView? = null
     private var amap: AMap? = null
@@ -70,15 +73,25 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         mapContainer = root.findViewById(R.id.mapContainer)
         privacyPrompt = root.findViewById(R.id.privacyPrompt)
         routeNameInput = root.findViewById(R.id.routeNameInput)
+        routeRemarkInput = root.findViewById(R.id.routeRemarkInput)
         drawHint = root.findViewById(R.id.drawHint)
         locateButton = root.findViewById(R.id.locateButton)
+        savedRoutesEmpty = root.findViewById(R.id.savedRoutesEmpty)
+        savedRouteList = root.findViewById(R.id.savedRouteList)
 
         locateButton.setOnClickListener { locateCurrentPosition() }
         root.findViewById<Button>(R.id.clearButton).setOnClickListener { clearRoute() }
         root.findViewById<Button>(R.id.saveButton).setOnClickListener { saveRoute() }
 
         initMapSafely(savedInstanceState)
+        refreshSavedRoutes()
         return root
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mapView?.onResume()
+        refreshSavedRoutes()
     }
 
     /**
@@ -190,13 +203,101 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             Toast.makeText(requireContext(), R.string.route_points_required, Toast.LENGTH_SHORT).show()
             return
         }
+        val remark = routeRemarkInput.text.toString().trim()
         executor.execute {
-            val result = ApiClient.createRoute(name, points)
+            val result = ApiClient.createRoute(name, remark, points)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     clearRoute()
                     routeNameInput.text.clear()
+                    routeRemarkInput.text.clear()
+                    refreshSavedRoutes()
+                }
+            }
+        }
+    }
+
+    // ---------- 已保存路线列表 ----------
+
+    private fun refreshSavedRoutes() {
+        executor.execute {
+            val result = ApiClient.listRoutes()
+            requireActivity().runOnUiThread {
+                renderSavedRoutes(result)
+            }
+        }
+    }
+
+    private fun renderSavedRoutes(result: io.github.fairyxh.VirtualEnv.core.model.ApiResult) {
+        savedRouteList.removeAllViews()
+        val routes = result.data?.optJSONArray("routes") ?: return
+        val count = routes.length()
+        savedRoutesEmpty.visibility = if (count == 0) View.VISIBLE else View.GONE
+        if (count == 0) return
+
+        for (i in 0 until count) {
+            val item = routes.optJSONObject(i) ?: continue
+            val row = layoutInflater.inflate(R.layout.item_saved_route, savedRouteList, false)
+            row.findViewById<android.widget.TextView>(R.id.routeName).text = item.optString("name", "")
+            val remark = item.optString("remark", "")
+            val remarkView = row.findViewById<android.widget.TextView>(R.id.routeRemark)
+            if (remark.isBlank()) {
+                remarkView.visibility = View.GONE
+            } else {
+                remarkView.text = getString(R.string.location_point_remark_format, remark)
+            }
+            row.findViewById<android.widget.TextView>(R.id.routeMeta).text = getString(
+                R.string.route_point_count_format,
+                item.optJSONArray("points")?.length() ?: 0
+            )
+            row.findViewById<Button>(R.id.useButton).setOnClickListener {
+                loadRoute(item)
+            }
+            row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
+                deleteRoute(item.optLong("id"))
+            }
+            savedRouteList.addView(row)
+        }
+    }
+
+    /** 一键使用：把已保存路线加载到地图（可继续编辑或重新保存）。 */
+    private fun loadRoute(item: org.json.JSONObject) {
+        val pointsArr = item.optJSONArray("points") ?: return
+        if (amap == null) {
+            Toast.makeText(requireContext(), R.string.route_map_init_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        clearRoute()
+        for (i in 0 until pointsArr.length()) {
+            val p = pointsArr.optJSONObject(i) ?: continue
+            val lat = p.optDouble("lat", Double.NaN)
+            val lon = p.optDouble("lon", Double.NaN)
+            if (!lat.isNaN() && !lon.isNaN()) {
+                addPoint(com.amap.api.maps.model.LatLng(lat, lon))
+            }
+        }
+        routeNameInput.setText(item.optString("name", ""))
+        routeRemarkInput.setText(item.optString("remark", ""))
+        if (points.isNotEmpty()) {
+            amap?.moveCamera(
+                com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(points.first(), 14f)
+            )
+        }
+        Toast.makeText(
+            requireContext(),
+            getString(R.string.route_loaded, item.optString("name", "")),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun deleteRoute(id: Long) {
+        executor.execute {
+            val result = ApiClient.deleteRoute(id)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    refreshSavedRoutes()
                 }
             }
         }
@@ -248,11 +349,6 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         requireActivity().runOnUiThread {
             amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        mapView?.onResume()
     }
 
     override fun onPause() {

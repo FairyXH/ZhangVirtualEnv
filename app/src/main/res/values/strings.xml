@@ -85,6 +85,12 @@
     <string name="route_draw_hint">点击地图添加路径点</string>
     <string name="route_points_count">已添加 %1$d 个路径点</string>
     <string name="route_name_hint">路线名称，如：学校→公园</string>
+    <string name="route_remark_hint">备注（可选），如：步行通勤路线</string>
+    <string name="route_saved_title">已保存路线</string>
+    <string name="route_saved_empty">暂无已保存路线</string>
+    <string name="route_loaded">已加载：%1$s</string>
+    <string name="route_deleted">路线已删除</string>
+    <string name="route_point_count_format">%1$d 个路径点</string>
     <string name="route_clear">清空</string>
     <string name="route_save">保存路线</string>
     <string name="route_name_required">请输入路线名称</string>

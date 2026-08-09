@@ -28,11 +28,10 @@
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_height="260dp"
         android:layout_marginStart="@dimen/space_md"
         android:layout_marginTop="@dimen/space_md"
         android:layout_marginEnd="@dimen/space_md"
-        android:layout_weight="1"
         android:background="@drawable/bg_card">
 
         <!-- 地图容器：初始化成功前不加载 MapView，避免白屏 -->
@@ -91,43 +90,87 @@
             android:textSize="@dimen/text_caption" />
     </FrameLayout>
 
-    <!-- Route name + actions -->
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="@dimen/space_md">
-
-        <EditText
-            android:id="@+id/routeNameInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/route_name_hint"
-            style="@style/EditText.Field" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:overScrollMode="never">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_sm"
-            android:orientation="horizontal">
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
 
-            <Button
-                android:id="@+id/clearButton"
-                android:layout_width="0dp"
+            <EditText
+                android:id="@+id/routeNameInput"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="@dimen/space_xs"
-                android:layout_weight="1"
-                android:text="@string/route_clear"
-                style="@style/Button.Pill.Secondary" />
+                android:hint="@string/route_name_hint"
+                style="@style/EditText.Field" />
 
-            <Button
-                android:id="@+id/saveButton"
-                android:layout_width="0dp"
+            <EditText
+                android:id="@+id/routeRemarkInput"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="@dimen/space_xs"
-                android:layout_weight="1"
-                android:text="@string/route_save"
-                style="@style/Button.Pill" />
+                android:layout_marginTop="@dimen/space_sm"
+                android:hint="@string/route_remark_hint"
+                style="@style/EditText.Field" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/clearButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/space_xs"
+                    android:layout_weight="1"
+                    android:text="@string/route_clear"
+                    style="@style/Button.Pill.Secondary" />
+
+                <Button
+                    android:id="@+id/saveButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:layout_weight="1"
+                    android:text="@string/route_save"
+                    style="@style/Button.Pill" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/space_md">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/route_saved_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/savedRoutesEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/route_saved_empty"
+                    android:textColor="@color/text_secondary"
+                    style="@style/Text.Caption" />
+
+                <LinearLayout
+                    android:id="@+id/savedRouteList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
         </LinearLayout>
-    </LinearLayout>
+    </ScrollView>
 </LinearLayout>
