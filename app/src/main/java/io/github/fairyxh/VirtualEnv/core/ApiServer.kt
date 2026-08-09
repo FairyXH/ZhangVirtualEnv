@@ -129,6 +129,15 @@ class ApiServer(
                 path == "/api/system/info" && method == "GET" -> systemInfo()
                 path == "/api/route/create" && method == "POST" -> routeCreate(body)
                 path == "/api/route/list" && method == "GET" -> routeList()
+                path == "/api/route/get" && method == "POST" -> routeGet(body)
+                path == "/api/route/delete" && method == "POST" -> routeDelete(body)
+                path == "/api/location-point/create" && method == "POST" -> locationPointCreate(body)
+                path == "/api/location-point/list" && method == "GET" -> locationPointList()
+                path == "/api/location-point/use" && method == "POST" -> locationPointUse(body)
+                path == "/api/location-point/delete" && method == "POST" -> locationPointDelete(body)
+                path == "/api/env-snapshot/create" && method == "POST" -> envSnapshotCreate(body)
+                path == "/api/env-snapshot/list" && method == "GET" -> envSnapshotList()
+                path == "/api/env-snapshot/delete" && method == "POST" -> envSnapshotDelete(body)
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -153,9 +162,10 @@ class ApiServer(
             return ApiResult.error("name and at least 2 points required")
         }
         val pointsJson = pointsArr.toString()
+        val remark = json.optString("remark", "")
         val speed = json.optDouble("speed", 3.5)
         val stepFrequency = json.optInt("stepFrequency", 120)
-        val id = backend.createRoute(name, pointsJson, speed, stepFrequency)
+        val id = backend.createRoute(name, remark, pointsJson, speed, stepFrequency)
         ZLog.i(TAG_SCOPE, "route created id=$id name=$name points=${pointsArr.length()}")
         val data = JSONObject().apply { put("id", id) }
         return ApiResult.ok("ok", data)
@@ -165,6 +175,99 @@ class ApiServer(
         val data = JSONObject()
         data.put("routes", org.json.JSONArray(backend.listRoutes().map { it.toString() }))
         return ApiResult.ok("ok", data)
+    }
+
+    private fun routeGet(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val route = backend.getRoute(id)
+            ?: return ApiResult.error("route not found: $id")
+        return ApiResult.ok("ok", route)
+    }
+
+    private fun routeDelete(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        return if (backend.deleteRoute(id)) {
+            ApiResult.ok("deleted")
+        } else {
+            ApiResult.error("route not found: $id")
+        }
+    }
+
+    // ---------- LocationPoint ----------
+
+    private fun locationPointCreate(body: String): ApiResult {
+        val json = JSONObject(body)
+        val name = json.optString("name", "")
+        val latitude = json.optDouble("latitude", Double.NaN)
+        val longitude = json.optDouble("longitude", Double.NaN)
+        if (name.isBlank() || latitude.isNaN() || longitude.isNaN()) {
+            return ApiResult.error("name/latitude/longitude required")
+        }
+        val remark = json.optString("remark", "")
+        val id = backend.createLocationPoint(name, remark, latitude, longitude)
+        ZLog.i(TAG_SCOPE, "location point created id=$id name=$name")
+        val data = JSONObject().apply { put("id", id) }
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun locationPointList(): ApiResult {
+        val data = JSONObject()
+        data.put("points", org.json.JSONArray(backend.listLocationPoints().map { it.toString() }))
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun locationPointUse(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val point = backend.useLocationPoint(id)
+            ?: return ApiResult.error("location point not found: $id")
+        ZLog.i(TAG_SCOPE, "location point used id=$id name=${point.optString("name")}")
+        return ApiResult.ok("applied", point)
+    }
+
+    private fun locationPointDelete(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        return if (backend.deleteLocationPoint(id)) {
+            ApiResult.ok("deleted")
+        } else {
+            ApiResult.error("location point not found: $id")
+        }
+    }
+
+    // ---------- EnvSnapshot ----------
+
+    private fun envSnapshotCreate(body: String): ApiResult {
+        val json = JSONObject(body)
+        val name = json.optString("name", "")
+        val type = json.optString("type", "")
+        if (name.isBlank() || type.isBlank()) {
+            return ApiResult.error("name/type required")
+        }
+        val remark = json.optString("remark", "")
+        val data = json.optJSONObject("data") ?: JSONObject()
+        val id = backend.createEnvSnapshot(name, remark, type, data.toString())
+        ZLog.i(TAG_SCOPE, "env snapshot created id=$id type=$type name=$name")
+        val result = JSONObject().apply { put("id", id) }
+        return ApiResult.ok("ok", result)
+    }
+
+    private fun envSnapshotList(): ApiResult {
+        val data = JSONObject()
+        data.put("snapshots", org.json.JSONArray(backend.listEnvSnapshots().map { it.toString() }))
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun envSnapshotDelete(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        return if (backend.deleteEnvSnapshot(id)) {
+            ApiResult.ok("deleted")
+        } else {
+            ApiResult.error("env snapshot not found: $id")
+        }
     }
 
     private fun locationStatus(): ApiResult {

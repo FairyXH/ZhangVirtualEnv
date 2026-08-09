@@ -52,6 +52,10 @@ object ApiClient {
     fun getSystemInfo(): ApiResult = get("/api/system/info")
 
     fun createRoute(name: String, points: List<com.amap.api.maps.model.LatLng>): ApiResult {
+        return createRoute(name, "", points)
+    }
+
+    fun createRoute(name: String, remark: String, points: List<com.amap.api.maps.model.LatLng>): ApiResult {
         val arr = org.json.JSONArray()
         points.forEach { p ->
             arr.put(org.json.JSONObject().apply {
@@ -61,12 +65,67 @@ object ApiClient {
         }
         val body = JSONObject().apply {
             put("name", name)
+            put("remark", remark)
             put("points", arr)
         }
         return post("/api/route/create", body)
     }
 
     fun listRoutes(): ApiResult = get("/api/route/list")
+
+    fun deleteRoute(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/route/delete", body)
+    }
+
+    fun getRoute(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/route/get", body)
+    }
+
+    // ---------- LocationPoint ----------
+
+    fun createLocationPoint(name: String, remark: String, latitude: Double, longitude: Double): ApiResult {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("remark", remark)
+            put("latitude", latitude)
+            put("longitude", longitude)
+        }
+        return post("/api/location-point/create", body)
+    }
+
+    fun listLocationPoints(): ApiResult = get("/api/location-point/list")
+
+    /** 一键使用已保存地点：设置坐标并启用。 */
+    fun useLocationPoint(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/location-point/use", body)
+    }
+
+    fun deleteLocationPoint(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/location-point/delete", body)
+    }
+
+    // ---------- EnvSnapshot ----------
+
+    fun createEnvSnapshot(name: String, remark: String, type: String, data: org.json.JSONObject): ApiResult {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("remark", remark)
+            put("type", type)
+            put("data", data)
+        }
+        return post("/api/env-snapshot/create", body)
+    }
+
+    fun listEnvSnapshots(): ApiResult = get("/api/env-snapshot/list")
+
+    fun deleteEnvSnapshot(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/env-snapshot/delete", body)
+    }
 
     private fun get(path: String): ApiResult {
         return request("GET", path, null)

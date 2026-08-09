@@ -130,11 +130,62 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- Route API（App 控制端调用） ----------
 
-    fun createRoute(name: String, pointsJson: String, speed: Double, stepFrequency: Int): Long {
-        return databaseManager.insertRoute(name, pointsJson, speed, stepFrequency)
+    fun createRoute(name: String, remark: String, pointsJson: String, speed: Double, stepFrequency: Int): Long {
+        return databaseManager.insertRoute(name, remark, pointsJson, speed, stepFrequency)
     }
 
     fun listRoutes(): List<org.json.JSONObject> {
         return databaseManager.queryRoutes()
+    }
+
+    fun getRoute(id: Long): org.json.JSONObject? {
+        return databaseManager.getRoute(id)
+    }
+
+    fun deleteRoute(id: Long): Boolean {
+        return databaseManager.deleteRoute(id)
+    }
+
+    // ---------- LocationPoint API ----------
+
+    fun createLocationPoint(name: String, remark: String, latitude: Double, longitude: Double): Long {
+        return databaseManager.insertLocationPoint(name, remark, latitude, longitude)
+    }
+
+    fun listLocationPoints(): List<org.json.JSONObject> {
+        return databaseManager.queryLocationPoints()
+    }
+
+    fun getLocationPoint(id: Long): org.json.JSONObject? {
+        return databaseManager.getLocationPoint(id)
+    }
+
+    /** 一键使用已保存地点：设置坐标并启用虚拟定位。 */
+    fun useLocationPoint(id: Long): org.json.JSONObject? {
+        val point = databaseManager.getLocationPoint(id) ?: return null
+        val latitude = point.optDouble("latitude", Double.NaN)
+        val longitude = point.optDouble("longitude", Double.NaN)
+        if (latitude.isNaN() || longitude.isNaN()) return null
+        setLocationPoint(latitude, longitude, 0f, 0f)
+        setLocationEnabled(true)
+        return point
+    }
+
+    fun deleteLocationPoint(id: Long): Boolean {
+        return databaseManager.deleteLocationPoint(id)
+    }
+
+    // ---------- EnvSnapshot API ----------
+
+    fun createEnvSnapshot(name: String, remark: String, type: String, dataJson: String): Long {
+        return databaseManager.insertEnvSnapshot(name, remark, type, dataJson)
+    }
+
+    fun listEnvSnapshots(): List<org.json.JSONObject> {
+        return databaseManager.queryEnvSnapshots()
+    }
+
+    fun deleteEnvSnapshot(id: Long): Boolean {
+        return databaseManager.deleteEnvSnapshot(id)
     }
 }
