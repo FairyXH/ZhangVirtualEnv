@@ -11,16 +11,18 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
+import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.security.MessageDigest
 
 /**
- * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置。
+ * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意。
  */
 class SettingsFragment : Fragment() {
 
@@ -29,12 +31,15 @@ class SettingsFragment : Fragment() {
         private const val PREFS = "amap_config"
         private const val KEY_AMAP_KEY = "amap_key"
         private const val KEY_AMAP_SECURITY = "amap_security_key"
+
+        private const val AMAP_PRIVACY_URL = "https://lbs.amap.com/api/android-sdk/guide/create-project/dev-attention"
     }
 
     private lateinit var packageValue: TextView
     private lateinit var sha1Value: TextView
     private lateinit var amapKeyInput: EditText
     private lateinit var amapSecurityInput: EditText
+    private lateinit var privacyAgreeCheck: CheckBox
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_settings, container, false)
@@ -42,6 +47,7 @@ class SettingsFragment : Fragment() {
         sha1Value = root.findViewById(R.id.sha1Value)
         amapKeyInput = root.findViewById(R.id.amapKeyInput)
         amapSecurityInput = root.findViewById(R.id.amapSecurityInput)
+        privacyAgreeCheck = root.findViewById(R.id.privacyAgreeCheck)
 
         val context = requireContext()
         packageValue.text = context.packageName
@@ -53,6 +59,20 @@ class SettingsFragment : Fragment() {
         root.findViewById<Button>(R.id.copySha1Button).setOnClickListener {
             sha1Value.text?.toString()?.let { copyText(it) }
         }
+        privacyAgreeCheck.setOnCheckedChangeListener { _, checked ->
+            AmapPrivacyManager.setAgreed(requireContext(), checked)
+        }
+        root.findViewById<TextView>(R.id.privacyPolicyLink).setOnClickListener {
+            try {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(AMAP_PRIVACY_URL)
+                )
+                startActivity(intent)
+            } catch (t: Throwable) {
+                Toast.makeText(requireContext(), R.string.settings_no_browser, Toast.LENGTH_SHORT).show()
+            }
+        }
         root.findViewById<Button>(R.id.saveAmapButton).setOnClickListener { saveAmapConfig() }
 
         loadAmapConfig()
@@ -63,12 +83,17 @@ class SettingsFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         amapKeyInput.setText(prefs.getString(KEY_AMAP_KEY, ""))
         amapSecurityInput.setText(prefs.getString(KEY_AMAP_SECURITY, ""))
+        privacyAgreeCheck.isChecked = AmapPrivacyManager.isAgreed(requireContext())
     }
 
     private fun saveAmapConfig() {
         val key = amapKeyInput.text.toString().trim()
         if (key.isEmpty()) {
             Toast.makeText(requireContext(), R.string.settings_amap_key_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!privacyAgreeCheck.isChecked) {
+            Toast.makeText(requireContext(), R.string.settings_amap_privacy_required, Toast.LENGTH_LONG).show()
             return
         }
         val prefs = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)

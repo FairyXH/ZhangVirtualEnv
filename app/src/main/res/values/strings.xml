@@ -59,6 +59,10 @@
     <string name="settings_amap_save">保存 Key</string>
     <string name="settings_amap_saved">已保存，重启应用后生效</string>
     <string name="settings_amap_key_empty">请输入 API Key</string>
+    <string name="settings_amap_privacy">我已阅读并同意《高德开放平台隐私权政策》</string>
+    <string name="settings_amap_privacy_link">查看隐私合规说明文档</string>
+    <string name="settings_amap_privacy_required">请先阅读并同意高德隐私政策</string>
+    <string name="settings_no_browser">未找到浏览器</string>
 
     <!-- Route -->
     <string name="route_title">路线模拟</string>
@@ -70,6 +74,12 @@
     <string name="route_save">保存路线</string>
     <string name="route_name_required">请输入路线名称</string>
     <string name="route_points_required">至少需要 2 个路径点</string>
+    <string name="route_privacy_prompt">地图功能需要先阅读并同意高德隐私政策\n请前往「设置」页勾选同意后返回</string>
+    <string name="route_map_init_failed">地图初始化失败，请检查高德 Key 与隐私同意</string>
+    <string name="route_locate">当前位置</string>
+    <string name="route_locating">正在定位…</string>
+    <string name="route_locate_failed">定位失败，请检查定位权限</string>
+    <string name="route_location_permission">需要定位权限才能获取当前位置</string>
 
     <!-- Env -->
     <string name="env_title">环境模拟</string>

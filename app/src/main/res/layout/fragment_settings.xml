@@ -165,6 +165,26 @@
                 android:inputType="text"
                 style="@style/EditText.Field" />
 
+            <CheckBox
+                android:id="@+id/privacyAgreeCheck"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:buttonTint="@color/accent"
+                android:text="@string/settings_amap_privacy"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/text_body" />
+
+            <TextView
+                android:id="@+id/privacyPolicyLink"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_lg"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/settings_amap_privacy_link"
+                android:textColor="@color/accent"
+                android:textSize="@dimen/text_caption" />
+
             <Button
                 android:id="@+id/saveAmapButton"
                 android:layout_width="match_parent"

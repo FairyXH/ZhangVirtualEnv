@@ -35,10 +35,31 @@
         android:layout_weight="1"
         android:background="@drawable/bg_card">
 
-        <com.amap.api.maps.MapView
-            android:id="@+id/mapView"
+        <!-- 地图容器：初始化成功前不加载 MapView，避免白屏 -->
+        <FrameLayout
+            android:id="@+id/mapContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+
+        <!-- 隐私未同意提示 -->
+        <LinearLayout
+            android:id="@+id/privacyPrompt"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/bg_secondary"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="@dimen/space_lg"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/route_privacy_prompt"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/text_body" />
+        </LinearLayout>
 
         <!-- draw hint -->
         <TextView
@@ -53,6 +74,20 @@
             android:paddingEnd="@dimen/space_md"
             android:paddingBottom="@dimen/space_xs"
             android:text="@string/route_draw_hint"
+            android:textSize="@dimen/text_caption" />
+
+        <!-- 当前位置按钮 -->
+        <Button
+            android:id="@+id/locateButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="@dimen/space_md"
+            android:background="@drawable/bg_pill_secondary"
+            android:minWidth="0dp"
+            android:paddingStart="@dimen/space_md"
+            android:paddingEnd="@dimen/space_md"
+            android:text="@string/route_locate"
             android:textSize="@dimen/text_caption" />
     </FrameLayout>
 
