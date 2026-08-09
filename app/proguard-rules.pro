@@ -29,3 +29,7 @@
 # Obfuscation
 -repackageclasses
 -allowaccessmodification
+
+# AMap SDK 可选依赖缺失（运行时按需加载，R8 仅告警）
+-dontwarn com.amap.ams.gnss.GnssSoftLocator
+-dontwarn net.jafama.FastMath
