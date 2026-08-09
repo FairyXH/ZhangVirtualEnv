@@ -25,21 +25,21 @@ Android Framework / system_server / GMS
 目标：建立可运行的三层骨架，打通 `APP → ApiServer → Backend → Engine → Hook Adapter` 全链路，实现单点虚拟定位。
 
 - [x] 包名迁移 `io.github.fairyxh.VirtualEnv`（namespace / applicationId / Kotlin 包 / Manifest / LSPosed 入口 / YukiHook 配置 / 文件路径）
-- [ ] core/ 模块骨架
+- [x] core/ 模块骨架
   - ApiServer：本地 HTTP API 服务（`/api/location/*`、`/api/config/*`、`/api/status`）
   - ConfigManager：配置读写（开关、单点坐标、Profile 选择）
   - DatabaseManager：SQLite 数据库（route 表 + 配置表）
   - TimelineEngine：时间轴/播放引擎接口 + 基础状态机
   - EnvironmentManager：环境数据管理接口 + 占位实现
-- [ ] hook/ 模块
+- [x] hook/ 模块
   - LSPosed 入口（API 101 `XposedModule`）
   - Location Hook Adapter：`LocationManagerService.getLastLocation`、`GnssLocationProvider.onReportLocation`
-- [ ] app/ 控制端基础结构
+- [x] app/ 控制端基础结构
   - MainActivity：开关 + 经纬度输入 + 状态显示
   - ApiClient：HTTP 调用 Backend
-- [ ] Profile 机制：`profiles/android14.json`、`android15.json`、`default.json`
-- [ ] docs/reverse/目标类分析.md（Location 相关逆向记录）
-- [ ] 编译通过 + Git commit
+- [x] Profile 机制：`profiles/android14.json`、`android15.json`、`default.json`
+- [x] docs/reverse/目标类分析.md（Location 相关逆向记录）
+- [x] 编译通过（assembleDebug / assembleRelease + lint）+ Git commit
 
 ### Phase 2：路线模拟 + 地图可视化 + 摇杆
 
