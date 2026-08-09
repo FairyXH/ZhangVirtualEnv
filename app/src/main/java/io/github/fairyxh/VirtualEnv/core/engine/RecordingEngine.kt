@@ -31,6 +31,9 @@ class RecordingEngine(
     companion object {
         private const val TAG_SCOPE = "Replay"
         private const val TICK_MS = 200L
+
+        /** 循环回放时末帧停留余量（ms），避免最后一帧与时长边界重合导致不显示。 */
+        private const val FRAME_GRACE_MS = 500L
     }
 
     // ---------- 录制状态 ----------
@@ -43,6 +46,8 @@ class RecordingEngine(
     private var recordingStartWall: Long = 0L
     @Volatile
     private var recordingFirstTs: Long = 0L
+    @Volatile
+    private var recordingLastTs: Long = 0L
     @Volatile
     private var recordingFrameSeq: Int = 0
     @Volatile
@@ -78,6 +83,7 @@ class RecordingEngine(
             recordingName = name
             recordingStartWall = System.currentTimeMillis()
             recordingFirstTs = 0L
+            recordingLastTs = 0L
             recordingFrameSeq = 0
             recordingFrameCount = 0
         }
@@ -92,6 +98,7 @@ class RecordingEngine(
         val ts = data.optLong("timestamp", System.currentTimeMillis())
         val seq = synchronized(this) {
             if (recordingFirstTs == 0L) recordingFirstTs = ts
+            recordingLastTs = ts
             recordingFrameSeq++
             recordingFrameCount++
             recordingFrameSeq
@@ -108,7 +115,9 @@ class RecordingEngine(
         var duration = 0L
         synchronized(this) {
             count = recordingFrameCount
-            duration = if (recordingFirstTs > 0) {
+            duration = if (recordingFirstTs > 0 && recordingLastTs >= recordingFirstTs) {
+                recordingLastTs - recordingFirstTs
+            } else if (recordingFirstTs > 0) {
                 (System.currentTimeMillis() - recordingFirstTs).coerceAtLeast(0L)
             } else 0L
             databaseManager.updateRecordingMeta(id, duration, count)
@@ -117,6 +126,7 @@ class RecordingEngine(
             recordingFrameSeq = 0
             recordingFrameCount = 0
             recordingFirstTs = 0L
+            recordingLastTs = 0L
         }
         ZLog.i(TAG_SCOPE, "recording stopped id=$id frames=$count duration=$duration")
         return true
@@ -235,22 +245,43 @@ class RecordingEngine(
     private fun tick() {
         val enabled: Boolean
         val paused: Boolean
-        val elapsed: Long
+        var elapsed: Long
+        val dur: Long
+        val loop: Boolean
         synchronized(playbackLock) {
             enabled = playbackEnabled
             paused = playbackPaused
             elapsed = if (paused) pausedElapsed else SystemClock.elapsedRealtime() - playStartWall
+            dur = durationMs
+            loop = playbackLoop
         }
         if (!enabled) return
 
-        val idx = findFrameIndex(elapsed)
+        var idx: Int
+        if (dur > 0 && elapsed >= dur) {
+            if (loop) {
+                // 平滑循环：末帧停留 FRAME_GRACE_MS 后再从头
+                val cycleLen = dur + FRAME_GRACE_MS
+                val cycleElapsed = elapsed % cycleLen
+                idx = if (cycleElapsed >= dur) frames.size - 1 else findFrameIndex(cycleElapsed)
+            } else {
+                // 非循环：先确保停在最后一帧，再推进到下一段或结束
+                idx = frames.size - 1
+                if (idx != lastAppliedIdx) {
+                    applyFrame(frames.getOrNull(idx)?.optJSONObject("data") ?: JSONObject())
+                    lastAppliedIdx = idx
+                }
+                handler.post { advanceOrStop() }
+                return
+            }
+        } else {
+            idx = findFrameIndex(elapsed)
+        }
+
         val frame = frames.getOrNull(idx) ?: return
         if (idx != lastAppliedIdx) {
             applyFrame(frame.optJSONObject("data") ?: JSONObject())
             lastAppliedIdx = idx
-        }
-        if (elapsed >= durationMs && durationMs > 0) {
-            advanceOrStop()
         }
     }
 
