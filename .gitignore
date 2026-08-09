@@ -5,3 +5,4 @@
 /captures
 /local.properties
 build
+*.log
