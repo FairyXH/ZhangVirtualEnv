@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:overScrollMode="never">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/space_md">
+
+        <EditText
+            android:id="@+id/cellNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/env_name_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellRemarkInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/home_collect_remark_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellTypeInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:hint="@string/env_cell_type_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellMccInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_mcc_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellMncInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_mnc_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellTacInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_tac_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellCiInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_ci_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellPciInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_pci_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/cellRsrpInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_cell_rsrp_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+    </LinearLayout>
+</ScrollView>

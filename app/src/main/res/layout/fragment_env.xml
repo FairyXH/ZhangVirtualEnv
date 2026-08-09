@@ -124,5 +124,36 @@
                 android:text="@string/env_pending"
                 style="@style/Text.Caption" />
         </LinearLayout>
+
+        <!-- Saved env snapshots card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/env_saved_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:id="@+id/savedEnvEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/env_saved_empty"
+                android:textColor="@color/text_secondary"
+                style="@style/Text.Caption" />
+
+            <LinearLayout
+                android:id="@+id/savedEnvList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

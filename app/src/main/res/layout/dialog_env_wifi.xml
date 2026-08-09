@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:overScrollMode="never">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/space_md">
+
+        <EditText
+            android:id="@+id/wifiNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/env_name_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/wifiRemarkInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/home_collect_remark_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/wifiSsidInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:hint="@string/env_wifi_ssid_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/wifiBssidInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_wifi_bssid_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/wifiRssiInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_wifi_rssi_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/wifiFrequencyInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_wifi_frequency_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:overScrollMode="never">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/space_md">
+
+        <EditText
+            android:id="@+id/gnssNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/env_name_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/gnssRemarkInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/home_collect_remark_hint"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/gnssCountInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:hint="@string/env_gnss_count_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/gnssUsedInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_gnss_used_hint"
+            android:inputType="numberSigned"
+            style="@style/EditText.Field" />
+
+        <EditText
+            android:id="@+id/gnssCn0Input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:hint="@string/env_gnss_cn0_hint"
+            android:inputType="numberDecimal|numberSigned"
+            style="@style/EditText.Field" />
+    </LinearLayout>
+</ScrollView>

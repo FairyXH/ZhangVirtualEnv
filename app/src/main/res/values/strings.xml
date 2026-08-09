@@ -123,4 +123,26 @@
     <string name="env_gnss_title">GNSS 模拟</string>
     <string name="env_gnss_desc">卫星状态 / 星历 / 信噪比</string>
     <string name="env_gnss_coming">Phase 4 实现</string>
+    <string name="env_saved_title">已保存环境</string>
+    <string name="env_saved_empty">暂无已保存环境</string>
+    <string name="env_save">保存</string>
+    <string name="env_name_hint">名称，如：办公室基站 1</string>
+    <string name="env_use_coming">%1$s 模拟引擎开发中，暂不可用</string>
+    <string name="env_type_cell">基站</string>
+    <string name="env_type_wifi">WiFi</string>
+    <string name="env_type_gnss">GNSS</string>
+    <string name="env_cell_type_hint">类型：LTE / NR / GSM / WCDMA</string>
+    <string name="env_cell_mcc_hint">MCC，如：460</string>
+    <string name="env_cell_mnc_hint">MNC，如：0</string>
+    <string name="env_cell_tac_hint">TAC，如：12345</string>
+    <string name="env_cell_ci_hint">CID / NCI，如：123456</string>
+    <string name="env_cell_pci_hint">PCI，如：456</string>
+    <string name="env_cell_rsrp_hint">RSRP，如：-95</string>
+    <string name="env_wifi_ssid_hint">SSID，如：MyWiFi</string>
+    <string name="env_wifi_bssid_hint">BSSID，如：AA:BB:CC:DD:EE:FF</string>
+    <string name="env_wifi_rssi_hint">RSSI，如：-60</string>
+    <string name="env_wifi_frequency_hint">Frequency，如：2412</string>
+    <string name="env_gnss_count_hint">卫星总数，如：12</string>
+    <string name="env_gnss_used_hint">参与定位数，如：8</string>
+    <string name="env_gnss_cn0_hint">平均信噪比 dBHz，如：38</string>
 </resources>
