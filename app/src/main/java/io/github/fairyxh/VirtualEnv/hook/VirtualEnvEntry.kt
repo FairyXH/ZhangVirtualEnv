@@ -38,12 +38,12 @@ class VirtualEnvEntry : XposedModule() {
             if (appCache != null) return
             val cache = io.github.fairyxh.VirtualEnv.core.EnvStateCache()
             appCache = cache
-            val registrar = HookRegistrar { method, interceptor ->
+            val registrar = HookRegistrar { executable, interceptor ->
                 try {
-                    hook(method).intercept(interceptor)
+                    hook(executable).intercept(interceptor)
                     true
                 } catch (t: Throwable) {
-                    ZLog.e(TAG_SCOPE, "app hook register failed: ${method.declaringClass.name}.${method.name}", t)
+                    ZLog.e(TAG_SCOPE, "app hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
             }
@@ -77,18 +77,20 @@ class VirtualEnvEntry : XposedModule() {
             backend.startApiServer()
 
             // 安装 Hook Adapter
-            val registrar = HookRegistrar { method, interceptor ->
+            val registrar = HookRegistrar { executable, interceptor ->
                 try {
-                    hook(method).intercept(interceptor)
+                    hook(executable).intercept(interceptor)
                     true
                 } catch (t: Throwable) {
-                    ZLog.e(TAG_SCOPE, "hook register failed: ${method.declaringClass.name}.${method.name}", t)
+                    ZLog.e(TAG_SCOPE, "hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
             }
             LocationHookAdapter(backend, registrar).install(param.classLoader)
             // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位
             WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
+            // 虚拟 fix 主动注入：百度/微信 gps 无 fix 时主动上报，GMS fused passive 缓存刷新
+            VirtualFixInjector(backend, registrar).install(param.classLoader)
 
             log(Log.INFO, TAG, "[$TAG_SCOPE] system server hook install done")
         } catch (t: Throwable) {

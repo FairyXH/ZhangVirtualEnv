@@ -12,7 +12,9 @@
       "gnssClass": "com.android.server.location.gnss.GnssLocationProvider",
       "reportLocation": "onReportLocation",
       "providerManagerClass": "com.android.server.location.provider.LocationProviderManager",
-      "managerReportLocation": "onReportLocation"
+      "managerReportLocation": "onReportLocation",
+      "injectProviders": ["gps", "passive"],
+      "injectIntervalMs": 1000
     }
   }
 }

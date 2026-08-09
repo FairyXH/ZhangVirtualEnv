@@ -26,7 +26,6 @@ class LocationHookAdapter(
 
     companion object {
         private const val TAG_SCOPE = "Hook"
-        private const val LOCATION_RESULT_CLASS = "android.location.LocationResult"
     }
 
     /**
@@ -138,12 +137,7 @@ class LocationHookAdapter(
             ZLog.w(TAG_SCOPE, "provider manager onReportLocation not found in $className")
             return
         }
-        val locationResultClass = try {
-            Class.forName(LOCATION_RESULT_CLASS, false, classLoader)
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "LocationResult class not found", t)
-            null
-        }
+        val locationResultClass = LocationResultFactory.resolveClass(classLoader)
         if (locationResultClass == null) return
 
         val ok = registrar.register(method) { chain ->
@@ -151,7 +145,7 @@ class LocationHookAdapter(
             if (virtual != null) {
                 try {
                     // 构造 LocationResult 替换上报位置（兼容 AOSP wrap(Location) 与 ColorOS wrap(List)）
-                    val virtualResult = createLocationResult(locationResultClass, virtual)
+                    val virtualResult = LocationResultFactory.create(locationResultClass, virtual)
                     chain.proceed(arrayOf(virtualResult))
                     ZLog.d(TAG_SCOPE, "provider onReportLocation -> virtual ${virtual.latitude},${virtual.longitude}")
                 } catch (t: Throwable) {
@@ -166,35 +160,6 @@ class LocationHookAdapter(
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $className.onReportLocation")
         }
-    }
-
-    /**
-     * 反射构造 LocationResult。
-     *
-     * Android 15 AOSP：LocationResult.wrap(Location)
-     * ColorOS/Oplus 15：LocationResult.wrap(List<Location>)（已实测，见真机日志）
-     * 兜底：LocationResult.create(List<Location>)
-     */
-    private fun createLocationResult(locationResultClass: Class<*>, location: Location): Any {
-        // 1. wrap(Location)
-        try {
-            val m = locationResultClass.getMethod("wrap", Location::class.java)
-            return m.invoke(null, location)
-        } catch (_: NoSuchMethodException) {
-        }
-        // 2. wrap(List)
-        try {
-            val m = locationResultClass.getMethod("wrap", List::class.java)
-            return m.invoke(null, listOf(location))
-        } catch (_: NoSuchMethodException) {
-        }
-        // 3. create(List)
-        try {
-            val m = locationResultClass.getMethod("create", List::class.java)
-            return m.invoke(null, listOf(location))
-        } catch (_: NoSuchMethodException) {
-        }
-        throw NoSuchMethodException("no LocationResult factory: wrap(Location)/wrap(List)/create(List)")
     }
 
     // ---------- GPS provider 上报兜底：GnssLocationProvider.onReportLocation ----------
@@ -241,12 +206,7 @@ class LocationHookAdapter(
      * 可覆盖 requestLocationUpdates 连续定位被真实位置覆盖的场景。
      */
     private fun hookDeliverOnLocationChanged(classLoader: ClassLoader, providerManagerClass: String) {
-        val locationResultClass = try {
-            Class.forName(LOCATION_RESULT_CLASS, false, classLoader)
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "LocationResult class not found", t)
-            null
-        }
+        val locationResultClass = LocationResultFactory.resolveClass(classLoader)
         if (locationResultClass == null) return
 
         listOf(
@@ -266,7 +226,7 @@ class LocationHookAdapter(
                 val virtual: Location? = backend.currentLocation()
                 if (virtual != null) {
                     try {
-                        val virtualResult = createLocationResult(locationResultClass, virtual)
+                        val virtualResult = LocationResultFactory.create(locationResultClass, virtual)
                         chain.proceed(arrayOf(virtualResult, chain.getArg(1)))
                         ZLog.d(TAG_SCOPE, "$transportName deliver -> virtual ${virtual.latitude},${virtual.longitude}")
                     } catch (t: Throwable) {
