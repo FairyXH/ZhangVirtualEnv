@@ -29,6 +29,7 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     private var wifi: JSONObject? = null
     private var cell: JSONObject? = null
     private var ble: JSONObject? = null
+    private var locationEnabled: Boolean = false
 
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-EnvCache").apply { isDaemon = true }
@@ -55,6 +56,14 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh env cache failed: ${t.message}")
         }
+        try {
+            val loc = rawGet("/api/location/status") ?: return
+            synchronized(lock) {
+                locationEnabled = loc.optBoolean("enabled", false)
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "refresh location cache failed: ${t.message}")
+        }
     }
 
     /** 当前虚拟 WiFi 数据；未启用时 null。 */
@@ -65,6 +74,9 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
 
     /** 当前虚拟 BLE 数据；未启用时 null。 */
     fun currentBle(): JSONObject? = synchronized(lock) { ble }
+
+    /** 位置虚拟化开关（单点或路线任一启用即为 true）。 */
+    fun isLocationEnabled(): Boolean = synchronized(lock) { locationEnabled }
 
     fun shutdown() {
         executor.shutdownNow()

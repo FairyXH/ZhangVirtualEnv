@@ -47,6 +47,13 @@ class VirtualEnvEntry : XposedModule() {
                     false
                 }
             }
+            // com.android.phone 是基站 Binder 服务端所在进程：Hook 服务端方法，
+            // 对所有 App（含第三方地图）全局阻断真实基站网络定位。
+            if (param.processName == "com.android.phone") {
+                PhoneInterfaceManagerHookAdapter(cache, registrar).install(ClassLoader.getSystemClassLoader())
+                log(Log.INFO, TAG, "[$TAG_SCOPE] phone interface manager hooks installed for ${param.processName}")
+                return
+            }
             FrameworkEnvHookAdapter(cache, registrar).install(ClassLoader.getSystemClassLoader())
             log(Log.INFO, TAG, "[$TAG_SCOPE] framework env hooks installed for ${param.processName}")
         } catch (t: Throwable) {
@@ -80,6 +87,8 @@ class VirtualEnvEntry : XposedModule() {
                 }
             }
             LocationHookAdapter(backend, registrar).install(param.classLoader)
+            // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位
+            WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
 
             log(Log.INFO, TAG, "[$TAG_SCOPE] system server hook install done")
         } catch (t: Throwable) {
