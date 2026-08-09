@@ -94,6 +94,8 @@ class LocationSimFragment : Fragment() {
             }
         }
 
+        root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
+
         applyButton.setOnClickListener {
             val lat = latitudeInput.text.toString().toDoubleOrNull()
             val lon = longitudeInput.text.toString().toDoubleOrNull()
@@ -217,6 +219,28 @@ class LocationSimFragment : Fragment() {
                 refreshStatus()
             }
         }
+    }
+
+    private fun openFloatWindow() {
+        val context = requireContext()
+        if (!android.provider.Settings.canDrawOverlays(context)) {
+            Toast.makeText(context, R.string.float_permission_required, Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:${context.packageName}")
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (t: Throwable) {
+                startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return
+        }
+        io.github.fairyxh.VirtualEnv.app.FloatControlService.start(context)
     }
 
     /** 保存当前输入坐标（含名称/备注），成功后刷新列表。 */

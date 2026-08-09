@@ -150,4 +150,33 @@
     <string name="env_gnss_count_hint">卫星总数，如：12</string>
     <string name="env_gnss_used_hint">参与定位数，如：8</string>
     <string name="env_gnss_cn0_hint">平均信噪比 dBHz，如：38</string>
+
+    <!-- Float window -->
+    <string name="float_window_title">虚拟环境悬浮窗</string>
+    <string name="float_collapse">收起</string>
+    <string name="float_close">关闭</string>
+    <string name="float_mode_joystick">摇杆</string>
+    <string name="float_mode_route">路线</string>
+    <string name="float_speed">速度</string>
+    <string name="float_speed_value">%1$.1f km/h</string>
+    <string name="float_route_refresh">刷新</string>
+    <string name="float_route_start">开始</string>
+    <string name="float_route_pause">暂停</string>
+    <string name="float_route_resume">继续</string>
+    <string name="float_route_reset">重置</string>
+    <string name="float_route_stop">停止</string>
+    <string name="float_route_speed_hint">速度 km/h</string>
+    <string name="float_route_step_hint">步频 步/分</string>
+    <string name="float_route_config">应用</string>
+    <string name="float_route_select_first">请先选择路线</string>
+    <string name="float_route_started">路线已启动</string>
+    <string name="float_route_paused">路线已暂停</string>
+    <string name="float_route_resumed">路线已继续</string>
+    <string name="float_route_reset_done">路线已重置</string>
+    <string name="float_route_stopped">路线已停止</string>
+    <string name="float_route_configured">速度/步频已应用</string>
+    <string name="float_window_add_failed">悬浮窗添加失败，请检查悬浮窗权限</string>
+    <string name="float_open">显示悬浮窗</string>
+    <string name="float_open_desc">摇杆移动 + 路线启停重置 + 速度/步频设置</string>
+    <string name="float_permission_required">需要悬浮窗权限，请授权后重试</string>
 </resources>
