@@ -4,20 +4,21 @@ import io.github.fairyxh.VirtualEnv.core.EnvStateCache
 import io.github.fairyxh.VirtualEnv.util.ZLog
 
 /**
- * PhoneInterfaceManager Hook Adapter（基站网络定位全局阻断）。
+ * PhoneInterfaceManager Hook Adapter（基站网络定位虚拟化）。
  *
- * 高德等地图的网络定位 SDK 调用 `TelephonyManager.getAllCellInfo()` /
- * `getCellLocation()` / `getNeighboringCellInfo()` 读取真实基站信息，发往
- * 厂商服务器换算真实坐标。这三个方法的 Binder 服务端实现位于 com.android.phone
- * 进程的 `com.android.phone.PhoneInterfaceManager`（scope 已包含该进程）。
+ * 地图网络定位 SDK 调用 `TelephonyManager.getAllCellInfo()` /
+ * `getCellLocation()` / `getNeighboringCellInfo()` 读取基站信息，发往厂商
+ * 服务器换算坐标。Binder 服务端实现位于 com.android.phone 进程的
+ * `com.android.phone.PhoneInterfaceManager`（scope 已包含该进程）。
  *
- * Hook 服务端方法后对所有调用方（含第三方地图）全局生效：
- * - `getAllCellInfo`：启用时返回空 List（无基站）
- * - `getCellLocation`：启用时返回 null（无小区）
- * - `getNeighboringCellInfo`：启用时返回空 List
+ * 策略（虚拟定位启用时，fail-open）：
+ * - `getAllCellInfo`：返回携带虚拟经纬度的 CellInfoCdma 列表（registered=true）。
+ *   与早期"返回空列表"不同：返回空会让百度/微信 SDK 网络定位直接失败，
+ *   参考 GhostMapX，改为提供带虚拟坐标的基站，SDK 服务器即可换算到虚拟位置。
+ * - `getCellLocation`：返回携带虚拟经纬度的 CellIdentityCdma。
+ * - `getNeighboringCellInfo`：返回空列表（邻区不参与主定位）。
  *
- * 本进程通过 [EnvStateCache] 轮询读取 system_server Backend 的位置虚拟化开关，
- * 不在 Hook 内保存业务状态。
+ * 本进程通过 [EnvStateCache] 轮询读取 system_server Backend 的状态。
  */
 class PhoneInterfaceManagerHookAdapter(
     private val cache: EnvStateCache,
@@ -51,8 +52,14 @@ class PhoneInterfaceManagerHookAdapter(
             val original = chain.proceed()
             if (!virtualLocationEnabled()) return@register original
             try {
-                ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> empty (virtual location)")
-                emptyList<Any>()
+                val cell = VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+                if (cell != null) {
+                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> virtual cell (${cache.locationLat()},${cache.locationLon()})")
+                    listOf(cell)
+                } else {
+                    ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo virtual cell build failed, fallback empty")
+                    emptyList<Any>()
+                }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo virtual failed, fallback", t)
                 original
@@ -75,8 +82,13 @@ class PhoneInterfaceManagerHookAdapter(
             val original = chain.proceed()
             if (!virtualLocationEnabled()) return@register original
             try {
-                ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getCellLocation -> null (virtual location)")
-                null
+                val identity = VirtualCellFactory.buildCellIdentityCdma(cache.locationLat(), cache.locationLon())
+                if (identity != null) {
+                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getCellLocation -> virtual identity")
+                    identity
+                } else {
+                    null
+                }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getCellLocation virtual failed, fallback", t)
                 original

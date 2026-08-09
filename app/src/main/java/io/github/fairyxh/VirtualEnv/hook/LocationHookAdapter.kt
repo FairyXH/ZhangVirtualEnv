@@ -4,6 +4,8 @@ import android.location.Location
 import io.github.fairyxh.VirtualEnv.core.Backend
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
+import java.util.Collections
+import java.util.HashSet
 
 /**
  * Location Hook Adapter（Phase 1.1）。
@@ -48,6 +50,9 @@ class LocationHookAdapter(
         hookProviderManagerReportLocation(classLoader, providerManagerClass)
         hookGnssReportLocation(classLoader, gnssClass)
         hookDeliverOnLocationChanged(classLoader, providerManagerClass)
+        hookRegisterLocationListener(classLoader, managerClass)
+        hookProviderEnabled(classLoader, managerClass)
+        hookRegisterGnssStatusCallback(classLoader, managerClass)
     }
 
     // ---------- 单次查询：getLastLocation ----------
@@ -241,6 +246,170 @@ class LocationHookAdapter(
             if (ok) {
                 ZLog.i(TAG_SCOPE, "hooked $transportName.deliverOnLocationChanged")
             }
+        }
+    }
+
+    // ---------- 连续定位 listener 注册点：LocationManagerService.registerLocationListener ----------
+
+    /**
+     * Hook Android 12+ 的 listener 注册入口，借鉴 GhostMapX：
+     *
+     * 签名：registerLocationListener(String provider, LocationRequest request,
+     *     ILocationListener listener, String packageName, String attributionTag,
+     *     String listenerId)
+     *
+     * 注册时捕获 ILocationListener（App 进程 Binder 代理，class 为
+     * ILocationListener$Stub$Proxy），对其 `onLocationChanged` 方法做参数替换，
+     * 并立即主动推送一次虚拟位置。这样即使 provider 从不产生上报，SDK 在
+     * 注册后也能立刻收到虚拟位置（解决百度/微信 gps 无 fix 时收不到位置）。
+     */
+    private fun hookRegisterLocationListener(classLoader: ClassLoader, className: String) {
+        val clazz = HookSupport.findClass(classLoader, className) ?: return
+        val method = HookSupport.findMethods(clazz, "registerLocationListener")
+            .firstOrNull { m ->
+                m.parameterCount == 6 && m.parameterTypes[2].simpleName.contains("ILocationListener")
+            }
+        if (method == null) {
+            ZLog.w(TAG_SCOPE, "registerLocationListener not found in $className")
+            return
+        }
+        val ok = registrar.register(method) { chain ->
+            chain.proceed()
+            val virtual: Location? = backend.currentLocation()
+            if (virtual != null) {
+                try {
+                    val listener = chain.getArg(2) ?: return@register null
+                    hookListenerOnLocationChanged(listener, virtual)
+                    pushVirtualLocation(listener, virtual)
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "registerLocationListener virtual push failed", t)
+                }
+            }
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked $className.registerLocationListener")
+        }
+    }
+
+    /** 已 hook 过 onLocationChanged 的 listener class（Binder Proxy class 全局共享，只需 hook 一次）。 */
+    private val hookedListenerClasses = Collections.synchronizedSet(HashSet<Class<*>>())
+
+    /**
+     * 对 listener 的 onLocationChanged 做参数替换。
+     *
+     * 支持 Android 12+ 的 onLocationChanged(List<Location>, IRemoteCallback)
+     * 与旧式 onLocationChanged(Location)。
+     */
+    private fun hookListenerOnLocationChanged(listener: Any, virtual: Location) {
+        val cls = listener.javaClass
+        if (!hookedListenerClasses.add(cls)) return
+        cls.methods.filter { it.name == "onLocationChanged" }.forEach { m ->
+            try {
+                val ok = registrar.register(m) { chain ->
+                    val virtualNow: Location? = backend.currentLocation()
+                    if (virtualNow != null && chain.args.isNotEmpty()) {
+                        val arg0 = chain.getArg(0)
+                        if (arg0 is List<*>) {
+                            chain.proceed(arrayOf(listOf(virtualNow), chain.getArg(1)))
+                        } else if (arg0 is Location) {
+                            chain.proceed(arrayOf(virtualNow))
+                        } else {
+                            chain.proceed()
+                        }
+                    } else {
+                        chain.proceed()
+                    }
+                    null
+                }
+                if (ok) {
+                    ZLog.i(TAG_SCOPE, "hooked listener.onLocationChanged on ${cls.name} (${m.parameterCount} params)")
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "hook listener onLocationChanged failed on ${cls.name}", t)
+            }
+        }
+    }
+
+    /**
+     * 立即向 listener 主动推送虚拟位置。
+     *
+     * 优先 List<Location> 形式（Android 12+ ILocationListener），IRemoteCallback
+     * 传 null；失败回退 Location 单参形式。全部 try/catch，失败静默（依赖
+     * 注入器周期推送兜底）。
+     */
+    private fun pushVirtualLocation(listener: Any, virtual: Location) {
+        val cls = listener.javaClass
+        try {
+            val listMethod = cls.methods.firstOrNull { m ->
+                m.name == "onLocationChanged" && m.parameterCount >= 1 &&
+                    List::class.java.isAssignableFrom(m.parameterTypes[0])
+            }
+            if (listMethod != null) {
+                val args = arrayOfNulls<Any?>(listMethod.parameterCount)
+                args[0] = listOf(virtual)
+                listMethod.invoke(listener, *args)
+                ZLog.d(TAG_SCOPE, "registerLocationListener -> pushed virtual (${virtual.latitude},${virtual.longitude})")
+                return
+            }
+            val singleMethod = cls.methods.firstOrNull { m ->
+                m.name == "onLocationChanged" && m.parameterCount == 1 &&
+                    Location::class.java.isAssignableFrom(m.parameterTypes[0])
+            }
+            if (singleMethod != null) {
+                singleMethod.invoke(listener, virtual)
+                ZLog.d(TAG_SCOPE, "registerLocationListener -> pushed virtual single (${virtual.latitude},${virtual.longitude})")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "push virtual location to listener failed", t)
+        }
+    }
+
+    // ---------- provider 启用状态：isProviderEnabledForUser / isProviderEnabled ----------
+
+    private fun hookProviderEnabled(classLoader: ClassLoader, className: String) {
+        val clazz = HookSupport.findClass(classLoader, className) ?: return
+        listOf("isProviderEnabledForUser", "isProviderEnabled").forEach { name ->
+            HookSupport.findMethods(clazz, name).forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val original = chain.proceed()
+                    val virtual = backend.currentLocation()
+                    if (virtual != null) {
+                        ZLog.d(TAG_SCOPE, "$name -> true (virtual location)")
+                        true
+                    } else {
+                        original
+                    }
+                }
+                if (ok) {
+                    ZLog.i(TAG_SCOPE, "hooked $className.$name")
+                }
+            }
+        }
+    }
+
+    // ---------- GNSS 状态回调注册：registerGnssStatusCallback ----------
+
+    private fun hookRegisterGnssStatusCallback(classLoader: ClassLoader, className: String) {
+        val clazz = HookSupport.findClass(classLoader, className) ?: return
+        val method = HookSupport.findMethods(clazz, "registerGnssStatusCallback")
+            .firstOrNull { it.parameterCount >= 2 }
+        if (method == null) {
+            ZLog.w(TAG_SCOPE, "registerGnssStatusCallback not found in $className")
+            return
+        }
+        val ok = registrar.register(method) { chain ->
+            val original = chain.proceed()
+            val virtual = backend.currentLocation()
+            if (virtual != null) {
+                ZLog.d(TAG_SCOPE, "registerGnssStatusCallback -> true (virtual location)")
+                true
+            } else {
+                original
+            }
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked $className.registerGnssStatusCallback")
         }
     }
 }
