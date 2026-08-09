@@ -252,12 +252,34 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 item.optJSONArray("points")?.length() ?: 0
             )
             row.findViewById<Button>(R.id.useButton).setOnClickListener {
-                loadRoute(item)
+                startRouteSimulation(item)
             }
             row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
                 deleteRoute(item.optLong("id"))
             }
+            // 点击行文本区域：加载到地图继续编辑
+            row.setOnClickListener { loadRoute(item) }
             savedRouteList.addView(row)
+        }
+    }
+
+    /** 一键启动路线模拟（Backend RouteEngine 沿路线推进）。 */
+    private fun startRouteSimulation(item: org.json.JSONObject) {
+        val id = item.optLong("id")
+        val name = item.optString("name", "")
+        executor.execute {
+            val result = ApiClient.startRoute(id)
+            requireActivity().runOnUiThread {
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.route_started, name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 

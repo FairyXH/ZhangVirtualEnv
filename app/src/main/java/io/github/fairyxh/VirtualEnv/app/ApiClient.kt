@@ -83,6 +83,23 @@ object ApiClient {
         return post("/api/route/get", body)
     }
 
+    // ---------- 路线模拟控制 ----------
+
+    /** 一键启动路线模拟。speed 为 km/h，<=0 时使用路线默认速度。 */
+    fun startRoute(id: Long, speedKmh: Double = 0.0): ApiResult {
+        val body = JSONObject().apply {
+            put("id", id)
+            put("speed", speedKmh)
+        }
+        return post("/api/route/start", body)
+    }
+
+    fun pauseRoute(): ApiResult = post("/api/route/pause", JSONObject())
+
+    fun stopRoute(): ApiResult = post("/api/route/stop", JSONObject())
+
+    fun getRouteStatus(): ApiResult = get("/api/route/status")
+
     // ---------- LocationPoint ----------
 
     fun createLocationPoint(name: String, remark: String, latitude: Double, longitude: Double): ApiResult {

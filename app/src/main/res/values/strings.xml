@@ -100,6 +100,9 @@
     <string name="route_loaded">已加载：%1$s</string>
     <string name="route_deleted">路线已删除</string>
     <string name="route_point_count_format">%1$d 个路径点</string>
+    <string name="route_start">启动</string>
+    <string name="route_started">路线模拟已启动：%1$s</string>
+    <string name="route_stopped">路线模拟已停止</string>
     <string name="route_clear">清空</string>
     <string name="route_save">保存路线</string>
     <string name="route_name_required">请输入路线名称</string>

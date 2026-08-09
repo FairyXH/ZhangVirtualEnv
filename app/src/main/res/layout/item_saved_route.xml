@@ -51,7 +51,7 @@
         android:paddingTop="@dimen/space_xs"
         android:paddingEnd="@dimen/space_sm"
         android:paddingBottom="@dimen/space_xs"
-        android:text="@string/location_point_use"
+        android:text="@string/route_start"
         android:textColor="@color/accent"
         android:textSize="@dimen/text_caption" />
 

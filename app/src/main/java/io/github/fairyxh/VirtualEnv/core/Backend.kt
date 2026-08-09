@@ -4,6 +4,7 @@ import android.location.Location
 import io.github.fairyxh.VirtualEnv.core.engine.LocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.SinglePointLocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.EnvStateEngine
+import io.github.fairyxh.VirtualEnv.core.engine.RouteEngine
 import io.github.fairyxh.VirtualEnv.core.model.LocationState
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -62,6 +63,9 @@ class Backend private constructor(private val dataDir: File) {
     lateinit var profileManager: ProfileManager
         private set
 
+    /** 路线模拟引擎（优先于单点输出）。 */
+    val routeEngine = RouteEngine()
+
     /** 虚拟 WiFi / 基站 / BLE 环境状态（Hook 层只读快照）。 */
     val wifiEngine = EnvStateEngine("wifi")
     val cellEngine = EnvStateEngine("cell")
@@ -98,8 +102,11 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- Location API（Hook Adapter 调用） ----------
 
-    /** Hook 层数据入口：返回当前虚拟位置；未启用时返回 null（放行真实数据）。 */
-    fun currentLocation(): Location? = locationEngine.currentLocation()
+    /** Hook 层数据入口：路线运行时输出路线位置，否则输出单点；未启用时 null（放行真实数据）。 */
+    fun currentLocation(): Location? {
+        routeEngine.currentLocation()?.let { return it }
+        return locationEngine.currentLocation()
+    }
 
     /** App 状态查询入口。 */
     fun locationState(): LocationState = locationEngine.currentState()
@@ -150,6 +157,30 @@ class Backend private constructor(private val dataDir: File) {
 
     fun deleteRoute(id: Long): Boolean {
         return databaseManager.deleteRoute(id)
+    }
+
+    // ---------- 路线模拟控制 ----------
+
+    /** 一键启动路线模拟：加载路线点并按速度开始播放。 */
+    fun startRoute(id: Long, speedKmh: Double): org.json.JSONObject? {
+        val route = databaseManager.getRoute(id) ?: return null
+        val points = route.optString("points", "")
+        val speed = if (speedKmh > 0) speedKmh else route.optDouble("speed", 3.5)
+        routeEngine.start(points, speed)
+        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed")
+        return route
+    }
+
+    fun pauseRoute() {
+        routeEngine.pause()
+    }
+
+    fun stopRoute() {
+        routeEngine.stop()
+    }
+
+    fun routeStatusJson(): org.json.JSONObject {
+        return routeEngine.statusJson()
     }
 
     // ---------- LocationPoint API ----------

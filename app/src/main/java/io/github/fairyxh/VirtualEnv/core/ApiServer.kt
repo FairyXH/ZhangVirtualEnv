@@ -131,6 +131,10 @@ class ApiServer(
                 path == "/api/route/list" && method == "GET" -> routeList()
                 path == "/api/route/get" && method == "POST" -> routeGet(body)
                 path == "/api/route/delete" && method == "POST" -> routeDelete(body)
+                path == "/api/route/start" && method == "POST" -> routeStart(body)
+                path == "/api/route/pause" && method == "POST" -> routePause()
+                path == "/api/route/stop" && method == "POST" -> routeStop()
+                path == "/api/route/status" && method == "GET" -> routeStatus()
                 path == "/api/location-point/create" && method == "POST" -> locationPointCreate(body)
                 path == "/api/location-point/list" && method == "GET" -> locationPointList()
                 path == "/api/location-point/use" && method == "POST" -> locationPointUse(body)
@@ -197,6 +201,30 @@ class ApiServer(
         } else {
             ApiResult.error("route not found: $id")
         }
+    }
+
+    private fun routeStart(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val speed = json.optDouble("speed", 0.0)
+        val route = backend.startRoute(id, speed)
+            ?: return ApiResult.error("route not found: $id")
+        ZLog.i(TAG_SCOPE, "route start id=$id name=${route.optString("name")}")
+        return ApiResult.ok("started", route)
+    }
+
+    private fun routePause(): ApiResult {
+        backend.pauseRoute()
+        return ApiResult.ok("paused")
+    }
+
+    private fun routeStop(): ApiResult {
+        backend.stopRoute()
+        return ApiResult.ok("stopped")
+    }
+
+    private fun routeStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.routeStatusJson())
     }
 
     // ---------- LocationPoint ----------
