@@ -197,7 +197,7 @@ class HomeFragment : Fragment() {
             }
             row.findViewById<TextView>(R.id.collectMeta).text = formatTime(item.optLong("createTime", 0L))
             row.findViewById<Button>(R.id.useButton).setOnClickListener {
-                showCollectDetail(item)
+                useCollect(item)
             }
             row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
                 deleteCollect(item.optLong("id"))
@@ -206,14 +206,24 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun showCollectDetail(item: JSONObject) {
-        val data = item.optJSONObject("data")
-        val detail = if (data != null) summarize(data) else "无数据"
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle(item.optString("name", ""))
-            .setMessage(detail)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+    /** 一键使用采集包：整体加载到 WiFi / 基站 / BLE 模拟引擎。 */
+    private fun useCollect(item: JSONObject) {
+        val id = item.optLong("id")
+        val name = item.optString("name", "")
+        executor.execute {
+            val result = ApiClient.useEnvSnapshot(id)
+            requireActivity().runOnUiThread {
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.home_collect_applied, name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun deleteCollect(id: Long) {

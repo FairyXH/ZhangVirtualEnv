@@ -192,16 +192,33 @@ class EnvFragment : Fragment() {
             }
             row.findViewById<TextView>(R.id.envMeta).text = formatTime(item.optLong("createTime", 0L))
             row.findViewById<Button>(R.id.useButton).setOnClickListener {
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.env_use_coming, typeLabel(item.optString("type", ""))),
-                    Toast.LENGTH_SHORT
-                ).show()
+                useEnv(item)
             }
             row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
                 deleteEnv(item.optLong("id"))
             }
             savedEnvList.addView(row)
+        }
+    }
+
+    /** 一键使用：把环境快照加载到对应模拟引擎（Hook 层随即生效）。 */
+    private fun useEnv(item: JSONObject) {
+        val id = item.optLong("id")
+        val typeLabel = typeLabel(item.optString("type", ""))
+        executor.execute {
+            val result = ApiClient.useEnvSnapshot(id)
+            requireActivity().runOnUiThread {
+                if (result.code == ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.env_use_applied, typeLabel),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    refreshSavedEnv()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
