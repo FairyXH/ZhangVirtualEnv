@@ -5,6 +5,7 @@ import io.github.fairyxh.VirtualEnv.core.engine.LocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.SinglePointLocationEngine
 import io.github.fairyxh.VirtualEnv.core.engine.EnvStateEngine
 import io.github.fairyxh.VirtualEnv.core.engine.RouteEngine
+import io.github.fairyxh.VirtualEnv.core.engine.JoystickEngine
 import io.github.fairyxh.VirtualEnv.core.model.LocationState
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -66,6 +67,9 @@ class Backend private constructor(private val dataDir: File) {
     /** 路线模拟引擎（优先于单点输出）。 */
     val routeEngine = RouteEngine()
 
+    /** 悬浮窗摇杆引擎：位移叠加在路线/单点输出之上。 */
+    val joystickEngine = JoystickEngine()
+
     /** 虚拟 WiFi / 基站 / BLE 环境状态（Hook 层只读快照）。 */
     val wifiEngine = EnvStateEngine("wifi")
     val cellEngine = EnvStateEngine("cell")
@@ -102,17 +106,20 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- Location API（Hook Adapter 调用） ----------
 
-    /** Hook 层数据入口：路线运行时输出路线位置，否则输出单点；未启用时 null（放行真实数据）。 */
+    /** Hook 层数据入口：路线运行时输出路线位置，否则输出单点；未启用时 null（放行真实数据）。摇杆开启时在基准位置叠加位移。 */
     fun currentLocation(): Location? {
-        routeEngine.currentLocation()?.let { return it }
-        return locationEngine.currentLocation()
+        val base = routeEngine.currentLocation() ?: locationEngine.currentLocation()
+        return joystickEngine.applyTo(base) ?: base
     }
 
-    /** App 状态查询入口（路线运行时优先返回路线位置）。 */
+    /** App 状态查询入口（路线运行时优先返回路线位置；摇杆开启时叠加位移）。 */
     fun locationState(): LocationState {
-        val routeState = routeEngine.currentState()
-        if (routeState.enabled) return routeState
-        return locationEngine.currentState()
+        val base = routeEngine.currentState()
+        if (!base.enabled) {
+            val single = locationEngine.currentState()
+            return if (single.enabled) joystickEngine.applyTo(single) else single
+        }
+        return joystickEngine.applyTo(base)
     }
 
     /** App 设置单点位置（经 ApiServer 调用）。 */
@@ -170,13 +177,30 @@ class Backend private constructor(private val dataDir: File) {
         val route = databaseManager.getRoute(id) ?: return null
         val points = route.optString("points", "")
         val speed = if (speedKmh > 0) speedKmh else route.optDouble("speed", 3.5)
-        routeEngine.start(points, speed)
-        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed")
+        val stepFrequency = route.optInt("stepFrequency", 120)
+        routeEngine.start(points, speed, stepFrequency)
+        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed stepFrequency=$stepFrequency")
         return route
     }
 
     fun pauseRoute() {
         routeEngine.pause()
+    }
+
+    /** 暂停后继续。 */
+    fun resumeRoute() {
+        routeEngine.resume()
+    }
+
+    /** 重置到路线起点并继续运行。 */
+    fun resetRoute() {
+        routeEngine.reset()
+    }
+
+    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改。 */
+    fun configRoute(speedKmh: Double, stepFrequency: Int) {
+        routeEngine.config(speedKmh, stepFrequency)
+        ZLog.i(TAG_SCOPE, "route config speedKmh=$speedKmh stepFrequency=$stepFrequency")
     }
 
     fun stopRoute() {
@@ -185,6 +209,17 @@ class Backend private constructor(private val dataDir: File) {
 
     fun routeStatusJson(): org.json.JSONObject {
         return routeEngine.statusJson()
+    }
+
+    // ---------- 摇杆控制 ----------
+
+    /** 悬浮窗摇杆向量更新（App 控制端调用）。 */
+    fun setJoystickVector(enabled: Boolean, dx: Double, dy: Double, speedKmh: Double) {
+        joystickEngine.setVector(enabled, dx, dy, speedKmh)
+    }
+
+    fun joystickStatusJson(): org.json.JSONObject {
+        return joystickEngine.statusJson()
     }
 
     // ---------- LocationPoint API ----------

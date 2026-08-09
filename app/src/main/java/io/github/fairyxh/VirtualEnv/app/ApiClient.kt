@@ -96,9 +96,37 @@ object ApiClient {
 
     fun pauseRoute(): ApiResult = post("/api/route/pause", JSONObject())
 
+    fun resumeRoute(): ApiResult = post("/api/route/resume", JSONObject())
+
+    fun resetRoute(): ApiResult = post("/api/route/reset", JSONObject())
+
+    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改。 */
+    fun configRoute(speedKmh: Double = 0.0, stepFrequency: Int = 0): ApiResult {
+        val body = JSONObject().apply {
+            put("speed", speedKmh)
+            put("stepFrequency", stepFrequency)
+        }
+        return post("/api/route/config", body)
+    }
+
     fun stopRoute(): ApiResult = post("/api/route/stop", JSONObject())
 
     fun getRouteStatus(): ApiResult = get("/api/route/status")
+
+    // ---------- Joystick ----------
+
+    /** 悬浮窗摇杆向量：enabled=false 时停止并回基准。 */
+    fun setJoystick(enabled: Boolean, dx: Double, dy: Double, speedKmh: Double): ApiResult {
+        val body = JSONObject().apply {
+            put("enabled", enabled)
+            put("dx", dx)
+            put("dy", dy)
+            put("speedKmh", speedKmh)
+        }
+        return post("/api/joystick/set", body)
+    }
+
+    fun getJoystickStatus(): ApiResult = get("/api/joystick/status")
 
     // ---------- LocationPoint ----------
 

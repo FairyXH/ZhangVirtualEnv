@@ -133,8 +133,13 @@ class ApiServer(
                 path == "/api/route/delete" && method == "POST" -> routeDelete(body)
                 path == "/api/route/start" && method == "POST" -> routeStart(body)
                 path == "/api/route/pause" && method == "POST" -> routePause()
+                path == "/api/route/resume" && method == "POST" -> routeResume()
+                path == "/api/route/reset" && method == "POST" -> routeReset()
+                path == "/api/route/config" && method == "POST" -> routeConfig(body)
                 path == "/api/route/stop" && method == "POST" -> routeStop()
                 path == "/api/route/status" && method == "GET" -> routeStatus()
+                path == "/api/joystick/set" && method == "POST" -> joystickSet(body)
+                path == "/api/joystick/status" && method == "GET" -> joystickStatus()
                 path == "/api/location-point/create" && method == "POST" -> locationPointCreate(body)
                 path == "/api/location-point/list" && method == "GET" -> locationPointList()
                 path == "/api/location-point/use" && method == "POST" -> locationPointUse(body)
@@ -218,6 +223,25 @@ class ApiServer(
         return ApiResult.ok("paused")
     }
 
+    private fun routeResume(): ApiResult {
+        backend.resumeRoute()
+        return ApiResult.ok("resumed")
+    }
+
+    private fun routeReset(): ApiResult {
+        backend.resetRoute()
+        return ApiResult.ok("reset")
+    }
+
+    private fun routeConfig(body: String): ApiResult {
+        val json = JSONObject(body)
+        val speed = json.optDouble("speed", 0.0)
+        val stepFrequency = json.optInt("stepFrequency", 0)
+        backend.configRoute(speed, stepFrequency)
+        ZLog.i(TAG_SCOPE, "route config speed=$speed stepFrequency=$stepFrequency")
+        return ApiResult.ok("ok", backend.routeStatusJson())
+    }
+
     private fun routeStop(): ApiResult {
         backend.stopRoute()
         return ApiResult.ok("stopped")
@@ -225,6 +249,23 @@ class ApiServer(
 
     private fun routeStatus(): ApiResult {
         return ApiResult.ok("ok", backend.routeStatusJson())
+    }
+
+    // ---------- Joystick ----------
+
+    private fun joystickSet(body: String): ApiResult {
+        val json = JSONObject(body)
+        val enabled = json.optBoolean("enabled", false)
+        val dx = json.optDouble("dx", 0.0)
+        val dy = json.optDouble("dy", 0.0)
+        val speedKmh = json.optDouble("speedKmh", 5.0)
+        backend.setJoystickVector(enabled, dx, dy, speedKmh)
+        ZLog.i(TAG_SCOPE, "joystick set enabled=$enabled dx=$dx dy=$dy speedKmh=$speedKmh")
+        return ApiResult.ok("ok", backend.joystickStatusJson())
+    }
+
+    private fun joystickStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.joystickStatusJson())
     }
 
     // ---------- LocationPoint ----------

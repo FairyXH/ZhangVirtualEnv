@@ -31,6 +31,8 @@ class RouteEngine : LocationEngine {
         val running: Boolean = false,
         val points: List<Pair<Double, Double>> = emptyList(),
         val speedMps: Double = 1.4,
+        val stepFrequency: Int = 120,
+        val stepCount: Double = 0.0,
         val segmentIndex: Int = 0,
         val progress: Double = 0.0,
         val lastTime: Long = 0L,
@@ -52,7 +54,7 @@ class RouteEngine : LocationEngine {
     }
 
     /** 加载路线并开始播放。 */
-    fun start(pointsJson: String, speedKmh: Double) {
+    fun start(pointsJson: String, speedKmh: Double, stepFrequency: Int = 120) {
         val points = parsePoints(pointsJson)
         if (points.size < 2) {
             ZLog.w("Core", "RouteEngine.start ignored, need at least 2 points")
@@ -65,11 +67,12 @@ class RouteEngine : LocationEngine {
                 running = true,
                 points = points,
                 speedMps = (speedKmh / 3.6).coerceAtLeast(0.1),
+                stepFrequency = stepFrequency.coerceIn(0, 600),
                 lastTime = now,
                 updateTime = now
             )
         )
-        ZLog.i("Core", "RouteEngine started points=${points.size} speedKmh=$speedKmh")
+        ZLog.i("Core", "RouteEngine started points=${points.size} speedKmh=$speedKmh stepFrequency=$stepFrequency")
     }
 
     fun pause() {
@@ -77,6 +80,45 @@ class RouteEngine : LocationEngine {
         if (!s.running) return
         state.set(s.copy(running = false))
         ZLog.i("Core", "RouteEngine paused at segment=${s.segmentIndex} progress=${s.progress}")
+    }
+
+    /** 暂停后继续（不重置游标）。 */
+    fun resume() {
+        val s = state.get()
+        if (!s.enabled || s.running || s.points.size < 2) return
+        state.set(s.copy(running = true, lastTime = SystemClock.elapsedRealtime()))
+        ZLog.i("Core", "RouteEngine resumed at segment=${s.segmentIndex} progress=${s.progress}")
+    }
+
+    /** 重置到路线起点并继续运行。 */
+    fun reset() {
+        val s = state.get()
+        if (!s.enabled || s.points.size < 2) return
+        val now = SystemClock.elapsedRealtime()
+        state.set(
+            s.copy(
+                running = true,
+                segmentIndex = 0,
+                progress = 0.0,
+                stepCount = 0.0,
+                lastTime = now,
+                updateTime = now
+            )
+        )
+        ZLog.i("Core", "RouteEngine reset to start")
+    }
+
+    /** 运行时更新速度（km/h）与步频（steps/min）；传 0 表示不修改。 */
+    fun config(speedKmh: Double, stepFrequency: Int) {
+        val s = state.get()
+        if (!s.enabled) return
+        state.set(
+            s.copy(
+                speedMps = if (speedKmh > 0) (speedKmh / 3.6).coerceAtLeast(0.1) else s.speedMps,
+                stepFrequency = if (stepFrequency > 0) stepFrequency.coerceIn(0, 600) else s.stepFrequency
+            )
+        )
+        ZLog.i("Core", "RouteEngine config speedKmh=$speedKmh stepFrequency=$stepFrequency")
     }
 
     fun stop() {
@@ -121,10 +163,12 @@ class RouteEngine : LocationEngine {
             }
         }
         val finished = seg >= s.points.size - 1
+        val stepDelta = if (!finished) s.stepFrequency * deltaSec / 60.0 else 0.0
         return s.copy(
             segmentIndex = if (finished) s.points.size - 1 else seg,
             progress = if (finished) 1.0 else progress,
             running = !finished,
+            stepCount = s.stepCount + stepDelta.coerceAtLeast(0.0),
             lastTime = now,
             updateTime = now
         )
@@ -168,6 +212,8 @@ class RouteEngine : LocationEngine {
             put("running", s.running)
             put("enabled", s.enabled)
             put("speedKmh", s.speedMps * 3.6)
+            put("stepFrequency", s.stepFrequency)
+            put("stepCount", s.stepCount.toLong())
             put("points", s.points.size)
             put("segmentIndex", s.segmentIndex)
         }
