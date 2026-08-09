@@ -108,8 +108,12 @@ class Backend private constructor(private val dataDir: File) {
         return locationEngine.currentLocation()
     }
 
-    /** App 状态查询入口。 */
-    fun locationState(): LocationState = locationEngine.currentState()
+    /** App 状态查询入口（路线运行时优先返回路线位置）。 */
+    fun locationState(): LocationState {
+        val routeState = routeEngine.currentState()
+        if (routeState.enabled) return routeState
+        return locationEngine.currentState()
+    }
 
     /** App 设置单点位置（经 ApiServer 调用）。 */
     fun setLocationPoint(latitude: Double, longitude: Double, speed: Float, bearing: Float) {
