@@ -32,6 +32,40 @@
     <string name="home_saved_title">已保存采集</string>
     <string name="home_saved_empty">暂无已保存采集</string>
 
+    <!-- Recording -->
+    <string name="home_recording_title">持续记录（录像）</string>
+    <string name="home_recording_desc">按采样间隔记录位置 / 基站 / WiFi / 蓝牙，形成时间轴录像</string>
+    <string name="home_recording_name_hint">录像名称，如：通勤路线 1</string>
+    <string name="home_recording_interval_hint">间隔 秒</string>
+    <string name="home_recording_start">开始录制</string>
+    <string name="home_recording_stop">停止录制</string>
+    <string name="home_recording_running">录制中：%1$s · 已 %2$d 帧</string>
+    <string name="home_recording_idle">未在录制</string>
+    <string name="home_recording_name_required">请输入录像名称</string>
+    <string name="home_recording_started">录像已开始</string>
+    <string name="home_recording_stopped">录像已保存</string>
+    <string name="home_recording_delete">删除</string>
+    <string name="home_recording_deleted">录像已删除</string>
+    <string name="home_recordings_empty">暂无录像，先开始一段持续记录</string>
+    <string name="home_recording_meta">%1$s · %2$d 帧</string>
+
+    <!-- Playback -->
+    <string name="home_playback_title">录像回放</string>
+    <string name="home_playback_desc">勾选多个录像顺序播放；勾选循环则末尾回到第一段</string>
+    <string name="home_playback_loop">循环</string>
+    <string name="home_playback_play">播放</string>
+    <string name="home_playback_pause">暂停</string>
+    <string name="home_playback_resume">继续</string>
+    <string name="home_playback_stop">停止</string>
+    <string name="home_playback_none_selected">请先勾选至少一个录像</string>
+    <string name="home_playback_playing">回放中：第 %1$d/%2$d 段 · 帧 %3$d/%4$d%5$s</string>
+    <string name="home_playback_paused">回放已暂停：第 %1$d/%2$d 段 · 帧 %3$d/%4$d</string>
+    <string name="home_playback_idle">未在回放</string>
+    <string name="home_playback_started">回放开始</string>
+    <string name="home_playback_stopped">回放已停止</string>
+    <string name="home_playback_paused_toast">回放已暂停</string>
+    <string name="home_playback_resumed_toast">回放已继续</string>
+
     <!-- Location -->
     <string name="location_title">位置模拟</string>
     <string name="location_subtitle">单点虚拟定位 · 经 Backend 统一管理</string>

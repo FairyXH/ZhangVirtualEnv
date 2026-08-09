@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
@@ -14,12 +15,19 @@ import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
+import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 /**
- * 主页：模块激活状态 + 一键环境采集。
+ * 主页：模块状态 + 一键采集（快照）+ 持续记录（录像）+ 录像回放。
+ *
+ * - 快照模式：一键采集当前环境并保存为 env_snapshot（type=collect）。
+ * - 持续记录模式：按采样间隔采集位置/基站/WiFi/蓝牙帧，逐帧写入 Backend 录像。
+ * - 回放：勾选多个录像顺序播放，支持循环 / 暂停 / 继续 / 停止。
  */
 class HomeFragment : Fragment() {
 
@@ -57,9 +65,45 @@ class HomeFragment : Fragment() {
     private lateinit var savedCollectEmpty: TextView
     private lateinit var savedCollectList: android.widget.LinearLayout
 
+    // 持续记录（录像）
+    private lateinit var recordingNameInput: android.widget.EditText
+    private lateinit var recordingIntervalInput: android.widget.EditText
+    private lateinit var recordingStartButton: Button
+    private lateinit var recordingStopButton: Button
+    private lateinit var recordingStatus: TextView
+
+    // 录像回放
+    private lateinit var playbackLoopCheck: CheckBox
+    private lateinit var playbackPlayButton: Button
+    private lateinit var playbackPauseButton: Button
+    private lateinit var playbackStopButton: Button
+    private lateinit var playbackStatus: TextView
+    private lateinit var recordingsEmpty: TextView
+    private lateinit var recordingList: android.widget.LinearLayout
+
     private val executor = Executors.newSingleThreadExecutor()
     private var collector: EnvironmentCollector? = null
     private var lastCollectResult: JSONObject? = null
+
+    private var recordingId = -1L
+    private var recordingFrames = 0
+    private var recordingName = ""
+    private var recordingScheduler: ScheduledExecutorService? = null
+    private var pendingRecordingStart = false
+    private val selectedRecordingIds = LinkedHashSet<Long>()
+    private val playbackPollHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val playbackPoll = object : Runnable {
+        override fun run() {
+            if (!isAdded) return
+            executor.execute {
+                val result = ApiClient.getRecordingStatus()
+                requireActivity().runOnUiThread {
+                    renderPlaybackStatus(result)
+                    if (isAdded) playbackPollHandler.postDelayed(this, 1000L)
+                }
+            }
+        }
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_home, container, false)
@@ -75,10 +119,47 @@ class HomeFragment : Fragment() {
         savedCollectList = root.findViewById(R.id.savedCollectList)
         collector = EnvironmentCollector(requireContext())
 
+        recordingNameInput = root.findViewById(R.id.recordingNameInput)
+        recordingIntervalInput = root.findViewById(R.id.recordingIntervalInput)
+        recordingStartButton = root.findViewById(R.id.recordingStartButton)
+        recordingStopButton = root.findViewById(R.id.recordingStopButton)
+        recordingStatus = root.findViewById(R.id.recordingStatus)
+
+        playbackLoopCheck = root.findViewById(R.id.playbackLoopCheck)
+        playbackPlayButton = root.findViewById(R.id.playbackPlayButton)
+        playbackPauseButton = root.findViewById(R.id.playbackPauseButton)
+        playbackStopButton = root.findViewById(R.id.playbackStopButton)
+        playbackStatus = root.findViewById(R.id.playbackStatus)
+        recordingsEmpty = root.findViewById(R.id.recordingsEmpty)
+        recordingList = root.findViewById(R.id.recordingList)
+
         collectButton.setOnClickListener { startCollect() }
         saveCollectButton.setOnClickListener { saveCollect() }
+        recordingStartButton.setOnClickListener { startRecording() }
+        recordingStopButton.setOnClickListener { stopRecording() }
+        playbackPlayButton.setOnClickListener { playSelectedRecordings() }
+        playbackPauseButton.setOnClickListener {
+            executor.execute {
+                val result = ApiClient.pauseRecordingPlayback()
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        playbackStopButton.setOnClickListener {
+            executor.execute {
+                val result = ApiClient.stopRecordingPlayback()
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        recordingStatus.text = getString(R.string.home_recording_idle)
+        playbackStatus.text = getString(R.string.home_playback_idle)
         refreshBackendStatus()
         refreshSavedCollects()
+        refreshRecordings()
         return root
     }
 
@@ -86,6 +167,9 @@ class HomeFragment : Fragment() {
         super.onResume()
         refreshBackendStatus()
         refreshSavedCollects()
+        refreshRecordings()
+        playbackPollHandler.removeCallbacks(playbackPoll)
+        playbackPollHandler.post(playbackPoll)
     }
 
     private fun refreshBackendStatus() {
@@ -114,22 +198,42 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun startCollect() {
+    private fun hasPermissions(): Boolean {
+        return REQUIRED_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(requireContext(), it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestMissingPermissions() {
         val missing = REQUIRED_PERMISSIONS.filter {
             ContextCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
             requestPermissions(missing.toTypedArray(), REQ_PERMISSIONS)
-            return
         }
-        doCollect()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERMISSIONS) {
-            doCollect()
+            if (pendingRecordingStart) {
+                pendingRecordingStart = false
+                doStartRecording()
+            } else {
+                doCollect()
+            }
         }
+    }
+
+    // ---------- 快照采集 ----------
+
+    private fun startCollect() {
+        if (!hasPermissions()) {
+            pendingRecordingStart = false
+            requestMissingPermissions()
+            return
+        }
+        doCollect()
     }
 
     private fun doCollect() {
@@ -167,7 +271,7 @@ class HomeFragment : Fragment() {
             val apiResult = ApiClient.createEnvSnapshot(name, remark, "collect", result)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), apiResult.message, Toast.LENGTH_SHORT).show()
-                if (apiResult.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                if (apiResult.code == ApiResult.CODE_OK) {
                     collectNameInput.text.clear()
                     collectRemarkInput.text.clear()
                     refreshSavedCollects()
@@ -185,7 +289,7 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun renderSavedCollects(result: io.github.fairyxh.VirtualEnv.core.model.ApiResult) {
+    private fun renderSavedCollects(result: ApiResult) {
         savedCollectList.removeAllViews()
         val snapshots = result.data?.optJSONArray("snapshots") ?: return
         val collects = mutableListOf<JSONObject>()
@@ -224,7 +328,7 @@ class HomeFragment : Fragment() {
         executor.execute {
             val result = ApiClient.useEnvSnapshot(id)
             requireActivity().runOnUiThread {
-                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                if (result.code == ApiResult.CODE_OK) {
                     Toast.makeText(
                         requireContext(),
                         getString(R.string.home_collect_applied, name),
@@ -242,17 +346,227 @@ class HomeFragment : Fragment() {
             val result = ApiClient.deleteEnvSnapshot(id)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                if (result.code == ApiResult.CODE_OK) {
                     refreshSavedCollects()
                 }
             }
         }
     }
 
+    // ---------- 持续记录（录像） ----------
+
+    private fun startRecording() {
+        if (!hasPermissions()) {
+            pendingRecordingStart = true
+            requestMissingPermissions()
+            return
+        }
+        doStartRecording()
+    }
+
+    private fun doStartRecording() {
+        if (recordingId > 0) {
+            Toast.makeText(requireContext(), R.string.home_recording_running, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val name = recordingNameInput.text.toString().trim()
+        if (name.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_recording_name_required, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val interval = (recordingIntervalInput.text.toString().toIntOrNull() ?: 5).coerceIn(2, 300)
+        recordingIntervalInput.setText(interval.toString())
+        executor.execute {
+            val result = ApiClient.startRecording(name, "")
+            requireActivity().runOnUiThread {
+                if (result.code == ApiResult.CODE_OK) {
+                    recordingId = result.data?.optLong("id", -1L) ?: -1L
+                    recordingFrames = 0
+                    recordingName = name
+                    recordingNameInput.text.clear()
+                    Toast.makeText(requireContext(), R.string.home_recording_started, Toast.LENGTH_SHORT).show()
+                    startSamplingLoop(interval)
+                    recordingStatus.text = getString(R.string.home_recording_running, name, recordingFrames)
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun startSamplingLoop(intervalSec: Int) {
+        recordingScheduler?.shutdownNow()
+        val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "ZVE-Recorder").apply { isDaemon = true }
+        }
+        recordingScheduler = scheduler
+        scheduler.scheduleWithFixedDelay(
+            {
+                try {
+                    if (recordingId <= 0) return@scheduleWithFixedDelay
+                    collector?.collectAll { frame ->
+                        try {
+                            val result = ApiClient.appendRecordingFrame(recordingId, frame)
+                            if (result.code == ApiResult.CODE_OK) {
+                                recordingFrames++
+                                requireActivity().runOnUiThread {
+                                    recordingStatus.text = getString(
+                                        R.string.home_recording_running,
+                                        recordingName,
+                                        recordingFrames
+                                    )
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "append frame failed", t)
+                        }
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "recording sample failed", t)
+                }
+            },
+            0,
+            intervalSec.toLong(),
+            TimeUnit.SECONDS
+        )
+    }
+
+    private fun stopRecording() {
+        recordingScheduler?.shutdownNow()
+        recordingScheduler = null
+        val id = recordingId
+        if (id <= 0) return
+        recordingId = -1L
+        executor.execute {
+            val result = ApiClient.stopRecording(id)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()
+                recordingStatus.text = getString(R.string.home_recording_idle)
+                if (result.code == ApiResult.CODE_OK) {
+                    refreshRecordings()
+                }
+            }
+        }
+    }
+
+    // ---------- 录像回放 ----------
+
+    private fun refreshRecordings() {
+        executor.execute {
+            val result = ApiClient.listRecordings()
+            requireActivity().runOnUiThread {
+                renderRecordings(result)
+            }
+        }
+    }
+
+    private fun renderRecordings(result: ApiResult) {
+        recordingList.removeAllViews()
+        val recordings = result.data?.optJSONArray("recordings") ?: return
+        val count = recordings.length()
+        recordingsEmpty.visibility = if (count == 0) View.VISIBLE else View.GONE
+        if (count == 0) return
+
+        for (i in 0 until count) {
+            val item = recordings.optJSONObject(i) ?: continue
+            val id = item.optLong("id", -1L)
+            val row = layoutInflater.inflate(R.layout.item_saved_recording, recordingList, false)
+            row.findViewById<TextView>(R.id.recordingName).text = item.optString("name", "")
+            val durationSec = item.optLong("durationMs", 0L) / 1000L
+            row.findViewById<TextView>(R.id.recordingMeta).text = getString(
+                R.string.home_recording_meta,
+                formatDuration(durationSec),
+                item.optInt("frameCount", 0)
+            )
+            val check = row.findViewById<CheckBox>(R.id.recordingCheck)
+            check.isChecked = selectedRecordingIds.contains(id)
+            check.setOnCheckedChangeListener { _, checked ->
+                if (checked) {
+                    selectedRecordingIds.add(id)
+                } else {
+                    selectedRecordingIds.remove(id)
+                }
+            }
+            row.findViewById<Button>(R.id.recordingPlayButton).setOnClickListener {
+                playRecordings(listOf(id), playbackLoopCheck.isChecked)
+            }
+            row.findViewById<Button>(R.id.recordingDeleteButton).setOnClickListener {
+                deleteRecording(id)
+            }
+            recordingList.addView(row)
+        }
+    }
+
+    private fun playSelectedRecordings() {
+        val ids = selectedRecordingIds.toList()
+        if (ids.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_playback_none_selected, Toast.LENGTH_SHORT).show()
+            return
+        }
+        playRecordings(ids, playbackLoopCheck.isChecked)
+    }
+
+    private fun playRecordings(ids: List<Long>, loop: Boolean) {
+        executor.execute {
+            val result = ApiClient.playRecordings(ids, loop)
+            requireActivity().runOnUiThread {
+                if (result.code == ApiResult.CODE_OK) {
+                    Toast.makeText(requireContext(), R.string.home_playback_started, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun deleteRecording(id: Long) {
+        executor.execute {
+            val result = ApiClient.deleteRecording(id)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                if (result.code == ApiResult.CODE_OK) {
+                    selectedRecordingIds.remove(id)
+                    refreshRecordings()
+                }
+            }
+        }
+    }
+
+    private fun renderPlaybackStatus(result: ApiResult) {
+        val data = result.data ?: return
+        val playing = data.optBoolean("playing", false)
+        val paused = data.optBoolean("paused", false)
+        if (!playing) {
+            playbackStatus.text = getString(R.string.home_playback_idle)
+            return
+        }
+        val playIndex = data.optInt("playIndex", 0) + 1
+        val playlistSize = data.optInt("playlistSize", 1).coerceAtLeast(1)
+        val frameProgress = data.optInt("frameProgress", 0)
+        val frameCount = data.optInt("frameCount", 0)
+        val loopText = if (data.optBoolean("loop", false)) " · 循环" else ""
+        playbackStatus.text = if (paused) {
+            getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount)
+        } else {
+            getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, loopText)
+        }
+    }
+
+    // ---------- 工具 ----------
+
     private fun formatTime(millis: Long): String {
         if (millis <= 0) return ""
         val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
         return fmt.format(java.util.Date(millis))
+    }
+
+    private fun formatDuration(seconds: Long): String {
+        if (seconds <= 0) return "0s"
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
+        else String.format("%d:%02d", m, s)
     }
 
     private fun summarize(result: JSONObject): String {
@@ -289,6 +603,15 @@ class HomeFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        // 离开主页时结束录制采样（避免无主录制）
+        recordingScheduler?.shutdownNow()
+        recordingScheduler = null
+        if (recordingId > 0) {
+            val id = recordingId
+            recordingId = -1L
+            executor.execute { ApiClient.stopRecording(id) }
+        }
+        playbackPollHandler.removeCallbacks(playbackPoll)
         executor.shutdown()
         super.onDestroyView()
     }
