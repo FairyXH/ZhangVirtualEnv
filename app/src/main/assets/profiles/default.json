@@ -1,0 +1,15 @@
+{
+  "name": "default",
+  "android": 0,
+  "minSdk": 0,
+  "maxSdk": 99,
+  "device": "*",
+  "hooks": {
+    "location": {
+      "managerClass": "com.android.server.location.LocationManagerService",
+      "getLastLocation": "getLastLocation",
+      "gnssClass": "com.android.server.location.gnss.GnssLocationProvider",
+      "reportLocation": "onReportLocation"
+    }
+  }
+}
