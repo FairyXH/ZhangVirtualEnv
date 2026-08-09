@@ -48,6 +48,7 @@ class LocationHookAdapter(
         hookGetCurrentLocation(classLoader, managerClass)
         hookProviderManagerReportLocation(classLoader, providerManagerClass)
         hookGnssReportLocation(classLoader, gnssClass)
+        hookDeliverOnLocationChanged(classLoader, providerManagerClass)
     }
 
     // ---------- 单次查询：getLastLocation ----------
@@ -223,6 +224,63 @@ class LocationHookAdapter(
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $className.onReportLocation")
+        }
+    }
+
+    // ---------- 连续定位 App 分发点：LocationProviderManager$XxxTransport.deliverOnLocationChanged ----------
+
+    /**
+     * Hook Oplus/AOSP 15 的 listener 分发点（逆向 services.jar 确认）：
+     *
+     * LocationProviderManager$LocationListenerTransport.deliverOnLocationChanged(
+     *     LocationResult locationResult, IRemoteCallback onCompleteCallback)
+     *     → mListener.onLocationChanged(locationResult.asList(), onCompleteCallback)
+     *
+     * 以及 LocationPendingIntentTransport 的同名方法（后台 PendingIntent 定位）。
+     * 此点是 provider 上报后、真正回调给 App 的最后一环，替换 LocationResult
+     * 可覆盖 requestLocationUpdates 连续定位被真实位置覆盖的场景。
+     */
+    private fun hookDeliverOnLocationChanged(classLoader: ClassLoader, providerManagerClass: String) {
+        val locationResultClass = try {
+            Class.forName(LOCATION_RESULT_CLASS, false, classLoader)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "LocationResult class not found", t)
+            null
+        }
+        if (locationResultClass == null) return
+
+        listOf(
+            "$providerManagerClass\$LocationListenerTransport",
+            "$providerManagerClass\$LocationPendingIntentTransport"
+        ).forEach { transportName ->
+            val clazz = HookSupport.findClass(classLoader, transportName) ?: return@forEach
+            val method = HookSupport.findMethods(clazz, "deliverOnLocationChanged")
+                .firstOrNull { m ->
+                    m.parameterCount == 2 && m.parameterTypes[0] == locationResultClass
+                }
+            if (method == null) {
+                ZLog.w(TAG_SCOPE, "deliverOnLocationChanged not found in $transportName")
+                return@forEach
+            }
+            val ok = registrar.register(method) { chain ->
+                val virtual: Location? = backend.currentLocation()
+                if (virtual != null) {
+                    try {
+                        val virtualResult = createLocationResult(locationResultClass, virtual)
+                        chain.proceed(arrayOf(virtualResult, chain.getArg(1)))
+                        ZLog.d(TAG_SCOPE, "$transportName deliver -> virtual ${virtual.latitude},${virtual.longitude}")
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "$transportName deliver virtual failed, fallback", t)
+                        chain.proceed()
+                    }
+                } else {
+                    chain.proceed()
+                }
+                null
+            }
+            if (ok) {
+                ZLog.i(TAG_SCOPE, "hooked $transportName.deliverOnLocationChanged")
+            }
         }
     }
 }
