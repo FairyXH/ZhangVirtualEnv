@@ -8,8 +8,11 @@
     "location": {
       "managerClass": "com.android.server.location.LocationManagerService",
       "getLastLocation": "getLastLocation",
+      "getCurrentLocation": "getCurrentLocation",
       "gnssClass": "com.android.server.location.gnss.GnssLocationProvider",
-      "reportLocation": "onReportLocation"
+      "reportLocation": "onReportLocation",
+      "providerManagerClass": "com.android.server.location.provider.LocationProviderManager",
+      "managerReportLocation": "onReportLocation"
     }
   }
 }

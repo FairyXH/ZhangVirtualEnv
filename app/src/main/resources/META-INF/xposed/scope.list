@@ -1,1 +1,6 @@
 system
+com.android.phone
+com.android.bluetooth
+com.android.location.fused
+com.oplus.location
+com.google.android.gms

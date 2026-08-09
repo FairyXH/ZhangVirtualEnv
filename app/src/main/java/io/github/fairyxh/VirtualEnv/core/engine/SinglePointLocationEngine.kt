@@ -53,6 +53,12 @@ class SinglePointLocationEngine : LocationEngine {
     override fun currentState(): LocationState = state.get()
 
     companion object {
+        /**
+         * 由 [LocationState] 构建 [Location]。
+         *
+         * 每次调用都刷新 time/elapsedRealtimeNanos 为当前时间，
+         * 避免客户端因位置时间戳过旧而丢弃虚拟位置。
+         */
         fun buildLocation(s: LocationState): Location {
             val location = Location(s.provider.ifEmpty { "gps" })
             location.latitude = s.latitude
@@ -61,7 +67,8 @@ class SinglePointLocationEngine : LocationEngine {
             location.speed = s.speed
             location.bearing = s.bearing
             location.altitude = s.altitude
-            location.time = s.updateTime
+            val now = System.currentTimeMillis()
+            location.time = now
             location.elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
             return location
         }
