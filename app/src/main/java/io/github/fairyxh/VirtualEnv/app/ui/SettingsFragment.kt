@@ -25,6 +25,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.telephony.CellInfo
+import android.telephony.CellInfoCdma
 import android.telephony.CellInfoGsm
 import android.telephony.CellInfoLte
 import android.telephony.CellInfoNr
@@ -78,11 +79,17 @@ class SettingsFragment : Fragment() {
     private lateinit var envTestStartButton: Button
     private lateinit var envTestStopButton: Button
     private lateinit var envTestLocationValue: TextView
+    private lateinit var envTestLocationStatus: TextView
     private lateinit var envTestCellValue: TextView
+    private lateinit var envTestCellStatus: TextView
     private lateinit var envTestBleValue: TextView
+    private lateinit var envTestBleStatus: TextView
     private lateinit var envTestWifiValue: TextView
+    private lateinit var envTestWifiStatus: TextView
     private lateinit var envTestSensorValue: TextView
+    private lateinit var envTestSensorStatus: TextView
     private lateinit var envTestGnssValue: TextView
+    private lateinit var envTestGnssStatus: TextView
 
     // ---- 环境实时测试状态 ----
     private val envTestRunning = AtomicBoolean(false)
@@ -94,6 +101,11 @@ class SettingsFragment : Fragment() {
     private var sensorManager: SensorManager? = null
     private var bleScanner: BluetoothLeScanner? = null
     private var stepSensor: Sensor? = null
+    private var accelSensor: Sensor? = null
+    private var gyroSensor: Sensor? = null
+    private var magSensor: Sensor? = null
+    private var lightSensor: Sensor? = null
+    private var proxSensor: Sensor? = null
 
     private val bleFound = LinkedHashMap<String, String>()
     private val locationListener = object : LocationListener {
@@ -117,10 +129,36 @@ class SettingsFragment : Fragment() {
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
+    // 原始传感器值缓存（加速度/陀螺仪/磁力/光线/距离）
+    private val sensorRaw = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    private val rawSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val vals = event.values.joinToString(", ") { String.format("%.3f", it) }
+            sensorRaw[event.sensor.type] = "${event.sensor.name} [$vals]"
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
     @Volatile
     private var lastStepCount: Long = -1L
     @Volatile
     private var lastStepTickMs: Long = 0L
+
+    // ---- 虚拟配置期望（判定依据） ----
+    @Volatile
+    private var expectEnv: org.json.JSONObject? = null
+    @Volatile
+    private var expectLocation: org.json.JSONObject? = null
+    @Volatile
+    private var expectRoute: org.json.JSONObject? = null
+
+    // ---- 最近一次采集快照（供判定） ----
+    @Volatile
+    private var lastLocation: Location? = null
+    @Volatile
+    private var lastCellText: String = ""
+    @Volatile
+    private var lastWifiText: String = ""
 
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -163,11 +201,17 @@ class SettingsFragment : Fragment() {
         envTestStartButton = root.findViewById(R.id.envTestStartButton)
         envTestStopButton = root.findViewById(R.id.envTestStopButton)
         envTestLocationValue = root.findViewById(R.id.envTestLocationValue)
+        envTestLocationStatus = root.findViewById(R.id.envTestLocationStatus)
         envTestCellValue = root.findViewById(R.id.envTestCellValue)
+        envTestCellStatus = root.findViewById(R.id.envTestCellStatus)
         envTestBleValue = root.findViewById(R.id.envTestBleValue)
+        envTestBleStatus = root.findViewById(R.id.envTestBleStatus)
         envTestWifiValue = root.findViewById(R.id.envTestWifiValue)
+        envTestWifiStatus = root.findViewById(R.id.envTestWifiStatus)
         envTestSensorValue = root.findViewById(R.id.envTestSensorValue)
+        envTestSensorStatus = root.findViewById(R.id.envTestSensorStatus)
         envTestGnssValue = root.findViewById(R.id.envTestGnssValue)
+        envTestGnssStatus = root.findViewById(R.id.envTestGnssStatus)
 
         val context = requireContext()
         packageValue.text = context.packageName
@@ -244,6 +288,11 @@ class SettingsFragment : Fragment() {
         wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        magSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
+        proxSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
         val adapter = BluetoothAdapter.getDefaultAdapter()
         bleScanner = adapter?.bluetoothLeScanner
 
@@ -267,6 +316,15 @@ class SettingsFragment : Fragment() {
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test sensor register failed", t)
+        }
+        // 原始传感器监听（加速度/陀螺仪/磁力/光线/距离）
+        sensorRaw.clear()
+        val rawSensors = listOfNotNull(accelSensor, gyroSensor, magSensor, lightSensor, proxSensor)
+        for (s in rawSensors) {
+            try {
+                sensorManager?.registerListener(rawSensorListener, s, SensorManager.SENSOR_DELAY_NORMAL)
+            } catch (_: Throwable) {
+            }
         }
 
         // 位置：请求一次定位更新（普通 App 视角：getLastKnownLocation + 回调）
@@ -321,83 +379,272 @@ class SettingsFragment : Fragment() {
     private fun refreshEnvTest() {
         if (!envTestRunning.get() || !isAdded) return
         val ctx = requireContext()
+        val report = org.json.JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("running", true)
+        }
+        // 拉取虚拟配置期望（失败时保留上次，判为未启用模拟）
         try {
-            // 位置：优先 last known，兼容虚拟定位（栈内注入）
-            val locationText = buildLocationText(ctx)
+            val env = io.github.fairyxh.VirtualEnv.app.ApiClient.getEnvStatus()
+            if (env.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) expectEnv = env.data
+        } catch (_: Throwable) {
+        }
+        try {
+            val loc = io.github.fairyxh.VirtualEnv.app.ApiClient.getLocationStatus()
+            if (loc.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) expectLocation = loc.data
+        } catch (_: Throwable) {
+        }
+        try {
+            val route = io.github.fairyxh.VirtualEnv.app.ApiClient.getRouteStatus()
+            if (route.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) expectRoute = route.data
+        } catch (_: Throwable) {
+        }
+
+        try {
+            val loc = readLastLocation()
+            lastLocation = loc
+            val locationText = buildLocationText(ctx, loc)
+            val v = judgeLocation(loc)
+            report.put("location", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", locationText)
+            })
             requireActivity().runOnUiThread {
                 envTestLocationValue.text = locationText
+                renderVerdict(envTestLocationStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test location read failed", t)
         }
         try {
             val cellText = buildCellText()
+            lastCellText = cellText
+            val v = judgeCell()
+            report.put("cell", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", cellText)
+            })
             requireActivity().runOnUiThread {
                 envTestCellValue.text = cellText
+                renderVerdict(envTestCellStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test cell read failed", t)
         }
         try {
             val bleText = buildBleText()
+            val v = judgeBle()
+            report.put("ble", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", bleText)
+            })
             requireActivity().runOnUiThread {
                 envTestBleValue.text = bleText
+                renderVerdict(envTestBleStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test ble read failed", t)
         }
         try {
             val wifiText = buildWifiText()
+            lastWifiText = wifiText
+            val v = judgeWifi()
+            report.put("wifi", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", wifiText)
+            })
             requireActivity().runOnUiThread {
                 envTestWifiValue.text = wifiText
+                renderVerdict(envTestWifiStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test wifi read failed", t)
         }
         try {
             val sensorText = buildSensorText()
+            val v = judgeSensor()
+            report.put("sensor", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", sensorText)
+            })
             requireActivity().runOnUiThread {
                 envTestSensorValue.text = sensorText
+                renderVerdict(envTestSensorStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test sensor read failed", t)
         }
         try {
             val gnssText = buildGnssText()
+            val v = judgeGnss()
+            report.put("gnss", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", gnssText)
+            })
             requireActivity().runOnUiThread {
                 envTestGnssValue.text = gnssText
+                renderVerdict(envTestGnssStatus, v)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test gnss read failed", t)
         }
+        // 上报报告（每轮一次；失败静默，Backend 保留上一份）
+        try {
+            io.github.fairyxh.VirtualEnv.app.ApiClient.postTestReport(report)
+        } catch (_: Throwable) {
+        }
     }
 
-    private fun buildLocationText(context: Context): String {
-        val lm = locationManager ?: return "LocationManager 不可用"
-        val sb = StringBuilder()
+    // ---------- 判定 ----------
+
+    private enum class Verdict { PASS, FAIL, NOT_ENABLED }
+
+    private fun renderVerdict(view: TextView, v: Verdict?) {
+        if (v == null) return
+        val color = when (v) {
+            Verdict.PASS -> ContextCompat.getColor(requireContext(), R.color.success)
+            Verdict.FAIL -> ContextCompat.getColor(requireContext(), R.color.danger)
+            Verdict.NOT_ENABLED -> ContextCompat.getColor(requireContext(), R.color.text_tertiary)
+        }
+        val text = when (v) {
+            Verdict.PASS -> getString(R.string.settings_env_test_pass)
+            Verdict.FAIL -> getString(R.string.settings_env_test_fail)
+            Verdict.NOT_ENABLED -> getString(R.string.settings_env_test_not_enabled)
+        }
+        view.text = text
+        view.setTextColor(color)
+    }
+
+    private fun envEnabled(type: String): Boolean {
+        val env = expectEnv ?: return false
+        return env.optJSONObject(type)?.optBoolean("enabled", false) == true
+    }
+
+    private fun envData(type: String): org.json.JSONObject? {
+        val env = expectEnv ?: return null
+        return if (env.optJSONObject(type)?.optBoolean("enabled", false) == true) {
+            env.optJSONObject(type)?.optJSONObject("data")
+        } else null
+    }
+
+    /** 位置判定：定位/路线启用时，期望坐标与 App 读到位置误差 <= 容差。 */
+    private fun judgeLocation(loc: Location?): Verdict {
+        val expected = expectLocation ?: return Verdict.NOT_ENABLED
+        val enabled = expected.optBoolean("enabled", false)
+        val mode = expected.optString("mode", "none")
+        if (!enabled || mode == "none") return Verdict.NOT_ENABLED
+        val expLat = expected.optDouble("latitude", Double.NaN)
+        val expLon = expected.optDouble("longitude", Double.NaN)
+        if (expLat.isNaN() || expLon.isNaN()) return Verdict.FAIL
+        if (loc == null) return Verdict.FAIL
+        val results = FloatArray(1)
+        android.location.Location.distanceBetween(
+            expLat, expLon, loc.latitude, loc.longitude, results
+        )
+        // 允许小误差：定位 300m、路线 500m
+        val tolerance = if (mode == "route") 500f else 300f
+        return if (results[0] <= tolerance) Verdict.PASS else Verdict.FAIL
+    }
+
+    /** 基站判定：配置 entries（mcc/mnc/tac/ci）在 App 读到文本中出现。 */
+    private fun judgeCell(): Verdict {
+        val data = envData("cell") ?: return Verdict.NOT_ENABLED
+        val entries = data.optJSONArray("entries") ?: return Verdict.FAIL
+        if (entries.length() == 0) return Verdict.FAIL
+        for (i in 0 until entries.length()) {
+            val e = entries.optJSONObject(i) ?: continue
+            val mcc = e.optInt("mcc", -1)
+            val mnc = e.optInt("mnc", -1)
+            val tac = e.optLong("tac", -1L)
+            val ci = e.optLong("ci", -1L)
+            if (mcc >= 0 && mnc >= 0 &&
+                lastCellText.contains("mcc=$mcc") && lastCellText.contains("mnc=$mnc")
+            ) {
+                if (tac < 0 || ci < 0) return Verdict.PASS
+                if (lastCellText.contains("tac=$tac") && lastCellText.contains("ci=$ci")) {
+                    return Verdict.PASS
+                }
+            }
+        }
+        return Verdict.FAIL
+    }
+
+    /** 蓝牙判定：配置 devices address 出现在扫描结果。 */
+    private fun judgeBle(): Verdict {
+        val data = envData("ble") ?: return Verdict.NOT_ENABLED
+        val devices = data.optJSONArray("devices") ?: return Verdict.FAIL
+        if (devices.length() == 0) return Verdict.FAIL
+        val found: Set<String> = synchronized(bleFound) { bleFound.keys.toSet() }
+        for (i in 0 until devices.length()) {
+            val address = devices.optJSONObject(i)?.optString("address", "")?.uppercase()
+            if (!address.isNullOrBlank() && found.contains(address)) return Verdict.PASS
+        }
+        return Verdict.FAIL
+    }
+
+    /** WiFi 判定：配置 networks ssid/bssid 出现在扫描结果。 */
+    private fun judgeWifi(): Verdict {
+        val data = envData("wifi") ?: return Verdict.NOT_ENABLED
+        val networks = data.optJSONArray("networks") ?: return Verdict.FAIL
+        if (networks.length() == 0) return Verdict.FAIL
+        for (i in 0 until networks.length()) {
+            val n = networks.optJSONObject(i) ?: continue
+            val ssid = n.optString("ssid", "")
+            val bssid = n.optString("bssid", "").uppercase()
+            if (ssid.isNotEmpty() && lastWifiText.contains(ssid)) return Verdict.PASS
+            if (bssid.isNotEmpty() && lastWifiText.contains(bssid)) return Verdict.PASS
+        }
+        return Verdict.FAIL
+    }
+
+    /** 传感器判定：配置含步频/事件时，App 计步器已收到事件。 */
+    private fun judgeSensor(): Verdict {
+        val data = envData("sensor") ?: return Verdict.NOT_ENABLED
+        val stepFreq = data.optInt("stepFrequency", 0)
+        val hasEvents = data.optJSONArray("events")?.length() ?: 0
+        if (stepFreq <= 0 && hasEvents <= 0) return Verdict.NOT_ENABLED
+        return if (lastStepCount >= 0) Verdict.PASS else Verdict.FAIL
+    }
+
+    /** GNSS 判定：配置含卫星/使用数时，App GNSS 回调已收到数据。 */
+    private fun judgeGnss(): Verdict {
+        val data = envData("gnss") ?: return Verdict.NOT_ENABLED
+        val expectSat = data.optInt("satelliteCount", 0)
+        val expectUsed = data.optInt("usedInFix", 0)
+        if (expectSat <= 0 && expectUsed <= 0) return Verdict.NOT_ENABLED
+        val status = lastGnssStatus ?: return Verdict.FAIL
+        val used = (0 until status.satelliteCount).count { status.usedInFix(it) }
+        // 允许小误差：卫星数 >= 期望 80%，使用数 >= 期望 80%
+        val satOk = expectSat <= 0 || status.satelliteCount >= (expectSat * 0.8).toInt()
+        val usedOk = expectUsed <= 0 || used >= (expectUsed * 0.8).toInt()
+        return if (satOk && usedOk) Verdict.PASS else Verdict.FAIL
+    }
+
+    private fun readLastLocation(): Location? {
+        val lm = locationManager ?: return null
+        var best: Location? = null
         for (provider in arrayOf(
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER,
             LocationManager.PASSIVE_PROVIDER
         )) {
             try {
-                val loc = lm.getLastKnownLocation(provider)
-                if (loc != null) {
-                    sb.append(provider).append(": ")
-                        .append(String.format("%.6f", loc.latitude)).append(",")
-                        .append(String.format("%.6f", loc.longitude))
-                        .append(" acc=").append(loc.accuracy)
-                        .append(" alt=").append(String.format("%.1f", loc.altitude))
-                        .append(" speed=").append(String.format("%.1f", loc.speed))
-                        .append(" time=").append(loc.time)
-                        .append("\n")
-                }
-            } catch (t: Throwable) {
-                sb.append(provider).append(": ").append(t.message).append("\n")
+                val loc = lm.getLastKnownLocation(provider) ?: continue
+                if (best == null || loc.time > best.time) best = loc
+            } catch (_: Throwable) {
             }
         }
-        if (sb.isEmpty()) sb.append("无位置（等待定位或虚拟位置未启用）")
-        return sb.toString().trim()
+        return best
+    }
+
+    private fun buildLocationText(context: Context, loc: Location?): String {
+        if (loc == null) return "无位置（等待定位或虚拟位置未启用）"
+        return "provider=${loc.provider}\n" +
+            String.format("lat=%.6f lon=%.6f", loc.latitude, loc.longitude) +
+            "\nacc=" + loc.accuracy +
+            " alt=" + String.format("%.1f", loc.altitude) +
+            " speed=" + String.format("%.1f", loc.speed) +
+            "\ntime=" + loc.time
     }
 
     private fun buildCellText(): String {
@@ -439,6 +686,12 @@ class SettingsFragment : Fragment() {
                         .append(" lac=").append(id.lac)
                         .append(" cid=").append(id.cid)
                         .append(" asu=").append(info.cellSignalStrength?.asuLevel).append("\n")
+                }
+                is CellInfoCdma -> {
+                    val id = info.cellIdentity
+                    sb.append("CDMA lat=").append(id.latitude)
+                        .append(" lon=").append(id.longitude)
+                        .append("\n")
                 }
                 is CellInfoWcdma -> {
                     val id = info.cellIdentity
@@ -505,36 +758,63 @@ class SettingsFragment : Fragment() {
             }
             sb.append("\n")
         }
-        // 读取当前常用传感器列表（普通 App 视角可见的）
-        val present = listOf(
+        // 原始传感器值（按固定顺序展示）
+        val order = listOf(
             Sensor.TYPE_ACCELEROMETER to "加速度",
             Sensor.TYPE_GYROSCOPE to "陀螺仪",
             Sensor.TYPE_MAGNETIC_FIELD to "磁力",
             Sensor.TYPE_LIGHT to "光线",
             Sensor.TYPE_PROXIMITY to "距离"
-        ).mapNotNull { (t, label) ->
-            sm.getDefaultSensor(t)?.let { "$label: 有" }
+        )
+        for ((type, label) in order) {
+            val raw = sensorRaw[type]
+            if (raw != null) {
+                sb.append(label).append(": ").append(raw).append("\n")
+            } else {
+                val present = sm.getDefaultSensor(type) != null
+                sb.append(label).append(": ").append(if (present) "等待事件" else "无").append("\n")
+            }
         }
-        if (present.isNotEmpty()) sb.append(present.joinToString(", ")).append("\n")
         if (sb.isEmpty()) sb.append("无可用传感器")
         return sb.toString().trim()
     }
 
     private fun buildGnssText(): String {
-        val lm = locationManager ?: return "LocationManager 不可用"
         val sb = StringBuilder()
         val status = lastGnssStatus
         if (status != null) {
             val used = (0 until status.satelliteCount).count { status.usedInFix(it) }
             sb.append("卫星: ").append(status.satelliteCount)
                 .append(" 使用: ").append(used).append("\n")
+            // 原始卫星明细（星座/编号/载噪比），最多 12 颗
+            val maxShow = minOf(status.satelliteCount, 12)
+            for (i in 0 until maxShow) {
+                val cn0 = status.getCn0DbHz(i)
+                val const = when {
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_GPS -> "GPS"
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_GLONASS -> "GLO"
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_BEIDOU -> "BDS"
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_GALILEO -> "GAL"
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_QZSS -> "QZS"
+                    status.getConstellationType(i) == android.location.GnssStatus.CONSTELLATION_IRNSS -> "IRN"
+                    else -> "?"
+                }
+                val usedMark = if (status.usedInFix(i)) "U" else "-"
+                sb.append("  ").append(const)
+                    .append(" sv").append(status.getSvid(i))
+                    .append(" cn0=").append(String.format("%.1f", cn0))
+                    .append(" ").append(usedMark).append("\n")
+            }
         } else {
             sb.append("GNSS 回调未收到数据\n")
         }
-        try {
-            val isGnssEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            sb.append("GPS 开关: ").append(if (isGnssEnabled) "开" else "关").append("\n")
-        } catch (_: Throwable) {
+        val lm = locationManager
+        if (lm != null) {
+            try {
+                val isGnssEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                sb.append("GPS 开关: ").append(if (isGnssEnabled) "开" else "关").append("\n")
+            } catch (_: Throwable) {
+            }
         }
         if (sb.isEmpty()) sb.append("无 GNSS 数据")
         return sb.toString().trim()
@@ -554,6 +834,12 @@ class SettingsFragment : Fragment() {
         }
         try {
             stepSensor?.let { sensorManager?.unregisterListener(stepListener, it) }
+        } catch (_: Throwable) {
+        }
+        try {
+            for (s in listOfNotNull(accelSensor, gyroSensor, magSensor, lightSensor, proxSensor)) {
+                sensorManager?.unregisterListener(rawSensorListener, s)
+            }
         } catch (_: Throwable) {
         }
         try {

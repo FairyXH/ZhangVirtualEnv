@@ -61,8 +61,11 @@ class SinglePointLocationEngine : LocationEngine {
          */
         fun buildLocation(s: LocationState): Location {
             val location = Location(s.provider.ifEmpty { "gps" })
-            location.latitude = s.latitude
-            location.longitude = s.longitude
+            // 随机抖动 ±0.000005°（约 ±0.5m），模拟真实 GPS 噪声；
+            // 每次调用独立抖动，客户端不易察觉“像素级静止”的虚拟定位。
+            val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
+            location.latitude = s.latitude + jitter
+            location.longitude = s.longitude + jitter
             location.accuracy = s.accuracy
             location.speed = s.speed
             location.bearing = s.bearing

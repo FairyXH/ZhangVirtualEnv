@@ -248,11 +248,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_location_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_location_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestLocationStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestLocationValue"
@@ -265,6 +281,12 @@
                     android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@color/separator" />
+
             <!-- 基站 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -272,11 +294,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_cell_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_cell_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestCellStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestCellValue"
@@ -289,6 +327,12 @@
                     android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@color/separator" />
+
             <!-- 蓝牙 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -296,11 +340,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_ble_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_ble_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestBleStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestBleValue"
@@ -313,6 +373,12 @@
                     android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@color/separator" />
+
             <!-- WiFi -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -320,11 +386,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_wifi_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_wifi_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestWifiStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestWifiValue"
@@ -337,6 +419,12 @@
                     android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@color/separator" />
+
             <!-- 传感器 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -344,11 +432,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_sensor_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_sensor_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestSensorStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestSensorValue"
@@ -361,6 +465,12 @@
                     android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@color/separator" />
+
             <!-- GNSS -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -368,11 +478,27 @@
                 android:layout_marginTop="@dimen/space_md"
                 android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_env_test_gnss_title"
-                    style="@style/Text.Caption" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_env_test_gnss_title"
+                        style="@style/Text.Caption" />
+
+                    <TextView
+                        android:id="@+id/envTestGnssStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_env_test_idle"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="@dimen/text_caption" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/envTestGnssValue"

@@ -177,8 +177,10 @@ class RouteEngine : LocationEngine {
     private fun buildLocation(s: RouteState): Location {
         val p = interpolate(s.points, s.segmentIndex, s.progress)
         val location = Location("gps")
-        location.latitude = p.first
-        location.longitude = p.second
+        // 随机抖动 ±0.000005°（约 ±0.5m），模拟真实 GPS 噪声
+        val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
+        location.latitude = p.first + jitter
+        location.longitude = p.second + jitter
         location.accuracy = 5f
         location.speed = s.speedMps.toFloat()
         location.bearing = bearingAt(s).toFloat()

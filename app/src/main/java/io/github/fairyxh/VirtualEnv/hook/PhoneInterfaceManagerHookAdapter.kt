@@ -52,6 +52,20 @@ class PhoneInterfaceManagerHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
+            // 优先按 cell 配置生成对应类型（LTE/GSM/NR/WCDMA）；无配置但虚拟定位启用时
+            // 回退 CDMA（带虚拟经纬度，供网络定位 SDK 换算坐标）。
+            val cellData = cache.currentCell()
+            if (cellData != null) {
+                try {
+                    val list = VirtualCellFactory.buildCellInfoList(cellData)
+                    if (list.isNotEmpty()) {
+                        ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> virtual ${list.size} cells from config")
+                        return@register list
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo config build failed, fallback cdma", t)
+                }
+            }
             if (!virtualLocationEnabled()) return@register original
             try {
                 // 多基站：按 cell 配置 entries 数量返回多个带虚拟经纬度的基站（默认 1 个）
