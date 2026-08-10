@@ -29,6 +29,7 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     private var wifi: JSONObject? = null
     private var cell: JSONObject? = null
     private var ble: JSONObject? = null
+    private var sensor: JSONObject? = null
     private var locationEnabled: Boolean = false
     private var locationLat: Double = 0.0
     private var locationLon: Double = 0.0
@@ -39,6 +40,7 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     private var stepEnabled: Boolean = false
     private var stepFrequency: Int = 120
     private var stepCounter: Long = 0L
+    private var lastSensorTickMs: Long = 0L
 
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-EnvCache").apply { isDaemon = true }
@@ -68,6 +70,9 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
                 ble = data.optJSONObject("ble")
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
+                sensor = data.optJSONObject("sensor")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh env cache failed: ${t.message}")
@@ -89,11 +94,29 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
         try {
             val route = rawGet("/api/route/status") ?: return
             synchronized(lock) {
-                val running = route.optBoolean("running", false)
-                val enabled = route.optBoolean("enabled", false)
-                stepFrequency = route.optInt("stepFrequency", 120)
-                stepCounter = route.optLong("stepCount", 0L)
-                stepEnabled = enabled && running && stepFrequency > 0
+                val routeRunning = route.optBoolean("running", false)
+                val routeEnabled = route.optBoolean("enabled", false)
+                val routeStepFrequency = route.optInt("stepFrequency", 120)
+                val routeStepCount = route.optLong("stepCount", 0L)
+                // 传感器引擎（环境模拟页）优先：配置了步频则按它注入，并本地累计步数
+                val sensorStep = sensor?.optInt("stepFrequency", 0) ?: 0
+                if (sensorStep > 0) {
+                    stepEnabled = true
+                    stepFrequency = sensorStep
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (lastSensorTickMs > 0L) {
+                        val deltaSec = (now - lastSensorTickMs) / 1000.0
+                        stepCounter += (sensorStep * deltaSec / 60.0).toLong()
+                    } else {
+                        stepCounter = routeStepCount
+                    }
+                    lastSensorTickMs = now
+                } else {
+                    stepEnabled = routeEnabled && routeRunning && routeStepFrequency > 0
+                    stepFrequency = routeStepFrequency
+                    stepCounter = routeStepCount
+                    lastSensorTickMs = 0L
+                }
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh step cache failed: ${t.message}")

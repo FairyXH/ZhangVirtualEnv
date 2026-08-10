@@ -57,8 +57,12 @@
     <string name="home_saved_kind_snapshot">[快照]</string>
     <string name="home_saved_kind_recording">[录像]</string>
     <string name="home_saved_select">选择</string>
+    <string name="home_saved_detail">详情</string>
     <string name="home_saved_meta_snapshot">快照 · %1$s</string>
     <string name="home_saved_meta_recording">录像 · 时长 %1$s · %2$d 帧</string>
+    <string name="home_saved_detail_title">采集详情</string>
+    <string name="home_saved_detail_loading">加载中…</string>
+    <string name="home_saved_detail_empty">暂无详情数据</string>
     <string name="home_playback_title">采集回放</string>
     <string name="home_playback_desc">选择下方已保存采集后自动区分快照/录像：快照一次性启用，录像支持开始/暂停/重新开始/倍速</string>
     <string name="home_playback_none">未选择已保存采集</string>
@@ -188,27 +192,34 @@
 
     <!-- Env -->
     <string name="env_title">环境模拟</string>
-    <string name="env_subtitle">基站 / WiFi / GNSS 环境模拟入口</string>
+    <string name="env_subtitle">基站 / WiFi / 蓝牙 / 传感器 / GNSS 环境模拟入口</string>
     <string name="env_pending">待开发</string>
     <string name="env_status_active">使用中</string>
     <string name="env_status_inactive">未使用</string>
     <string name="env_cell_title">基站模拟</string>
-    <string name="env_cell_desc">MCC / MNC / TAC / CID / PCI / RSRP</string>
+    <string name="env_cell_desc">MCC / MNC / TAC / CID / PCI / RSRP（多基站）</string>
     <string name="env_cell_coming">Phase 3 实现</string>
     <string name="env_wifi_title">WiFi 模拟</string>
-    <string name="env_wifi_desc">SSID / BSSID / RSSI / Frequency</string>
+    <string name="env_wifi_desc">SSID / BSSID / RSSI / Frequency（多 WiFi）</string>
     <string name="env_wifi_coming">Phase 3 实现</string>
+    <string name="env_ble_title">蓝牙模拟</string>
+    <string name="env_ble_desc">地址 / RSSI / 名称（多设备，含 BLE Beacon）</string>
+    <string name="env_sensor_title">传感器模拟</string>
+    <string name="env_sensor_desc">步频（步/分）计步器 / 步测事件</string>
     <string name="env_gnss_title">GNSS 模拟</string>
     <string name="env_gnss_desc">卫星状态 / 星历 / 信噪比</string>
     <string name="env_gnss_coming">Phase 4 实现</string>
     <string name="env_saved_title">已保存环境</string>
     <string name="env_saved_empty">暂无已保存环境</string>
+    <string name="env_saved_detail_empty">暂无详情数据</string>
     <string name="env_save">保存</string>
     <string name="env_name_hint">名称，如：办公室基站 1</string>
     <string name="env_use_coming">%1$s 模拟引擎开发中，暂不可用</string>
     <string name="env_use_applied">%1$s 环境已加载</string>
     <string name="env_type_cell">基站</string>
     <string name="env_type_wifi">WiFi</string>
+    <string name="env_type_ble">蓝牙</string>
+    <string name="env_type_sensor">传感器</string>
     <string name="env_type_gnss">GNSS</string>
     <string name="env_cell_type_hint">类型：LTE / NR / GSM / WCDMA</string>
     <string name="env_cell_mcc_hint">MCC，如：460</string>
@@ -221,6 +232,11 @@
     <string name="env_wifi_bssid_hint">BSSID，如：AA:BB:CC:DD:EE:FF</string>
     <string name="env_wifi_rssi_hint">RSSI，如：-60</string>
     <string name="env_wifi_frequency_hint">Frequency，如：2412</string>
+    <string name="env_ble_name_hint">设备名称（可选）</string>
+    <string name="env_ble_address_hint">地址，如：AA:BB:CC:DD:EE:FF</string>
+    <string name="env_ble_rssi_hint">RSSI，如：-70</string>
+    <string name="env_ble_address_required">请填写设备地址</string>
+    <string name="env_sensor_step_hint">步频（步/分），如：120</string>
     <string name="env_gnss_count_hint">卫星总数，如：12</string>
     <string name="env_gnss_used_hint">参与定位数，如：8</string>
     <string name="env_gnss_cn0_hint">平均信噪比 dBHz，如：38</string>
@@ -235,12 +251,16 @@
     <string name="env_detail_saved_title">已保存配置（点击使用 = 切换）</string>
     <string name="env_detail_active">使用中</string>
     <string name="env_detail_inactive">未使用</string>
+    <string name="env_detail_in_use_badge">使用中</string>
+    <string name="env_detail_view">详情</string>
+    <string name="env_detail_data_title">配置详情</string>
     <string name="env_use">使用</string>
     <string name="env_delete">删除</string>
     <string name="env_cell_mcc_required">请填写 MCC</string>
     <string name="env_wifi_ssid_required">请填写 SSID</string>
     <string name="env_cell_entry_format">%1$s  MCC=%2$d MNC=%3$d TAC=%4$d CI=%5$d</string>
     <string name="env_wifi_entry_format">%1$s (%2$s) RSSI=%3$d</string>
+    <string name="env_ble_entry_format">%1$s (%2$s) RSSI=%3$d</string>
 
     <!-- Float window -->
     <string name="float_window_title">虚拟环境悬浮窗</string>

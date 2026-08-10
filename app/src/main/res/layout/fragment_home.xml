@@ -289,54 +289,65 @@
                 android:text="@string/home_playback_enable"
                 style="@style/Button.Pill" />
 
-            <!-- 录像控制（仅录像选中时显示） -->
+            <!-- 录像控制（仅录像选中时显示）：2 行 × 2 列等大矩形网格 -->
             <LinearLayout
                 android:id="@+id/playbackControls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
+                android:orientation="vertical"
                 android:visibility="gone">
 
-                <Button
-                    android:id="@+id/playbackPauseButton"
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_playback_pause"
-                    style="@style/Button.Pill.Secondary" />
+                    android:orientation="horizontal">
 
-                <Button
-                    android:id="@+id/playbackResumeButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_xs"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_playback_resume"
-                    style="@style/Button.Pill.Secondary" />
+                    <Button
+                        android:id="@+id/playbackPauseButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_playback_pause"
+                        style="@style/Button.Pill.Secondary" />
 
-                <Button
-                    android:id="@+id/playbackRestartButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_xs"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_playback_restart"
-                    style="@style/Button.Pill.Secondary" />
+                    <Button
+                        android:id="@+id/playbackResumeButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="@dimen/space_xs"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_playback_resume"
+                        style="@style/Button.Pill.Secondary" />
+                </LinearLayout>
 
-                <Button
-                    android:id="@+id/playbackStopButton"
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_xs"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_playback_stop"
-                    style="@style/Button.Pill.Secondary" />
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/playbackRestartButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_playback_restart"
+                        style="@style/Button.Pill.Secondary" />
+
+                    <Button
+                        android:id="@+id/playbackStopButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="@dimen/space_xs"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_playback_stop"
+                        style="@style/Button.Pill.Secondary" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout

@@ -40,6 +40,22 @@
     </LinearLayout>
 
     <Button
+        android:id="@+id/detailButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_xs"
+        android:background="@drawable/bg_pill_secondary"
+        android:minWidth="0dp"
+        android:minHeight="0dp"
+        android:paddingStart="@dimen/space_sm"
+        android:paddingTop="@dimen/space_xs"
+        android:paddingEnd="@dimen/space_sm"
+        android:paddingBottom="@dimen/space_xs"
+        android:text="@string/home_saved_detail"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/text_caption" />
+
+    <Button
         android:id="@+id/useButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

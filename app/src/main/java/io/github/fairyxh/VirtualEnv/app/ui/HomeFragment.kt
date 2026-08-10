@@ -101,11 +101,15 @@ class HomeFragment : Fragment() {
 
     private var collectRecordingMode = false
 
+    @Volatile
     private var recordingId = -1L
     private var recordingFrames = 0
     private var recordingName = ""
     private var recordingScheduler: ScheduledExecutorService? = null
     private var pendingRecordingStart = false
+
+    /** 采样链保护：collectAll 为异步链，上一轮未完成时跳过本轮，避免并发扫描。 */
+    private val samplingBusy = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** 统一已保存采集（快照 + 录像）。 */
     private val savedItems = mutableListOf<SavedItem>()
@@ -457,13 +461,16 @@ class HomeFragment : Fragment() {
         recordingIntervalInput.setText(interval.toString())
         executor.execute {
             val result = ApiClient.startRecording(name, "")
+            // 采集真实环境前先临时停用虚拟环境；必须在后台线程（主线程禁止网络）
+            if (result.code == ApiResult.CODE_OK) {
+                ApiClient.suspendEnv()
+            }
             requireActivity().runOnUiThread {
                 if (result.code == ApiResult.CODE_OK) {
                     recordingId = result.data?.optLong("id", -1L) ?: -1L
                     recordingFrames = 0
                     recordingName = name
                     recordingNameInput.text.clear()
-                    ApiClient.suspendEnv()
                     Toast.makeText(
                         requireContext(),
                         R.string.home_recording_suspend_notice,
@@ -488,24 +495,44 @@ class HomeFragment : Fragment() {
             {
                 try {
                     if (recordingId <= 0) return@scheduleWithFixedDelay
+                    // collectAll 是异步链（WiFi/GNSS/BLE 回调），上一轮未完成时跳过
+                    if (!samplingBusy.compareAndSet(false, true)) return@scheduleWithFixedDelay
                     collector?.collectAll { frame ->
                         try {
-                            val result = ApiClient.appendRecordingFrame(recordingId, frame)
-                            if (result.code == ApiResult.CODE_OK) {
-                                recordingFrames++
-                                requireActivity().runOnUiThread {
-                                    recordingStatus.text = getString(
-                                        R.string.home_recording_running,
-                                        recordingName,
-                                        recordingFrames
-                                    )
+                            // collectAll 回调运行在主线程，HTTP 追加必须切到后台线程
+                            executor.execute {
+                                try {
+                                    val id = recordingId
+                                    if (id > 0) {
+                                        val result = ApiClient.appendRecordingFrame(id, frame)
+                                        if (result.code == ApiResult.CODE_OK) {
+                                            recordingFrames++
+                                            requireActivity().runOnUiThread {
+                                                if (isAdded) {
+                                                    recordingStatus.text = getString(
+                                                        R.string.home_recording_running,
+                                                        recordingName,
+                                                        recordingFrames
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            ZLog.w(TAG_SCOPE, "append frame rejected: ${result.message}")
+                                        }
+                                    }
+                                } catch (t: Throwable) {
+                                    ZLog.w(TAG_SCOPE, "append frame failed", t)
+                                } finally {
+                                    samplingBusy.set(false)
                                 }
                             }
                         } catch (t: Throwable) {
-                            ZLog.w(TAG_SCOPE, "append frame failed", t)
+                            samplingBusy.set(false)
+                            ZLog.w(TAG_SCOPE, "append frame dispatch failed", t)
                         }
                     }
                 } catch (t: Throwable) {
+                    samplingBusy.set(false)
                     ZLog.w(TAG_SCOPE, "recording sample failed", t)
                 }
             },
@@ -545,11 +572,17 @@ class HomeFragment : Fragment() {
             val points = mutableListOf<com.amap.api.maps.model.LatLng>()
             for (i in 0 until frames.length()) {
                 val frame = frames.optJSONObject(i) ?: continue
-                val loc = frame.optJSONObject("location") ?: continue
-                val lat = loc.optDouble("latitude", Double.NaN)
-                val lon = loc.optDouble("longitude", Double.NaN)
-                if (!lat.isNaN() && !lon.isNaN()) {
-                    points.add(com.amap.api.maps.model.LatLng(lat, lon))
+                // 帧数据 location 为 provider 键结构：{gps: {latitude, longitude, ...}}
+                val loc = frame.optJSONObject("data")?.optJSONObject("location") ?: continue
+                val keys = loc.keys()
+                while (keys.hasNext()) {
+                    val item = loc.optJSONObject(keys.next()) ?: continue
+                    val lat = item.optDouble("latitude", Double.NaN)
+                    val lon = item.optDouble("longitude", Double.NaN)
+                    if (!lat.isNaN() && !lon.isNaN()) {
+                        points.add(com.amap.api.maps.model.LatLng(lat, lon))
+                        break
+                    }
                 }
             }
             if (points.size >= 2) {
@@ -639,6 +672,9 @@ class HomeFragment : Fragment() {
             useBtn.setOnClickListener {
                 selectItem(item)
             }
+            row.findViewById<Button>(R.id.detailButton).setOnClickListener {
+                showSavedDetail(item)
+            }
             row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
                 deleteItem(item)
             }
@@ -694,6 +730,133 @@ class HomeFragment : Fragment() {
                 }
             }
         }
+    }
+
+    // ---------- 采集详情 ----------
+
+    /** 已保存采集详情弹窗：快照显示采集内容摘要，录像显示帧/轨迹信息。 */
+    private fun showSavedDetail(item: SavedItem) {
+        executor.execute {
+            val text = if (item.kind == "snapshot") {
+                buildSnapshotDetail(item.id)
+            } else {
+                buildRecordingDetail(item.id)
+            }
+            requireActivity().runOnUiThread {
+                android.app.AlertDialog.Builder(requireContext())
+                    .setTitle(getString(R.string.home_saved_detail_title) + " · " + item.name)
+                    .setMessage(text)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            }
+        }
+    }
+
+    private fun buildSnapshotDetail(id: Long): String {
+        val arr = ApiClient.listEnvSnapshots().data?.optJSONArray("snapshots")
+            ?: return getString(R.string.home_saved_detail_empty)
+        for (i in 0 until arr.length()) {
+            val item = arr.optJSONObject(i) ?: continue
+            if (item.optLong("id", -1L) != id) continue
+            val data = item.optJSONObject("data")
+            return when (item.optString("type", "")) {
+                "collect" -> formatCollectDetail(data)
+                "cell" -> formatEnvDetail(data, "cell")
+                "wifi" -> formatEnvDetail(data, "wifi")
+                "gnss" -> formatEnvDetail(data, "gnss")
+                else -> getString(R.string.home_saved_detail_empty)
+            }
+        }
+        return getString(R.string.home_saved_detail_empty)
+    }
+
+    private fun formatCollectDetail(data: JSONObject?): String {
+        if (data == null) return getString(R.string.home_saved_detail_empty)
+        val sb = StringBuilder()
+        val loc = data.optJSONObject("location")
+        if (loc != null && loc.length() > 0) {
+            val first = loc.keys().next()
+            val item = loc.optJSONObject(first)
+            sb.append("位置：").append(item?.optString("latitude")).append(", ")
+                .append(item?.optString("longitude")).append("\n")
+        }
+        sb.append("基站：").append(data.optJSONObject("cell")?.optJSONArray("cells")?.length() ?: 0)
+            .append(" 个\n")
+        sb.append("WiFi：").append(data.optJSONObject("wifi")?.optJSONArray("networks")?.length() ?: 0)
+            .append(" 个\n")
+        val bt = data.optJSONObject("bluetooth")
+        sb.append("蓝牙：已配对 ").append(bt?.optJSONArray("bonded")?.length() ?: 0)
+            .append(" · 附近 ").append(bt?.optJSONArray("devices")?.length() ?: 0).append("\n")
+        val gnss = data.optJSONObject("gnss")
+        sb.append("GNSS：").append(gnss?.optInt("satelliteCount", 0) ?: 0).append(" 颗卫星")
+        return sb.toString()
+    }
+
+    private fun formatEnvDetail(data: JSONObject?, type: String): String {
+        if (data == null) return getString(R.string.home_saved_detail_empty)
+        val sb = StringBuilder()
+        when (type) {
+            "cell" -> {
+                val arr = data.optJSONArray("entries") ?: org.json.JSONArray()
+                sb.append("基站 ").append(arr.length()).append(" 个")
+                for (i in 0 until arr.length().coerceAtMost(8)) {
+                    val e = arr.optJSONObject(i) ?: continue
+                    sb.append("\n#").append(i + 1).append("  ")
+                        .append(e.optString("type", "LTE"))
+                        .append(" MCC=").append(e.optInt("mcc", -1))
+                        .append(" MNC=").append(e.optInt("mnc", -1))
+                        .append(" TAC=").append(e.optInt("tac", -1))
+                        .append(" CI=").append(e.optLong("ci", -1L))
+                }
+            }
+            "wifi" -> {
+                val arr = data.optJSONArray("networks") ?: org.json.JSONArray()
+                sb.append("WiFi ").append(arr.length()).append(" 个")
+                for (i in 0 until arr.length().coerceAtMost(8)) {
+                    val e = arr.optJSONObject(i) ?: continue
+                    sb.append("\n#").append(i + 1).append("  ")
+                        .append(e.optString("ssid", ""))
+                        .append(" (").append(e.optString("bssid", ""))
+                        .append(") RSSI=").append(e.optInt("rssi", -70))
+                }
+            }
+            "gnss" -> {
+                sb.append("卫星总数：").append(data.optInt("satelliteCount", -1)).append("\n")
+                sb.append("参与定位：").append(data.optInt("usedInFix", -1)).append("\n")
+                sb.append("平均信噪比：").append(data.optDouble("cn0", -1.0)).append(" dBHz")
+            }
+            else -> sb.append(data.toString(2))
+        }
+        return sb.toString()
+    }
+
+    private fun buildRecordingDetail(id: Long): String {
+        val result = ApiClient.getRecordingFrames(id)
+        val frames = result.data?.optJSONArray("frames")
+            ?: return getString(R.string.home_saved_detail_empty)
+        val sb = StringBuilder()
+        sb.append("帧数：").append(frames.length()).append("\n")
+        var firstLoc = ""
+        var lastLoc = ""
+        for (i in 0 until frames.length()) {
+            val frame = frames.optJSONObject(i) ?: continue
+            val loc = frame.optJSONObject("data")?.optJSONObject("location") ?: continue
+            val keys = loc.keys()
+            while (keys.hasNext()) {
+                val item = loc.optJSONObject(keys.next()) ?: continue
+                val lat = item.optDouble("latitude", Double.NaN)
+                val lon = item.optDouble("longitude", Double.NaN)
+                if (!lat.isNaN() && !lon.isNaN()) {
+                    val text = String.format("%.6f, %.6f", lat, lon)
+                    if (firstLoc.isEmpty()) firstLoc = text
+                    lastLoc = text
+                    break
+                }
+            }
+        }
+        if (firstLoc.isNotEmpty()) sb.append("起点：").append(firstLoc).append("\n")
+        if (lastLoc.isNotEmpty()) sb.append("终点：").append(lastLoc).append("\n")
+        return sb.toString()
     }
 
     // ---------- 采集回放 ----------

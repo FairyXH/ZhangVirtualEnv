@@ -28,6 +28,7 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         private const val TAG_SCOPE = "UI"
+        private const val KEY_TAB = "current_tab"
         private val TAB_ICONS = intArrayOf(
             R.drawable.ic_tab_home,
             R.drawable.ic_tab_location,
@@ -51,11 +52,20 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         bottomBar = findViewById(R.id.bottomBar)
+        currentTab = savedInstanceState?.getInt(KEY_TAB, 0) ?: 0
         buildBottomBar()
 
         if (savedInstanceState == null) {
+            // switchTab 会因 currentTab == index 提前返回；先把索引置 -1，
+            // 确保启动时真正提交首页 Fragment（否则主页空白，需切换后才显示）
+            currentTab = -1
             switchTab(0, false)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_TAB, currentTab)
     }
 
     private fun buildBottomBar() {

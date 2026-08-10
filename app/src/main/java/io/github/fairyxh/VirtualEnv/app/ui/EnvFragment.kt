@@ -20,14 +20,20 @@ class EnvFragment : Fragment() {
     companion object {
         private const val TYPE_CELL = "cell"
         private const val TYPE_WIFI = "wifi"
+        private const val TYPE_BLE = "ble"
+        private const val TYPE_SENSOR = "sensor"
         private const val TYPE_GNSS = "gnss"
     }
 
     private lateinit var cellStatus: TextView
     private lateinit var wifiStatus: TextView
+    private lateinit var bleStatus: TextView
+    private lateinit var sensorStatus: TextView
     private lateinit var gnssStatus: TextView
     private lateinit var cellSwitch: android.widget.Switch
     private lateinit var wifiSwitch: android.widget.Switch
+    private lateinit var bleSwitch: android.widget.Switch
+    private lateinit var sensorSwitch: android.widget.Switch
     private lateinit var gnssSwitch: android.widget.Switch
     private var updatingSwitch = false
 
@@ -37,9 +43,13 @@ class EnvFragment : Fragment() {
         val root = inflater.inflate(R.layout.fragment_env, container, false)
         cellStatus = root.findViewById(R.id.cellStatus)
         wifiStatus = root.findViewById(R.id.wifiStatus)
+        bleStatus = root.findViewById(R.id.bleStatus)
+        sensorStatus = root.findViewById(R.id.sensorStatus)
         gnssStatus = root.findViewById(R.id.gnssStatus)
         cellSwitch = root.findViewById(R.id.cellSwitch)
         wifiSwitch = root.findViewById(R.id.wifiSwitch)
+        bleSwitch = root.findViewById(R.id.bleSwitch)
+        sensorSwitch = root.findViewById(R.id.sensorSwitch)
         gnssSwitch = root.findViewById(R.id.gnssSwitch)
 
         root.findViewById<View>(R.id.cellCard).setOnClickListener {
@@ -48,12 +58,20 @@ class EnvFragment : Fragment() {
         root.findViewById<View>(R.id.wifiCard).setOnClickListener {
             EnvDetailActivity.start(requireContext(), TYPE_WIFI)
         }
+        root.findViewById<View>(R.id.bleCard).setOnClickListener {
+            EnvDetailActivity.start(requireContext(), TYPE_BLE)
+        }
+        root.findViewById<View>(R.id.sensorCard).setOnClickListener {
+            EnvDetailActivity.start(requireContext(), TYPE_SENSOR)
+        }
         root.findViewById<View>(R.id.gnssCard).setOnClickListener {
             EnvDetailActivity.start(requireContext(), TYPE_GNSS)
         }
 
         cellSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_CELL, checked) }
         wifiSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_WIFI, checked) }
+        bleSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_BLE, checked) }
+        sensorSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_SENSOR, checked) }
         gnssSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_GNSS, checked) }
 
         refreshStatuses()
@@ -88,6 +106,8 @@ class EnvFragment : Fragment() {
         listOf(
             TYPE_CELL to (cellStatus to cellSwitch),
             TYPE_WIFI to (wifiStatus to wifiSwitch),
+            TYPE_BLE to (bleStatus to bleSwitch),
+            TYPE_SENSOR to (sensorStatus to sensorSwitch),
             TYPE_GNSS to (gnssStatus to gnssSwitch)
         ).forEach { (type, pair) ->
             val (statusView, switchView) = pair

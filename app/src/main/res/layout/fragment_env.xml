@@ -105,6 +105,84 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/bleCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:background="@drawable/bg_card"
+            android:clickable="true"
+            android:focusable="true"
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/env_ble_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/env_ble_desc"
+                style="@style/Text.Caption" />
+
+            <TextView
+                android:id="@+id/bleStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:layout_weight="1"
+                android:text="@string/env_pending"
+                style="@style/Text.Caption" />
+
+            <Switch
+                android:id="@+id/bleSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/sensorCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:background="@drawable/bg_card"
+            android:clickable="true"
+            android:focusable="true"
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/env_sensor_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/env_sensor_desc"
+                style="@style/Text.Caption" />
+
+            <TextView
+                android:id="@+id/sensorStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:layout_weight="1"
+                android:text="@string/env_pending"
+                style="@style/Text.Caption" />
+
+            <Switch
+                android:id="@+id/sensorSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/gnssCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

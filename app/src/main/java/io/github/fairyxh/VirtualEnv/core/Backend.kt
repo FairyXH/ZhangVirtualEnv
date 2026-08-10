@@ -390,36 +390,54 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- 虚拟环境加载（App 控制端调用） ----------
 
-    /**
-     * 一键使用环境快照：把已保存的 env_snapshot 数据加载到对应模拟引擎。
-     *
-     * @return 加载的快照 JSON；快照不存在或类型不支持时返回 null
-     */
+    /** 当前正在使用的环境快照 id（按类型），供 App 子页面标识“使用中”配置。 */
+    private val activeEnvSnapshotIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 一键使用环境快照：把已保存的 env_snapshot 数据加载到对应模拟引擎。 */
     fun useEnvSnapshot(id: Long): org.json.JSONObject? {
-        val snapshot = databaseManager.queryEnvSnapshots()
-            .firstOrNull { it.optLong("id", -1L) == id }
-            ?: return null
-        val type = snapshot.optString("type", "")
-        val data = snapshot.optJSONObject("data") ?: return null
-        when (type) {
-            "wifi" -> wifiEngine.update(data)
-            "cell" -> cellEngine.update(data)
-            "ble" -> bleEngine.update(data)
-            "gnss" -> gnssEngine.update(data)
-            "sensor" -> sensorEngine.update(data)
-            "collect" -> {
-                loadCollectSnapshot(data)
-                // 轨道化回放：同名+来源标记的轨道快照存在则用轨道数据覆盖，
-                // 不存在（被单独删除）则清空该轨道 = 留空轨（真实信息）
-                applyTrackOverrides(snapshot.optString("name", ""))
-                // 自动启用该采集保存的位置轨道（已保存地点）
-                enableCollectLocation(snapshot.optString("name", ""))
-            }
-            else -> return null
-        }
-        ZLog.i(TAG_SCOPE, "env snapshot used id=$id type=$type")
-        return snapshot
-    }
+         val snapshot = databaseManager.queryEnvSnapshots()
+             .firstOrNull { it.optLong("id", -1L) == id }
+             ?: return null
+         val type = snapshot.optString("type", "")
+         val data = snapshot.optJSONObject("data") ?: return null
+         when (type) {
+             "wifi" -> {
+                 wifiEngine.update(data)
+                 activeEnvSnapshotIds["wifi"] = id
+             }
+             "cell" -> {
+                 cellEngine.update(data)
+                 activeEnvSnapshotIds["cell"] = id
+             }
+             "ble" -> {
+                 bleEngine.update(data)
+                 activeEnvSnapshotIds["ble"] = id
+             }
+             "gnss" -> {
+                 gnssEngine.update(data)
+                 activeEnvSnapshotIds["gnss"] = id
+             }
+             "sensor" -> {
+                 sensorEngine.update(data)
+                 activeEnvSnapshotIds["sensor"] = id
+             }
+             "collect" -> {
+                 loadCollectSnapshot(data)
+                 // 轨道化回放：同名+来源标记的轨道快照存在则用轨道数据覆盖，
+                 // 不存在（被单独删除）则清空该轨道 = 留空轨（真实信息）
+                 applyTrackOverrides(snapshot.optString("name", ""))
+                 // 自动启用该采集保存的位置轨道（已保存地点）
+                 enableCollectLocation(snapshot.optString("name", ""))
+                 // 采集包不等于某个具体配置，清除子类型的“使用中”标记
+                 activeEnvSnapshotIds.keys.removeAll(
+                     setOf("wifi", "cell", "ble", "gnss", "sensor")
+                 )
+             }
+             else -> return null
+         }
+         ZLog.i(TAG_SCOPE, "env snapshot used id=$id type=$type")
+         return snapshot
+     }
 
     /** 一键采集包：拆分到 wifi / cell / ble 引擎（gnss/sensor 后续 Phase 接入）。 */
     private fun loadCollectSnapshot(data: org.json.JSONObject) {
@@ -486,32 +504,52 @@ class Backend private constructor(private val dataDir: File) {
         return true
     }
 
-    /** 查询指定类型的虚拟环境状态。 */
+    /** 查询指定类型的虚拟环境状态（附带当前正在使用的配置 id）。 */
     fun envStatus(type: String): org.json.JSONObject? {
-        return when (type) {
+        val status = when (type) {
             "wifi" -> wifiEngine.statusJson()
             "cell" -> cellEngine.statusJson()
             "ble" -> bleEngine.statusJson()
             "gnss" -> gnssEngine.statusJson()
             "sensor" -> sensorEngine.statusJson()
-            else -> null
+            else -> return null
         }
+        status.put("activeSnapshotId", activeEnvSnapshotIds[type] ?: -1L)
+        return status
     }
 
     /** 清除指定类型的虚拟环境。 */
     fun clearEnv(type: String) {
         when (type) {
-            "wifi" -> wifiEngine.clear()
-            "cell" -> cellEngine.clear()
-            "ble" -> bleEngine.clear()
-            "gnss" -> gnssEngine.clear()
-            "sensor" -> sensorEngine.clear()
+            "wifi" -> {
+                wifiEngine.clear()
+                activeEnvSnapshotIds.remove("wifi")
+            }
+            "cell" -> {
+                cellEngine.clear()
+                activeEnvSnapshotIds.remove("cell")
+            }
+            "ble" -> {
+                bleEngine.clear()
+                activeEnvSnapshotIds.remove("ble")
+            }
+            "gnss" -> {
+                gnssEngine.clear()
+                activeEnvSnapshotIds.remove("gnss")
+            }
+            "sensor" -> {
+                sensorEngine.clear()
+                activeEnvSnapshotIds.remove("sensor")
+            }
             "collect" -> {
                 wifiEngine.clear()
                 cellEngine.clear()
                 bleEngine.clear()
                 gnssEngine.clear()
                 sensorEngine.clear()
+                activeEnvSnapshotIds.keys.removeAll(
+                    setOf("wifi", "cell", "ble", "gnss", "sensor")
+                )
             }
         }
         ZLog.i(TAG_SCOPE, "env cleared type=$type")

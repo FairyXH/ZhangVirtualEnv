@@ -107,10 +107,9 @@ class FrameworkEnvHookAdapter(
             if (virtual != null) {
                 try {
                     val list = buildCellInfoList(virtual)
-                    if (list.isNotEmpty()) {
-                        ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
-                        return@register list
-                    }
+                    // 启用即覆盖：即使空配置也返回空列表，绝不放行真实基站
+                    ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
+                    return@register list
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "build virtual cells failed, fallback", t)
                 }
@@ -121,7 +120,8 @@ class FrameworkEnvHookAdapter(
     }
 
     private fun buildCellInfoList(data: JSONObject): List<Any> {
-        val cells = data.optJSONArray("cells") ?: return emptyList()
+        // 兼容两种数据键：采集包用 cells[]，环境模拟配置页用 entries[]
+        val cells = data.optJSONArray("cells") ?: data.optJSONArray("entries") ?: return emptyList()
         val result = mutableListOf<Any>()
         for (i in 0 until cells.length()) {
             val c = cells.optJSONObject(i) ?: continue
@@ -292,13 +292,12 @@ class FrameworkEnvHookAdapter(
     /**
      * 向 [ScanCallback] 投递虚拟扫描结果。
      *
-     * @return 投递成功返回 true（阻止原链路）；无虚拟数据或投递失败返回 null（放行）
+     * @return 投递成功返回 true（阻止原链路）；未启用虚拟 BLE 或投递失败返回 null（放行）
      */
     private fun deliverVirtualBle(callback: Any): Boolean? {
         val virtual = cache.currentBle() ?: return null
         try {
             val results = buildScanResults(virtual)
-            if (results.isEmpty()) return null
             val callbackClass = callback.javaClass
             val resultClass = Class.forName("android.bluetooth.le.ScanResult")
             val onScanResult: Method = try {
@@ -309,6 +308,7 @@ class FrameworkEnvHookAdapter(
             results.forEach { r ->
                 onScanResult.invoke(callback, CALLBACK_TYPE_ALL_MATCH, r)
             }
+            // 启用即覆盖：空配置也投递 0 个结果并阻断真实扫描
             ZLog.d(TAG_SCOPE, "startScan -> virtual ${results.size} results")
             return true
         } catch (t: Throwable) {
@@ -381,10 +381,9 @@ class FrameworkEnvHookAdapter(
             if (virtual != null) {
                 try {
                     val list = buildWifiResults(virtual)
-                    if (list.isNotEmpty()) {
-                        ZLog.d(TAG_SCOPE, "getScanResults -> virtual ${list.size} networks")
-                        return@register list
-                    }
+                    // 启用即覆盖：即使空配置也返回空列表，绝不放行真实 WiFi
+                    ZLog.d(TAG_SCOPE, "getScanResults -> virtual ${list.size} networks")
+                    return@register list
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "build virtual wifi failed, fallback", t)
                 }

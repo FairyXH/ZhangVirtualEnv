@@ -100,16 +100,22 @@ class WifiServiceHookAdapter(
         val ok = registrar.register(method) { chain ->
             // after：先走原始逻辑（含权限校验），再决定是否替换返回值
             val original = chain.proceed()
-            if (!virtualLocationEnabled()) return@register original
             try {
                 val virtual = backend.wifiEngine.currentData()
-                val list = buildVirtualScanResults(virtual)
-                // 用 hook 方法自身的返回类型 Class 构造，避免模块 classloader 与
-                // boot classloader 的 ParceledListSlice 不是同一个 Class，
-                // 否则 LSPosed 返回类型检查抛 ClassCastException 导致 system_server 崩溃
-                val slice = newParceledListSlice(method.returnType, list)
-                ZLog.d(TAG_SCOPE, "WifiService.getScanResults -> virtual ${list.size} networks")
-                slice
+                if (virtual != null) {
+                    // WiFi 模拟开关打开：直接覆盖真实扫描结果（空配置也返回空列表）
+                    val list = buildVirtualScanResults(virtual)
+                    val slice = newParceledListSlice(method.returnType, list)
+                    ZLog.d(TAG_SCOPE, "WifiService.getScanResults -> virtual ${list.size} networks")
+                    slice
+                } else if (!virtualLocationEnabled()) {
+                    original
+                } else {
+                    // 虚拟定位开启但未配置虚拟 WiFi：阻断网络定位数据源
+                    val slice = newParceledListSlice(method.returnType, emptyList<Any>())
+                    ZLog.d(TAG_SCOPE, "WifiService.getScanResults -> empty (virtual location)")
+                    slice
+                }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "WifiService.getScanResults virtual failed, fallback", t)
                 original
@@ -172,17 +178,19 @@ class WifiServiceHookAdapter(
         val method = findMethod(clazz, "getConnectionInfo", 2) ?: return
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
-            if (!virtualLocationEnabled()) return@register original
             try {
                 val virtual = backend.wifiEngine.currentData()
-                if (virtual == null) {
-                    // 未配置虚拟 WiFi：返回空 WifiInfo，阻断“当前连接 WiFi”网络定位
-                    val info = newEmptyWifiInfo(method.returnType)
-                    ZLog.d(TAG_SCOPE, "WifiService.getConnectionInfo -> empty (virtual location)")
-                    info
-                } else {
+                if (virtual != null) {
+                    // WiFi 模拟开关打开：直接覆盖当前连接信息
                     val info = buildVirtualWifiInfo(method.returnType, virtual)
                     ZLog.d(TAG_SCOPE, "WifiService.getConnectionInfo -> virtual")
+                    info
+                } else if (!virtualLocationEnabled()) {
+                    original
+                } else {
+                    // 虚拟定位开启但未配置虚拟 WiFi：返回空 WifiInfo，阻断网络定位
+                    val info = newEmptyWifiInfo(method.returnType)
+                    ZLog.d(TAG_SCOPE, "WifiService.getConnectionInfo -> empty (virtual location)")
                     info
                 }
             } catch (t: Throwable) {

@@ -211,6 +211,64 @@
                         style="@style/EditText.Field" />
                 </LinearLayout>
 
+                <!-- 添加表单：ble 字段 -->
+                <LinearLayout
+                    android:id="@+id/bleFields"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <EditText
+                        android:id="@+id/bleNameInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/env_ble_name_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/bleAddressInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_ble_address_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/bleRssiInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_ble_rssi_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+                </LinearLayout>
+
+                <!-- 添加表单：sensor 字段（单配置） -->
+                <LinearLayout
+                    android:id="@+id/sensorFields"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <EditText
+                        android:id="@+id/sensorStepInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/env_sensor_step_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+                </LinearLayout>
+
                 <!-- 添加表单：gnss 字段（详细设置） -->
                 <LinearLayout
                     android:id="@+id/gnssFields"

@@ -295,6 +295,9 @@ object ApiClient {
             conn.connectTimeout = 3000
             conn.readTimeout = 5000
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            // 后端为单请求即关闭连接（Connection: close），禁止 keep-alive 复用，
+            // 否则死连接上的后续 POST 会立即抛 EOFException（message=null）。
+            conn.setRequestProperty("Connection", "close")
             if (body != null) {
                 conn.doOutput = true
                 conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
@@ -309,8 +312,8 @@ object ApiClient {
                 data = json.optJSONObject("data")
             )
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "$method $path failed: ${t.message}")
-            ApiResult.error("backend unreachable: ${t.message}")
+            ZLog.w(TAG_SCOPE, "$method $path failed: ${t.javaClass.name}: ${t.message}", t)
+            ApiResult.error("backend unreachable: ${t.javaClass.simpleName}: ${t.message}")
         } finally {
             conn.disconnect()
         }
