@@ -68,6 +68,8 @@ class LocationSimFragment : Fragment() {
     private var amap: AMap? = null
     private var selectedMarker: Marker? = null
     private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
+    private var mapCollapsed = false
+    private lateinit var mapCollapseButton: TextView
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -122,6 +124,8 @@ class LocationSimFragment : Fragment() {
         savePointButton.setOnClickListener { saveCurrentPoint() }
         locateButton.setOnClickListener { locateCurrentPosition() }
         setupSearch()
+        mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
+        mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
 
         initMapSafely(savedInstanceState)
         refreshSavedPoints()
@@ -131,14 +135,35 @@ class LocationSimFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        mapView?.onResume()
+        if (!mapCollapsed) {
+            try {
+                mapView?.onResume()
+            } catch (_: Throwable) {
+            }
+        }
         refreshStatus()
         refreshSavedPoints()
     }
 
+    /** 收起/展开地图：GONE 时暂停 GLSurfaceView，节省空间。 */
+    private fun toggleMapCollapsed() {
+        mapCollapsed = !mapCollapsed
+        mapContainer.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
+        mapCollapseButton.text = getString(if (mapCollapsed) R.string.map_expand else R.string.map_collapse)
+        try {
+            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun onPause() {
         super.onPause()
-        mapView?.onPause()
+        if (!mapCollapsed) {
+            try {
+                mapView?.onPause()
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     override fun onDestroyView() {

@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="@dimen/space_md">
+
+    <!-- 标题栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/backButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill_secondary"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm"
+            android:text="@string/env_detail_back"
+            android:textSize="@dimen/text_caption" />
+
+        <TextView
+            android:id="@+id/detailTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_md"
+            android:layout_weight="1"
+            android:text="@string/env_cell_title"
+            style="@style/Text.Hero" />
+
+        <TextView
+            android:id="@+id/detailStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/env_pending"
+            style="@style/Text.Caption" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="@dimen/space_md"
+            android:paddingBottom="@dimen/space_lg">
+
+            <!-- 当前条目（组合）编辑 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/space_md">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_detail_entries_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/entriesDesc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:text="@string/env_detail_entries_desc"
+                    style="@style/Text.Caption" />
+
+                <LinearLayout
+                    android:id="@+id/entryList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical" />
+
+                <!-- 添加表单：cell 字段 -->
+                <LinearLayout
+                    android:id="@+id/cellFields"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <EditText
+                        android:id="@+id/cellTypeInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/env_cell_type_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellMccInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_mcc_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellMncInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_mnc_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellTacInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_tac_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellCiInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_ci_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellPciInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_pci_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/cellRsrpInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_cell_rsrp_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+                </LinearLayout>
+
+                <!-- 添加表单：wifi 字段 -->
+                <LinearLayout
+                    android:id="@+id/wifiFields"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <EditText
+                        android:id="@+id/wifiSsidInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/env_wifi_ssid_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/wifiBssidInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_wifi_bssid_hint"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/wifiRssiInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_wifi_rssi_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/wifiFrequencyInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_wifi_frequency_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+                </LinearLayout>
+
+                <!-- 添加表单：gnss 字段（详细设置） -->
+                <LinearLayout
+                    android:id="@+id/gnssFields"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <EditText
+                        android:id="@+id/gnssCountInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/env_gnss_count_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/gnssUsedInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_gnss_used_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <EditText
+                        android:id="@+id/gnssCn0Input"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_xs"
+                        android:hint="@string/env_gnss_cn0_hint"
+                        android:inputType="numberDecimal"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/addEntryButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/env_detail_add_entry"
+                    style="@style/Button.Pill.Secondary" />
+            </LinearLayout>
+
+            <!-- 保存为配置 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/space_md">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_detail_save_title"
+                    style="@style/Text.Headline" />
+
+                <EditText
+                    android:id="@+id/saveNameInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:hint="@string/env_detail_name_hint"
+                    android:maxLines="1"
+                    style="@style/EditText.Field" />
+
+                <EditText
+                    android:id="@+id/saveRemarkInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:hint="@string/env_detail_remark_hint"
+                    android:maxLines="1"
+                    style="@style/EditText.Field" />
+
+                <Button
+                    android:id="@+id/saveButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/env_save"
+                    style="@style/Button.Pill" />
+            </LinearLayout>
+
+            <!-- 已保存配置列表（点击使用 = 多配置切换） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/space_md">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_detail_saved_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/savedEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/env_saved_empty"
+                    android:textColor="@color/text_secondary"
+                    style="@style/Text.Caption" />
+
+                <LinearLayout
+                    android:id="@+id/savedList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

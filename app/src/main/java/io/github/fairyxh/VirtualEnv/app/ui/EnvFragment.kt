@@ -5,7 +5,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -18,11 +17,9 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
- * 环境模拟页：基站 / WiFi / GNSS 三卡片。
+ * 环境模拟入口页：基站 / WiFi / GNSS 三卡片 → 子页面（EnvDetailActivity）。
  *
- * 每个卡片可填写名称/备注与数据字段并保存（Backend env_snapshot），
- * 已保存环境支持删除；一键使用把快照加载到对应模拟引擎（wifi/cell/gnss 已接入，
- * ble/sensor 通过 /api/<type>/set 直接设置）。
+ * 子页面支持多基站 / 多 WiFi / GNSS 详细设置，以及多配置保存与一键切换。
  */
 class EnvFragment : Fragment() {
 
@@ -34,6 +31,9 @@ class EnvFragment : Fragment() {
         private const val TYPE_GNSS = "gnss"
     }
 
+    private lateinit var cellStatus: TextView
+    private lateinit var wifiStatus: TextView
+    private lateinit var gnssStatus: TextView
     private lateinit var savedEnvEmpty: TextView
     private lateinit var savedEnvList: LinearLayout
 
@@ -41,20 +41,31 @@ class EnvFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_env, container, false)
+        cellStatus = root.findViewById(R.id.cellStatus)
+        wifiStatus = root.findViewById(R.id.wifiStatus)
+        gnssStatus = root.findViewById(R.id.gnssStatus)
         savedEnvEmpty = root.findViewById(R.id.savedEnvEmpty)
         savedEnvList = root.findViewById(R.id.savedEnvList)
 
-        root.findViewById<View>(R.id.cellCard).setOnClickListener { showCellDialog() }
-        root.findViewById<View>(R.id.wifiCard).setOnClickListener { showWifiDialog() }
-        root.findViewById<View>(R.id.gnssCard).setOnClickListener { showGnssDialog() }
+        root.findViewById<View>(R.id.cellCard).setOnClickListener {
+            EnvDetailActivity.start(requireContext(), TYPE_CELL)
+        }
+        root.findViewById<View>(R.id.wifiCard).setOnClickListener {
+            EnvDetailActivity.start(requireContext(), TYPE_WIFI)
+        }
+        root.findViewById<View>(R.id.gnssCard).setOnClickListener {
+            EnvDetailActivity.start(requireContext(), TYPE_GNSS)
+        }
 
         refreshSavedEnv()
+        refreshStatuses()
         return root
     }
 
     override fun onResume() {
         super.onResume()
         refreshSavedEnv()
+        refreshStatuses()
     }
 
     override fun onDestroyView() {
@@ -62,96 +73,16 @@ class EnvFragment : Fragment() {
         super.onDestroyView()
     }
 
-    // ---------- 编辑对话框 ----------
-
-    private fun showCellDialog() {
-        val view = layoutInflater.inflate(R.layout.dialog_env_cell, null)
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle(R.string.env_cell_title)
-            .setView(view)
-            .setPositiveButton(R.string.env_save) { _, _ -> saveCell(view) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun showWifiDialog() {
-        val view = layoutInflater.inflate(R.layout.dialog_env_wifi, null)
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle(R.string.env_wifi_title)
-            .setView(view)
-            .setPositiveButton(R.string.env_save) { _, _ -> saveWifi(view) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun showGnssDialog() {
-        val view = layoutInflater.inflate(R.layout.dialog_env_gnss, null)
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle(R.string.env_gnss_title)
-            .setView(view)
-            .setPositiveButton(R.string.env_save) { _, _ -> saveGnss(view) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun saveCell(view: View) {
-        val name = view.findViewById<EditText>(R.id.cellNameInput).text.toString().trim()
-        if (name.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.location_point_name_required, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val remark = view.findViewById<EditText>(R.id.cellRemarkInput).text.toString().trim()
-        val data = JSONObject().apply {
-            val type = view.findViewById<EditText>(R.id.cellTypeInput).text.toString().trim()
-            put("type", if (type.isEmpty()) "LTE" else type)
-            put("mcc", view.findViewById<EditText>(R.id.cellMccInput).text.toString().toIntOrNull() ?: -1)
-            put("mnc", view.findViewById<EditText>(R.id.cellMncInput).text.toString().toIntOrNull() ?: -1)
-            put("tac", view.findViewById<EditText>(R.id.cellTacInput).text.toString().toIntOrNull() ?: -1)
-            put("ci", view.findViewById<EditText>(R.id.cellCiInput).text.toString().toLongOrNull() ?: -1L)
-            put("pci", view.findViewById<EditText>(R.id.cellPciInput).text.toString().toIntOrNull() ?: -1)
-            put("rsrp", view.findViewById<EditText>(R.id.cellRsrpInput).text.toString().toIntOrNull() ?: -1)
-        }
-        saveEnv(name, remark, TYPE_CELL, data)
-    }
-
-    private fun saveWifi(view: View) {
-        val name = view.findViewById<EditText>(R.id.wifiNameInput).text.toString().trim()
-        if (name.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.location_point_name_required, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val remark = view.findViewById<EditText>(R.id.wifiRemarkInput).text.toString().trim()
-        val data = JSONObject().apply {
-            put("ssid", view.findViewById<EditText>(R.id.wifiSsidInput).text.toString().trim())
-            put("bssid", view.findViewById<EditText>(R.id.wifiBssidInput).text.toString().trim())
-            put("rssi", view.findViewById<EditText>(R.id.wifiRssiInput).text.toString().toIntOrNull() ?: -1)
-            put("frequency", view.findViewById<EditText>(R.id.wifiFrequencyInput).text.toString().toIntOrNull() ?: -1)
-        }
-        saveEnv(name, remark, TYPE_WIFI, data)
-    }
-
-    private fun saveGnss(view: View) {
-        val name = view.findViewById<EditText>(R.id.gnssNameInput).text.toString().trim()
-        if (name.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.location_point_name_required, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val remark = view.findViewById<EditText>(R.id.gnssRemarkInput).text.toString().trim()
-        val data = JSONObject().apply {
-            put("satelliteCount", view.findViewById<EditText>(R.id.gnssCountInput).text.toString().toIntOrNull() ?: -1)
-            put("usedInFix", view.findViewById<EditText>(R.id.gnssUsedInput).text.toString().toIntOrNull() ?: -1)
-            put("cn0", view.findViewById<EditText>(R.id.gnssCn0Input).text.toString().toDoubleOrNull() ?: -1.0)
-        }
-        saveEnv(name, remark, TYPE_GNSS, data)
-    }
-
-    private fun saveEnv(name: String, remark: String, type: String, data: JSONObject) {
-        executor.execute {
-            val result = ApiClient.createEnvSnapshot(name, remark, type, data)
-            requireActivity().runOnUiThread {
-                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                if (result.code == ApiResult.CODE_OK) {
-                    refreshSavedEnv()
+    private fun refreshStatuses() {
+        listOf(TYPE_CELL to cellStatus, TYPE_WIFI to wifiStatus, TYPE_GNSS to gnssStatus).forEach { (type, view) ->
+            executor.execute {
+                val result = ApiClient.getEnvStatus(type)
+                requireActivity().runOnUiThread {
+                    val data = result.data
+                    val enabled = data != null && data.optBoolean("enabled", false)
+                    view.text = getString(
+                        if (enabled) R.string.env_status_active else R.string.env_status_inactive
+                    )
                 }
             }
         }
@@ -205,17 +136,18 @@ class EnvFragment : Fragment() {
     /** 一键使用：把环境快照加载到对应模拟引擎（Hook 层随即生效）。 */
     private fun useEnv(item: JSONObject) {
         val id = item.optLong("id")
-        val typeLabel = typeLabel(item.optString("type", ""))
+        val label = typeLabel(item.optString("type", ""))
         executor.execute {
             val result = ApiClient.useEnvSnapshot(id)
             requireActivity().runOnUiThread {
                 if (result.code == ApiResult.CODE_OK) {
                     Toast.makeText(
                         requireContext(),
-                        getString(R.string.env_use_applied, typeLabel),
+                        getString(R.string.env_use_applied, label),
                         Toast.LENGTH_SHORT
                     ).show()
                     refreshSavedEnv()
+                    refreshStatuses()
                 } else {
                     Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 }

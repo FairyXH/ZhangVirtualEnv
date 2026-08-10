@@ -69,6 +69,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private var mapView: MapView? = null
     private var amap: AMap? = null
     private var locationClient: AMapLocationClient? = null
+    private var mapCollapsed = false
+    private lateinit var mapCollapseButton: TextView
 
     private val points = mutableListOf<LatLng>()
     private val markers = mutableListOf<Marker>()
@@ -106,6 +108,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         routeSpeedInput = root.findViewById(R.id.routeSpeedInput)
         routeStepInput = root.findViewById(R.id.routeStepInput)
         setupPresets(root)
+        mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
+        mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
 
         locateButton.setOnClickListener { locateCurrentPosition() }
         root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
@@ -123,9 +127,25 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     override fun onResume() {
         super.onResume()
-        mapView?.onResume()
+        if (!mapCollapsed) {
+            try {
+                mapView?.onResume()
+            } catch (_: Throwable) {
+            }
+        }
         refreshSavedRoutes()
         refreshRouteStatus()
+    }
+
+    /** 收起/展开地图：GONE 时暂停 GLSurfaceView，节省空间。 */
+    private fun toggleMapCollapsed() {
+        mapCollapsed = !mapCollapsed
+        mapContainer.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
+        mapCollapseButton.text = getString(if (mapCollapsed) R.string.map_expand else R.string.map_collapse)
+        try {
+            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
+        } catch (_: Throwable) {
+        }
     }
 
     /** 速度/步频预设：步行/跑步/自行车/驾车。 */
@@ -676,7 +696,12 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     override fun onPause() {
         super.onPause()
-        mapView?.onPause()
+        if (!mapCollapsed) {
+            try {
+                mapView?.onPause()
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     override fun onDestroyView() {

@@ -52,10 +52,18 @@ class PhoneInterfaceManagerHookAdapter(
             val original = chain.proceed()
             if (!virtualLocationEnabled()) return@register original
             try {
-                val cell = VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
-                if (cell != null) {
-                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> virtual cell (${cache.locationLat()},${cache.locationLon()})")
-                    listOf(cell)
+                // 多基站：按 cell 配置 entries 数量返回多个带虚拟经纬度的基站（默认 1 个）
+                val cellCount = cache.currentCell()
+                    ?.optJSONArray("entries")
+                    ?.length()
+                    ?.coerceIn(1, 16)
+                    ?: 1
+                val cells = (0 until cellCount).mapNotNull {
+                    VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+                }
+                if (cells.isNotEmpty()) {
+                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> $cellCount virtual cells (${cache.locationLat()},${cache.locationLon()})")
+                    cells
                 } else {
                     ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo virtual cell build failed, fallback empty")
                     emptyList<Any>()

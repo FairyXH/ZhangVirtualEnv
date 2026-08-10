@@ -85,6 +85,8 @@
     <string name="location_enabled">已启用</string>
     <string name="location_disabled">未启用</string>
     <string name="location_map_hint">点击地图选点</string>
+    <string name="map_collapse">收起</string>
+    <string name="map_expand">展开</string>
     <string name="location_search_hint">搜索地址/POI，如：人民广场</string>
     <string name="location_search">搜索</string>
     <string name="location_search_empty">未找到相关地址</string>
@@ -174,6 +176,8 @@
     <string name="env_title">环境模拟</string>
     <string name="env_subtitle">基站 / WiFi / GNSS 环境模拟入口</string>
     <string name="env_pending">待开发</string>
+    <string name="env_status_active">使用中</string>
+    <string name="env_status_inactive">未使用</string>
     <string name="env_cell_title">基站模拟</string>
     <string name="env_cell_desc">MCC / MNC / TAC / CID / PCI / RSRP</string>
     <string name="env_cell_coming">Phase 3 实现</string>
@@ -206,6 +210,23 @@
     <string name="env_gnss_count_hint">卫星总数，如：12</string>
     <string name="env_gnss_used_hint">参与定位数，如：8</string>
     <string name="env_gnss_cn0_hint">平均信噪比 dBHz，如：38</string>
+    <string name="env_detail_back">返回</string>
+    <string name="env_detail_entries_title">当前条目</string>
+    <string name="env_detail_entries_desc">可添加多个条目，保存后 Hook 层同时生效</string>
+    <string name="env_detail_add_entry">添加条目</string>
+    <string name="env_detail_remove">移除</string>
+    <string name="env_detail_save_title">保存为配置</string>
+    <string name="env_detail_name_hint">配置名称，如：办公室基站组</string>
+    <string name="env_detail_remark_hint">备注（可选）</string>
+    <string name="env_detail_saved_title">已保存配置（点击使用 = 切换）</string>
+    <string name="env_detail_active">使用中</string>
+    <string name="env_detail_inactive">未使用</string>
+    <string name="env_use">使用</string>
+    <string name="env_delete">删除</string>
+    <string name="env_cell_mcc_required">请填写 MCC</string>
+    <string name="env_wifi_ssid_required">请填写 SSID</string>
+    <string name="env_cell_entry_format">%1$s  MCC=%2$d MNC=%3$d TAC=%4$d CI=%5$d</string>
+    <string name="env_wifi_entry_format">%1$s (%2$s) RSSI=%3$d</string>
 
     <!-- Float window -->
     <string name="float_window_title">虚拟环境悬浮窗</string>

@@ -68,21 +68,42 @@
         android:orientation="vertical"
         android:visibility="gone" />
 
-    <!-- 地图选点提示（地图框上方、搜索框下方） -->
-    <TextView
-        android:id="@+id/mapHint"
-        android:layout_width="wrap_content"
+    <!-- 地图选点提示 + 收起/展开（地图框上方、搜索框下方） -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/space_md"
         android:layout_marginTop="@dimen/space_sm"
         android:layout_marginEnd="@dimen/space_md"
-        android:background="@drawable/bg_pill_secondary"
-        android:paddingStart="@dimen/space_md"
-        android:paddingTop="@dimen/space_xs"
-        android:paddingEnd="@dimen/space_md"
-        android:paddingBottom="@dimen/space_xs"
-        android:text="@string/location_map_hint"
-        android:textSize="@dimen/text_caption" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/mapHint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_pill_secondary"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_xs"
+            android:text="@string/location_map_hint"
+            android:textSize="@dimen/text_caption" />
+
+        <TextView
+            android:id="@+id/mapCollapseButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_sm"
+            android:background="@drawable/bg_pill_secondary"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_xs"
+            android:text="@string/map_collapse"
+            android:textSize="@dimen/text_caption" />
+    </LinearLayout>
 
     <!-- 地图选点区 -->
     <FrameLayout
