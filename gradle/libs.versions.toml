@@ -1,13 +1,27 @@
 [versions]
-agp = "9.0.1"
+agp = "9.3.0"
+kotlin = "2.4.10"
 xposed-api = "101.0.0"
 xposed-service = "101.0.0"
 fragment = "1.8.5"
-
-[plugins]
-agp-app = { id = "com.android.application", version.ref = "agp" }
+activity-compose = "1.13.0"
+core = "1.19.0"
+compose = "1.11.0"
+kyant-shapes = "1.2.0"
+backdrop = "2.0.0"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "xposed-api" }
 libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "xposed-service" }
 androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "fragment" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core" }
+compose-ui = { group = "org.jetbrains.compose.ui", name = "ui", version.ref = "compose" }
+compose-foundation = { group = "org.jetbrains.compose.foundation", name = "foundation", version.ref = "compose" }
+compose-ui-graphics = { group = "org.jetbrains.compose.ui", name = "ui-graphics", version.ref = "compose" }
+kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kyant-shapes" }
+kyant-backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+
+[plugins]
+agp-app = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

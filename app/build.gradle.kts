@@ -1,11 +1,12 @@
 plugins {
     alias(libs.plugins.agp.app)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "io.github.fairyxh.VirtualEnv"
-    compileSdk = 36
-    buildToolsVersion = "36.1.0"
+    compileSdk = 37
+    buildToolsVersion = "37.0.0"
 
     defaultConfig {
         applicationId = "io.github.fairyxh.VirtualEnv"
@@ -26,6 +27,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        compose = true
     }
 
     compileOptions {
@@ -53,6 +55,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
 dependencies {
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
@@ -62,4 +70,12 @@ dependencies {
 
     // 高德地图 SDK（本地 jar，含 3DMap/Search/Location）
     implementation(files("libs/AMap3DMap.jar"))
+
+    // Compose + Liquid Glass（backdrop）
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.ui.graphics)
+    implementation(libs.kyant.backdrop)
+    implementation(libs.kyant.shapes)
 }
