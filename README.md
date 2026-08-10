@@ -18,7 +18,8 @@
 | BLE | 虚拟 Beacon 扫描结果，可采集真实设备后模拟 |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），完全屏蔽真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
-| 环境录制回放 | 录制真实环境数据包，随时回放 |
+| 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
+| 隐私/外观 | 桌面图标隐藏（仅 LSPosed 入口）、地图选点 GCJ-02→WGS-84 自动转换 |
 
 ### 设计原则
 
@@ -110,10 +111,10 @@ adb reboot
 
 控制端主界面分为：
 
-- **位置模拟**：地图选点设置单点位置；创建/编辑/启动路线；悬浮摇杆微调
+- **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；创建/编辑/启动路线；悬浮摇杆微调
 - **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 配置与启用，支持采集真实环境保存为快照
-- **录制回放**：录制真实环境数据包，按时间回放
-- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、调试入口
+- **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
+- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口
 
 所有操作走本地 API，无需外部网络（地图 SDK 除外）。
 
@@ -136,6 +137,9 @@ adb reboot
 | POST | `/api/debug/random-env` | 调试：生成全套随机虚拟环境并启用 |
 | GET/POST | `/api/test/report` | 检测器上报/查询报告 |
 | POST | `/api/recording/start` `/append` `/stop` | 录制 |
+| GET | `/api/recording/list` `/get` | 录像列表（含 `interrupted` 中断标记）/ 帧数据 |
+| POST | `/api/recording/play` `/pause` `/resume` `/stop-play` `/speed` | 回放控制 |
+| POST | `/api/recording/smooth` | 回放帧间平滑插值开关 `{"enabled":bool}` |
 
 请求示例：
 
@@ -170,8 +174,9 @@ curl -X POST http://127.0.0.1:18790/api/debug/random-env \
 - 读取真实环境（位置/基站/WiFi/BLE/传感器/GNSS）
 - 拉取模块期望配置（`/api/env/status`、`/api/location/status`、`/api/route/status`）
 - 逐项比较输出 `PASS / FAIL / SYNCING / NOT_ENABLED / UNKNOWN`
+- **识别录像/回放状态**：新增“录像/回放状态”区，显示 `PLAYING / PAUSED / RECORDING / IDLE`、播放段/帧进度、平滑插值开关；回放中位置判定容差放宽至 800m（帧间插值+抖动）
 - 一键"随机模拟"调用 `/api/debug/random-env` 后自动开始检测
-- 上报报告到 `/api/test/report`
+- 上报报告到 `/api/test/report`（含 `playback` 对象）
 
 ### 4.2 使用
 
@@ -278,6 +283,10 @@ adb logcat -s VirEnvDetector:I
 - **GNSS 真实回调覆盖**：必须拦截 `registerGnssStatusCallback`（不 proceed）并周期投递虚拟状态，否则真实卫星（几十颗）会覆盖虚拟值导致判定波动
 - **NetworkOnMainThread**：检测器 API 调用必须在后台线程，UI 更新回主线程
 - **HMA / HideMyAppList**：不影响 LSPosed Hook 注入；检测器需要 Root 才能直读模块持久化配置
+- **高德地图坐标是 GCJ-02**：地图选点/POI/高德定位坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后才能注入系统（否则偏差数百米）；内部持久化统一 WGS-84，回显地图时 `wgs84ToGcj02` 转回。**本次更新前保存的旧地点/路线坐标是 GCJ 语义，建议重新选点保存**
+- **流式录像**：录像使用 `StreamEnvironmentSampler` 持续监听 + 快照截帧，间隔输入框为 `numberDecimal`（支持 0.1s 小数）；录像中断（system_server 重启/崩溃）后自动标记 `interrupted` 并按实际帧数据恢复时长/帧数
+- **回放平滑插值**：默认开启；帧间位置按时间插值 + 小随机抖动（约 ±1.5m），可用 `/api/recording/smooth` 关闭；检测器回放中容差 800m
+- **桌面图标隐藏**：设置页开关通过禁用 `Launcher` activity-alias 实现；主 Activity（LSPosed `MODULE_SETTINGS` 入口）始终可用，不要手动禁用 MainActivity 组件
 
 ---
 
