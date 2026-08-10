@@ -78,6 +78,9 @@ class RecordingEngine(
     /** 开始一段新录像；若有未结束录像先自动结束。返回录像 id。 */
     fun startRecording(name: String, remark: String): Long {
         if (activeRecordingId > 0) stopRecording()
+        // 录制基线：保存用户录制开始时的位置/路线/摇杆/环境开关与配置，
+        // 回放时恢复同一环境起点（采集模式随后由帧数据逐帧覆盖）。
+        backend.saveRecordingBaseState()
         val id = databaseManager.insertRecording(name, remark)
         synchronized(this) {
             activeRecordingId = id
@@ -96,6 +99,20 @@ class RecordingEngine(
     fun appendFrame(data: JSONObject): Boolean {
         val id = activeRecordingId
         if (id <= 0) return false
+        // 录像编程器：每帧附加完整环境状态（位置/路线/摇杆/所有环境开关与配置），
+        // 回放时按时间轴自动重放这些“操作”。
+        // 采集模式（suspend 中）各引擎被临时清空，帧内 envState 取录制基线，
+        // 保证回放从用户录制开始时的环境起点恢复，而不是从空状态开始。
+        try {
+            val snapshot = if (backend.isSuspended()) {
+                backend.recordingBaseSnapshotJson()
+            } else {
+                backend.envStateSnapshotJson()
+            }
+            if (snapshot != null) data.put("envState", snapshot)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "append envState snapshot failed", t)
+        }
         val ts = data.optLong("timestamp", System.currentTimeMillis())
         val seq = synchronized(this) {
             if (recordingFirstTs == 0L) recordingFirstTs = ts
@@ -112,6 +129,7 @@ class RecordingEngine(
     fun stopRecording(): Boolean {
         val id = activeRecordingId
         if (id <= 0) return false
+        backend.clearRecordingBaseState()
         var count = 0
         var duration = 0L
         synchronized(this) {
@@ -158,8 +176,10 @@ class RecordingEngine(
             playlist = valid
             playIndex = 0
         }
-        // 回放是独立模式：先停路线，避免路线位置抢占回放输出
-        backend.stopRoute()
+        // 回放是独立模式：保存回放前的用户环境，结束时恢复；
+        // 同时应用录制基线（录制开始时的位置/路线/环境开关与配置）作为环境起点。
+        backend.savePrePlaybackState()
+        backend.applyRecordingBaseState()
         if (!loadRecording(valid[0])) {
             synchronized(playbackLock) { playbackEnabled = false }
             return false
@@ -192,7 +212,9 @@ class RecordingEngine(
             stopPlaybackLocked()
         }
         stopTicker()
-        ZLog.i(TAG_SCOPE, "playback stopped")
+        // 同步启停：回放停止时恢复回放前的用户环境（位置/路线/环境开关与配置）
+        backend.restoreAfterPlayback()
+        ZLog.i(TAG_SCOPE, "playback stopped (env restored)")
     }
 
     /** 设置回放倍速（0.5x~8x）。 */
@@ -340,9 +362,20 @@ class RecordingEngine(
         }
     }
 
-    /** 把一帧数据写入对应模拟引擎（Hook 层随即输出）。 */
+    /**
+     * 把一帧数据写入对应模拟引擎（Hook 层随即输出）。
+     *
+     * 录像编程器语义：帧内 `envState` 记录录制时刻的完整环境状态
+     * （位置/路线/摇杆/所有环境开关与配置），回放时先整体应用；
+     * 随后帧内采集数据（location/cell/wifi/bluetooth/gnss/sensor）
+     * 覆盖为具体输出数据。两者叠加 = 在合适时间点自动操作软件功能。
+     */
     private fun applyFrame(data: JSONObject) {
         try {
+            // 1) 应用录制时刻的完整环境状态快照（开关、路线、位置、摇杆、配置）
+            data.optJSONObject("envState")?.let { backend.applyEnvStateSnapshot(it) }
+
+            // 2) 帧内采集数据覆盖：位置
             data.optJSONObject("location")?.let { loc ->
                 val keys = loc.keys()
                 while (keys.hasNext()) {
@@ -357,9 +390,13 @@ class RecordingEngine(
                     }
                 }
             }
+            // 3) 帧内采集数据覆盖：基站 / WiFi / 蓝牙 / GNSS / 传感器
             data.optJSONObject("cell")?.let { backend.cellEngine.update(it) }
             data.optJSONObject("wifi")?.let { backend.wifiEngine.update(it) }
             data.optJSONObject("bluetooth")?.let { backend.bleEngine.update(it) }
+            data.optJSONObject("gnss")?.let { backend.gnssEngine.update(it) }
+            // 传感器连续模拟/回放：帧内 sensor 数据写入引擎，进程内注入器按事件流/采样率连续输出
+            data.optJSONObject("sensor")?.let { backend.sensorEngine.update(it) }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "apply frame failed", t)
         }
@@ -381,6 +418,17 @@ class RecordingEngine(
                 put("durationMs", durationMs)
                 put("recording", isRecording())
                 put("recordingId", activeRecordingId)
+                // 回放同步状态：路线/位置/环境开关与配置（App 展示用）
+                put("routeRunning", backend.routeEngine.isRunning())
+                put("routeEnabled", backend.routeEngine.isEnabled())
+                put("locationEnabled", backend.locationEngine.isEnabled())
+                put("envEnabled", JSONObject().apply {
+                    put("wifi", backend.wifiEngine.isEnabled())
+                    put("cell", backend.cellEngine.isEnabled())
+                    put("ble", backend.bleEngine.isEnabled())
+                    put("gnss", backend.gnssEngine.isEnabled())
+                    put("sensor", backend.sensorEngine.isEnabled())
+                })
             }
         }
     }

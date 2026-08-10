@@ -50,14 +50,17 @@ class EnvironmentCollector(private val context: Context) {
         result.put("timestamp", System.currentTimeMillis())
         result.put("location", collectLocation())
         result.put("cell", collectCell())
-        // WiFi / GNSS / 蓝牙均异步：串行完成后回调，避免 GNSS 状态回调晚于 onDone 丢失
+        // WiFi / GNSS / 蓝牙 / 传感器均异步：串行完成后回调，避免回调晚于 onDone 丢失
         collectWifi { wifi ->
             result.put("wifi", wifi)
             collectGnss { gnss ->
                 result.put("gnss", gnss)
                 collectBluetooth { bt ->
                     result.put("bluetooth", bt)
-                    onDone(result)
+                    collectSensors { sensor ->
+                        result.put("sensor", sensor)
+                        onDone(result)
+                    }
                 }
             }
         }
@@ -302,6 +305,68 @@ class EnvironmentCollector(private val context: Context) {
             mainHandler.removeCallbacks(timeout)
             ZLog.w(TAG_SCOPE, "ble startScan failed", t)
             out.put("devices", devices)
+            out.put("error", t.message)
+            onDone(out)
+        }
+    }
+
+    /**
+     * 传感器快照采集：注册加速度/陀螺仪/计步监听，拿到首批事件或超时后输出。
+     * 输出结构即传感器模拟/回放引擎消费的格式（accelerometer/gyroscope/stepCounter）。
+     */
+    @SuppressLint("MissingPermission")
+    private fun collectSensors(onDone: (JSONObject) -> Unit) {
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val out = JSONObject()
+        try {
+            val handler = Handler(Looper.getMainLooper())
+            val accel = sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+            val gyro = sm.getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE)
+            val step = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
+            var done = false
+            var accelV: FloatArray? = null
+            var gyroV: FloatArray? = null
+            var stepV = -1L
+            var sensorListener: android.hardware.SensorEventListener? = null
+
+            fun finish() {
+                if (done) return
+                done = true
+                try {
+                    sensorListener?.let { sm.unregisterListener(it) }
+                } catch (_: Throwable) {
+                }
+                handler.removeCallbacksAndMessages(null)
+                accelV?.let { out.put("accelerometer", JSONArray().apply { put(it[0]); put(it[1]); put(it[2]) }) }
+                gyroV?.let { out.put("gyroscope", JSONArray().apply { put(it[0]); put(it[1]); put(it[2]) }) }
+                if (stepV >= 0) out.put("stepCounter", stepV)
+                out.put("accuracy", 3)
+                out.put("sampleRateMs", 100)
+                ZLog.i(TAG_SCOPE, "sensors collected accel=${accelV != null} gyro=${gyroV != null} step=$stepV")
+                onDone(out)
+            }
+
+            sensorListener = object : android.hardware.SensorEventListener {
+                override fun onSensorChanged(event: android.hardware.SensorEvent) {
+                    when (event.sensor?.type) {
+                        android.hardware.Sensor.TYPE_ACCELEROMETER -> accelV = event.values.copyOf()
+                        android.hardware.Sensor.TYPE_GYROSCOPE -> gyroV = event.values.copyOf()
+                        android.hardware.Sensor.TYPE_STEP_COUNTER -> stepV = event.values[0].toLong()
+                    }
+                    if (accelV != null && gyroV != null && stepV >= 0) finish()
+                }
+
+                override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+            }
+
+            val listener = sensorListener ?: run { onDone(out); return }
+
+            if (accel != null) sm.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME, handler)
+            if (gyro != null) sm.registerListener(listener, gyro, android.hardware.SensorManager.SENSOR_DELAY_GAME, handler)
+            if (step != null) sm.registerListener(listener, step, android.hardware.SensorManager.SENSOR_DELAY_NORMAL, handler)
+            handler.postDelayed({ finish() }, 800L)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "collectSensors failed", t)
             out.put("error", t.message)
             onDone(out)
         }

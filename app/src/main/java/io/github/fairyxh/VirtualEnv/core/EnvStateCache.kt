@@ -132,6 +132,17 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     /** 当前虚拟 BLE 数据；未启用时 null。 */
     fun currentBle(): JSONObject? = synchronized(lock) { ble }
 
+    /** 当前虚拟传感器数据（加速度/陀螺仪/计步等）；未启用时 null。 */
+    fun currentSensor(): JSONObject? = synchronized(lock) { sensor }
+
+    /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
+    fun isSensorStreamActive(): Boolean = synchronized(lock) {
+        if (stepEnabled) return true
+        val d = sensor ?: return false
+        d.has("stepCounter") || d.has("accelerometer") || d.has("gyroscope") ||
+            (d.optJSONArray("events")?.length() ?: 0) > 0
+    }
+
     /** 位置虚拟化开关（单点或路线任一启用即为 true）。 */
     fun isLocationEnabled(): Boolean = synchronized(lock) { locationEnabled }
 

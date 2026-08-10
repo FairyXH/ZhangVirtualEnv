@@ -14,6 +14,7 @@ import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
+import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
@@ -99,6 +100,9 @@ class HomeFragment : Fragment() {
     private var collector: EnvironmentCollector? = null
     private var lastCollectResult: JSONObject? = null
 
+    /** 录像期间连续采集真实传感器数据（加速度/陀螺仪/计步）并逐帧追加。 */
+    private var sensorRecorder: SensorStreamRecorder? = null
+
     private var collectRecordingMode = false
 
     @Volatile
@@ -152,6 +156,7 @@ class HomeFragment : Fragment() {
         recordingStartButton = root.findViewById(R.id.recordingStartButton)
         recordingStopButton = root.findViewById(R.id.recordingStopButton)
         recordingStatus = root.findViewById(R.id.recordingStatus)
+        sensorRecorder = SensorStreamRecorder(requireContext())
 
         playbackSelected = root.findViewById(R.id.playbackSelected)
         playbackEnableButton = root.findViewById(R.id.playbackEnableButton)
@@ -231,6 +236,7 @@ class HomeFragment : Fragment() {
     override fun onDestroyView() {
         recordingScheduler?.shutdownNow()
         recordingScheduler = null
+        sensorRecorder?.stop()
         if (recordingId > 0) {
             val id = recordingId
             recordingId = -1L
@@ -427,6 +433,37 @@ class HomeFragment : Fragment() {
             )
         }
 
+        // 蓝牙轨道：合并附近设备 + 已配对设备，保存为 type=ble 配置，
+        // 使“蓝牙模拟”子页面能看到并同步本次采集结果
+        val btData = collect.optJSONObject("bluetooth")
+        val btDevices = btData?.optJSONArray("devices") ?: org.json.JSONArray()
+        val btBonded = btData?.optJSONArray("bonded") ?: org.json.JSONArray()
+        if (btDevices.length() > 0 || btBonded.length() > 0) {
+            val merged = org.json.JSONArray()
+            val seen = HashSet<String>()
+            fun appendEntry(src: org.json.JSONObject) {
+                val address = src.optString("address", "").uppercase()
+                if (address.isBlank() || !seen.add(address)) return
+                merged.put(JSONObject().apply {
+                    put("name", src.optString("name", ""))
+                    put("address", address)
+                    put("rssi", src.optInt("rssi", -70))
+                    if (src.has("txPower")) put("txPower", src.optInt("txPower", 0))
+                    if (src.has("manufacturerData")) put("manufacturerData", src.optString("manufacturerData", ""))
+                    if (src.has("serviceUuids")) put("serviceUuids", src.optJSONArray("serviceUuids"))
+                })
+            }
+            for (i in 0 until btBonded.length()) appendEntry(btBonded.optJSONObject(i) ?: continue)
+            for (i in 0 until btDevices.length()) appendEntry(btDevices.optJSONObject(i) ?: continue)
+            if (merged.length() > 0) {
+                ApiClient.createEnvSnapshot(
+                    name, sourceRemark, "ble",
+                    JSONObject().apply { put("devices", merged) }
+                )
+                ZLog.i(TAG_SCOPE, "ble track saved ${merged.length()} devices")
+            }
+        }
+
         val loc = collect.optJSONObject("location")
         val lat = loc?.optDouble("latitude", Double.NaN) ?: Double.NaN
         val lon = loc?.optDouble("longitude", Double.NaN) ?: Double.NaN
@@ -471,6 +508,8 @@ class HomeFragment : Fragment() {
                     recordingFrames = 0
                     recordingName = name
                     recordingNameInput.text.clear()
+                    // 连续传感器采集（加速度/陀螺仪/计步）随录像启动
+                    if (recordingId > 0) sensorRecorder?.start(recordingId)
                     Toast.makeText(
                         requireContext(),
                         R.string.home_recording_suspend_notice,
@@ -545,6 +584,7 @@ class HomeFragment : Fragment() {
     private fun stopRecording() {
         recordingScheduler?.shutdownNow()
         recordingScheduler = null
+        sensorRecorder?.stop()
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L
@@ -734,7 +774,7 @@ class HomeFragment : Fragment() {
 
     // ---------- 采集详情 ----------
 
-    /** 已保存采集详情弹窗：快照显示采集内容摘要，录像显示帧/轨迹信息。 */
+    /** 已保存采集详情弹窗：快照显示采集内容摘要，录像按时间轴显示所有帧。 */
     private fun showSavedDetail(item: SavedItem) {
         executor.execute {
             val text = if (item.kind == "snapshot") {
@@ -743,14 +783,34 @@ class HomeFragment : Fragment() {
                 buildRecordingDetail(item.id)
             }
             requireActivity().runOnUiThread {
-                android.app.AlertDialog.Builder(requireContext())
-                    .setTitle(getString(R.string.home_saved_detail_title) + " · " + item.name)
-                    .setMessage(text)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                showScrollableDialog(
+                    getString(R.string.home_saved_detail_title) + " · " + item.name,
+                    text
+                )
             }
         }
     }
+
+    /** 可滚动详情弹窗（录像帧数多时避免内容溢出）。 */
+    private fun showScrollableDialog(title: String, text: String) {
+        val scroll = android.widget.ScrollView(requireContext()).apply {
+            isFillViewport = true
+        }
+        val tv = TextView(requireContext()).apply {
+            setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.text_primary))
+            textSize = 12f
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setText(text)
+        }
+        scroll.addView(tv)
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setView(scroll)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun buildSnapshotDetail(id: Long): String {
         val arr = ApiClient.listEnvSnapshots().data?.optJSONArray("snapshots")
@@ -830,29 +890,73 @@ class HomeFragment : Fragment() {
         return sb.toString()
     }
 
+    /** 录像详情：按时间轴逐帧展示（seq、时间偏移、位置/基站/WiFi/蓝牙/GNSS/传感器摘要）。 */
     private fun buildRecordingDetail(id: Long): String {
         val result = ApiClient.getRecordingFrames(id)
         val frames = result.data?.optJSONArray("frames")
             ?: return getString(R.string.home_saved_detail_empty)
         val sb = StringBuilder()
         sb.append("帧数：").append(frames.length()).append("\n")
+        val firstTs = frames.optJSONObject(0)?.optLong("timestampMs", 0L) ?: 0L
         var firstLoc = ""
         var lastLoc = ""
         for (i in 0 until frames.length()) {
             val frame = frames.optJSONObject(i) ?: continue
-            val loc = frame.optJSONObject("data")?.optJSONObject("location") ?: continue
-            val keys = loc.keys()
-            while (keys.hasNext()) {
-                val item = loc.optJSONObject(keys.next()) ?: continue
-                val lat = item.optDouble("latitude", Double.NaN)
-                val lon = item.optDouble("longitude", Double.NaN)
-                if (!lat.isNaN() && !lon.isNaN()) {
-                    val text = String.format("%.6f, %.6f", lat, lon)
-                    if (firstLoc.isEmpty()) firstLoc = text
-                    lastLoc = text
-                    break
+            val ts = frame.optLong("timestampMs", 0L)
+            val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
+            val data = frame.optJSONObject("data") ?: continue
+
+            var locText = ""
+            data.optJSONObject("location")?.let { loc ->
+                val keys = loc.keys()
+                while (keys.hasNext()) {
+                    val item = loc.optJSONObject(keys.next()) ?: continue
+                    val lat = item.optDouble("latitude", Double.NaN)
+                    val lon = item.optDouble("longitude", Double.NaN)
+                    if (!lat.isNaN() && !lon.isNaN()) {
+                        val text = String.format("%.6f, %.6f", lat, lon)
+                        if (firstLoc.isEmpty()) firstLoc = text
+                        lastLoc = text
+                        locText = text
+                        break
+                    }
                 }
             }
+            val cellN = data.optJSONObject("cell")?.optJSONArray("cells")?.length() ?: 0
+            val wifiN = data.optJSONObject("wifi")?.optJSONArray("networks")?.length() ?: 0
+            val btN = (data.optJSONObject("bluetooth")?.optJSONArray("devices")?.length() ?: 0) +
+                (data.optJSONObject("bluetooth")?.optJSONArray("bonded")?.length() ?: 0)
+            val gnssN = data.optJSONObject("gnss")?.optInt("satelliteCount", 0) ?: 0
+            val sensor = data.optJSONObject("sensor")
+            var sensorText = ""
+            if (sensor != null) {
+                val parts = mutableListOf<String>()
+                sensor.optJSONArray("accelerometer")?.let { arr ->
+                    if (arr.length() >= 3) {
+                        parts.add(String.format("acc=%.2f,%.2f,%.2f", arr.optDouble(0), arr.optDouble(1), arr.optDouble(2)))
+                    }
+                }
+                sensor.optJSONArray("gyroscope")?.let { arr ->
+                    if (arr.length() >= 3) {
+                        parts.add(String.format("gyr=%.3f,%.3f,%.3f", arr.optDouble(0), arr.optDouble(1), arr.optDouble(2)))
+                    }
+                }
+                if (sensor.has("stepCounter")) parts.add("步=" + sensor.optLong("stepCounter", 0L))
+                sensorText = if (parts.isEmpty()) "" else parts.joinToString(" ")
+            }
+
+            sb.append(String.format("#%d [+%06.1fs] ", frame.optInt("seq", i + 1), offsetSec))
+            if (locText.isNotEmpty()) sb.append("位置:").append(locText).append(" ")
+            if (cellN > 0) sb.append("基站:").append(cellN).append(" ")
+            if (wifiN > 0) sb.append("WiFi:").append(wifiN).append(" ")
+            if (btN > 0) sb.append("蓝牙:").append(btN).append(" ")
+            if (gnssN > 0) sb.append("GNSS:").append(gnssN).append(" ")
+            if (sensorText.isNotEmpty()) sb.append("传感器[").append(sensorText).append("]")
+            val content = sb.toString()
+            if (content.endsWith("] ") || content.endsWith(" ")) {
+                sb.setLength(sb.length - 1)
+            }
+            sb.append("\n")
         }
         if (firstLoc.isNotEmpty()) sb.append("起点：").append(firstLoc).append("\n")
         if (lastLoc.isNotEmpty()) sb.append("终点：").append(lastLoc).append("\n")
@@ -901,10 +1005,26 @@ class HomeFragment : Fragment() {
         val playlistSize = data.optInt("playlistSize", 1).coerceAtLeast(1)
         val frameProgress = data.optInt("frameProgress", 0)
         val frameCount = data.optInt("frameCount", 0)
+        val routeRunning = data.optBoolean("routeRunning", false)
+        val locationEnabled = data.optBoolean("locationEnabled", false)
+        val env = data.optJSONObject("envEnabled")
+        val envParts = mutableListOf<String>()
+        env?.let {
+            if (it.optBoolean("wifi", false)) envParts.add("WiFi")
+            if (it.optBoolean("cell", false)) envParts.add("基站")
+            if (it.optBoolean("ble", false)) envParts.add("BLE")
+            if (it.optBoolean("gnss", false)) envParts.add("GNSS")
+            if (it.optBoolean("sensor", false)) envParts.add("传感器")
+        }
+        val syncParts = mutableListOf<String>()
+        if (routeRunning) syncParts.add("路线运行中")
+        if (locationEnabled) syncParts.add("虚拟定位")
+        if (envParts.isNotEmpty()) syncParts.add("环境:" + envParts.joinToString("/"))
+        val syncText = if (syncParts.isEmpty()) "" else " · " + syncParts.joinToString(" ")
         playbackStatus.text = if (paused) {
-            getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount)
+            getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount) + syncText
         } else {
-            getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, "")
+            getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, syncText)
         }
     }
 

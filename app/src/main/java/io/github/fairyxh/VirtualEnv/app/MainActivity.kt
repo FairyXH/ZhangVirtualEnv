@@ -82,21 +82,31 @@ class MainActivity : FragmentActivity() {
 
     private fun switchTab(index: Int, animate: Boolean) {
         if (currentTab == index) return
-        currentTab = index
-        val fragment: Fragment = when (index) {
-            0 -> HomeFragment()
-            1 -> LocationSimFragment()
-            2 -> RouteSimFragment()
-            3 -> EnvFragment()
-            else -> SettingsFragment()
+        val fm = supportFragmentManager
+        val ft = fm.beginTransaction().setCustomAnimations(
+            R.anim.fade_in, R.anim.fade_out,
+            R.anim.fade_in, R.anim.fade_out
+        )
+        // 隐藏当前页（保留其视图与状态，切回时不重建）
+        if (currentTab in 0..4) {
+            fm.findFragmentByTag("tab$currentTab")?.let { ft.hide(it) }
         }
-        supportFragmentManager.beginTransaction()
-            .setCustomAnimations(
-                R.anim.fade_in, R.anim.fade_out,
-                R.anim.fade_in, R.anim.fade_out
-            )
-            .replace(R.id.fragmentContainer, fragment, "tab$index")
-            .commit()
+        currentTab = index
+        // 优先复用已创建 Fragment，避免主页录制/回放等状态被重置
+        var fragment = fm.findFragmentByTag("tab$index")
+        if (fragment == null) {
+            fragment = when (index) {
+                0 -> HomeFragment()
+                1 -> LocationSimFragment()
+                2 -> RouteSimFragment()
+                3 -> EnvFragment()
+                else -> SettingsFragment()
+            }
+            ft.add(R.id.fragmentContainer, fragment, "tab$index")
+        } else {
+            ft.show(fragment)
+        }
+        ft.commit()
         updateTabVisual(index)
         ZLog.d(TAG_SCOPE, "switch tab -> $index")
     }

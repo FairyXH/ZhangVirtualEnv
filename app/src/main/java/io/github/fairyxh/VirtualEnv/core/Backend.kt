@@ -174,6 +174,184 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- 采集时临时停用虚拟环境 ----------
 
+    /** 回放停止时同步停用回放产生的虚拟环境：关闭虚拟定位并清空环境引擎（fail-open 放行真实数据）。 */
+    fun stopRecordingPlaybackEnv() {
+        synchronized(this) {
+            setLocationEnabled(false)
+            routeEngine.stop()
+            wifiEngine.clear()
+            cellEngine.clear()
+            bleEngine.clear()
+            gnssEngine.clear()
+            sensorEngine.clear()
+            activeEnvSnapshotIds.keys.removeAll(
+                setOf("wifi", "cell", "ble", "gnss", "sensor")
+            )
+            ZLog.i(TAG_SCOPE, "recording playback env stopped (location + env cleared)")
+        }
+    }
+
+    // ---------- 环境状态快照（录像编程器：录制/回放完整环境状态） ----------
+
+    /**
+     * 当前完整虚拟环境状态快照：位置（单点+开关）、路线、摇杆、
+     * 以及全部环境引擎（wifi/cell/ble/gnss/sensor）的 enabled+data。
+     *
+     * 录制时由 RecordingEngine 自动附加到每帧，回放时按帧应用，
+     * 实现“录制编程器”——在合适时间点自动操作位置/路线/所有环境开关和配置。
+     */
+    fun envStateSnapshotJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("location", org.json.JSONObject().apply {
+                put("enabled", locationEngine.isEnabled())
+                val s = locationEngine.currentState()
+                put("latitude", s.latitude)
+                put("longitude", s.longitude)
+                put("speed", s.speed)
+                put("bearing", s.bearing)
+                put("accuracy", s.accuracy)
+            })
+            put("route", routeEngine.snapshotJson())
+            put("joystick", joystickEngine.statusJson())
+            put("wifi", wifiEngine.statusJson())
+            put("cell", cellEngine.statusJson())
+            put("ble", bleEngine.statusJson())
+            put("gnss", gnssEngine.statusJson())
+            put("sensor", sensorEngine.statusJson())
+        }
+    }
+
+    /**
+     * 应用一帧环境状态快照（录像回放时调用）。
+     *
+     * 位置/路线/摇杆与各环境引擎的 enabled+data 全部同步；
+     * enabled=false 的引擎 clear（放行真实数据），数据保留语义由调用方快照保证。
+     */
+    fun applyEnvStateSnapshot(snap: org.json.JSONObject) {
+        synchronized(this) {
+            // 位置（单点）：开关与坐标同步
+            snap.optJSONObject("location")?.let { loc ->
+                val enabled = loc.optBoolean("enabled", false)
+                if (enabled) {
+                    setLocationPoint(
+                        loc.optDouble("latitude", 0.0),
+                        loc.optDouble("longitude", 0.0),
+                        loc.optDouble("speed", 0.0).toFloat(),
+                        loc.optDouble("bearing", 0.0).toFloat()
+                    )
+                    setLocationEnabled(true)
+                } else {
+                    setLocationEnabled(false)
+                }
+            }
+            // 路线：快照含 points/speed/stepFrequency/segment/progress
+            snap.optJSONObject("route")?.let { route ->
+                if (route.optBoolean("enabled", false) && route.optJSONArray("points")?.length() ?: 0 >= 2) {
+                    routeEngine.restoreFrom(route)
+                } else {
+                    routeEngine.stop()
+                }
+            }
+            // 摇杆
+            snap.optJSONObject("joystick")?.let { j ->
+                joystickEngine.setVector(
+                    j.optBoolean("enabled", false),
+                    j.optDouble("dx", 0.0),
+                    j.optDouble("dy", 0.0),
+                    j.optDouble("speedKmh", 5.0)
+                )
+            }
+            applyEnvSnapshotEngine(snap, "wifi", wifiEngine)
+            applyEnvSnapshotEngine(snap, "cell", cellEngine)
+            applyEnvSnapshotEngine(snap, "ble", bleEngine)
+            applyEnvSnapshotEngine(snap, "gnss", gnssEngine)
+            applyEnvSnapshotEngine(snap, "sensor", sensorEngine)
+            ZLog.i(TAG_SCOPE, "env state snapshot applied (${snap.length()} groups)")
+        }
+    }
+
+    private fun applyEnvSnapshotEngine(snap: org.json.JSONObject, key: String, engine: EnvStateEngine) {
+        val status = snap.optJSONObject(key) ?: return
+        val data = status.optJSONObject("data")
+        if (status.optBoolean("enabled", false) && data != null) {
+            engine.update(data)
+        } else {
+            engine.clear()
+        }
+    }
+
+    // ---------- 录像回放前保存 / 回放后恢复 ----------
+
+    @Volatile
+    private var prePlaybackSnapshot: org.json.JSONObject? = null
+
+    /** 录像回放开始前保存当前环境状态（回放结束时恢复）。 */
+    fun savePrePlaybackState() {
+        synchronized(this) {
+            prePlaybackSnapshot = envStateSnapshotJson()
+            ZLog.i(TAG_SCOPE, "pre-playback env saved")
+        }
+    }
+
+    /** 回放结束后恢复回放前环境；无快照时清空（fail-open 放行真实数据）。 */
+    fun restoreAfterPlayback() {
+        val snap = synchronized(this) {
+            val s = prePlaybackSnapshot
+            prePlaybackSnapshot = null
+            s
+        }
+        if (snap != null) {
+            applyEnvStateSnapshot(snap)
+            ZLog.i(TAG_SCOPE, "playback env restored from pre-playback snapshot")
+        } else {
+            stopRecordingPlaybackEnv()
+        }
+    }
+
+    // ---------- 录制基线（采集开始前保存用户虚拟环境状态） ----------
+
+    @Volatile
+    private var recordingBaseSnapshot: org.json.JSONObject? = null
+
+    /** 录像开始时保存当前环境状态（采集真实数据前调用，作为回放初始状态）。 */
+    fun saveRecordingBaseState() {
+        synchronized(this) {
+            recordingBaseSnapshot = envStateSnapshotJson()
+            ZLog.i(TAG_SCOPE, "recording base env saved")
+        }
+    }
+
+    /** 录像停止时清除录制基线（避免残留被下一次回放误用）。 */
+    fun clearRecordingBaseState() {
+        synchronized(this) {
+            recordingBaseSnapshot = null
+        }
+    }
+
+    /**
+     * 录制期间读取录制基线（不消费）。采集模式下 suspendAll 会把各引擎清空，
+     * 帧内 envState 需要以录制基线为准，而不是空的“挂起状态”。
+     */
+    fun recordingBaseSnapshotJson(): org.json.JSONObject? {
+        return synchronized(this) { recordingBaseSnapshot }
+    }
+
+    /**
+     * 回放录像前应用录制基线：恢复用户录制开始时的位置/路线/摇杆/环境开关与配置。
+     * 使录像回放从与录制时一致的环境起点开始（采集帧数据随后逐帧覆盖）。
+     * 只读应用，不消费基线：同一录像可多次回放；基线在停止录制时清除。
+     */
+    fun applyRecordingBaseState() {
+        val snap = synchronized(this) { recordingBaseSnapshot }
+        if (snap != null) {
+            applyEnvStateSnapshot(snap)
+            ZLog.i(TAG_SCOPE, "recording base env applied (${snap.length()} groups)")
+        } else {
+            // 无基线（老录像）：沿用原有“清空后由帧数据重建”的行为
+            ZLog.i(TAG_SCOPE, "recording base env absent, replay builds from frames")
+        }
+    }
+
     @Volatile
     private var suspendCount = 0
 
@@ -458,6 +636,7 @@ class Backend private constructor(private val dataDir: File) {
         findTrack("cell")?.optJSONObject("data")?.let { cellEngine.update(it) } ?: cellEngine.clear()
         findTrack("wifi")?.optJSONObject("data")?.let { wifiEngine.update(it) } ?: wifiEngine.clear()
         findTrack("gnss")?.optJSONObject("data")?.let { gnssEngine.update(it) } ?: gnssEngine.clear()
+        findTrack("ble")?.optJSONObject("data")?.let { bleEngine.update(it) } ?: bleEngine.clear()
         ZLog.i(TAG_SCOPE, "collect track overrides applied for name=$collectName")
     }
 
