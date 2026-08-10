@@ -4,16 +4,40 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import java.util.concurrent.Executors
 
 /**
- * 环境模拟入口页：基站 / WiFi / GNSS 三卡片 → 子页面（EnvDetailActivity）。
+ * 环境模拟入口页：基站 / WiFi / GNSS 等五卡片 → 子页面（EnvDetailActivity）。
  *
- * 已保存环境模块已删除：采集保存统一由主页「已保存采集」管理（含轨道化拆分）。
+ * 视图层已迁移到 Compose Liquid Glass（GlassCard + GlassToggle），业务逻辑不变。
  */
 class EnvFragment : Fragment() {
 
@@ -25,57 +49,26 @@ class EnvFragment : Fragment() {
         private const val TYPE_GNSS = "gnss"
     }
 
-    private lateinit var cellStatus: TextView
-    private lateinit var wifiStatus: TextView
-    private lateinit var bleStatus: TextView
-    private lateinit var sensorStatus: TextView
-    private lateinit var gnssStatus: TextView
-    private lateinit var cellSwitch: android.widget.Switch
-    private lateinit var wifiSwitch: android.widget.Switch
-    private lateinit var bleSwitch: android.widget.Switch
-    private lateinit var sensorSwitch: android.widget.Switch
-    private lateinit var gnssSwitch: android.widget.Switch
+    private data class EnvItem(
+        val type: String,
+        val titleRes: Int,
+        val switchState: Boolean,
+        val summary: String
+    )
+
+    private var items by mutableStateOf(listOf<EnvItem>())
     private var updatingSwitch = false
 
     private val executor = Executors.newSingleThreadExecutor()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        val root = inflater.inflate(R.layout.fragment_env, container, false)
-        cellStatus = root.findViewById(R.id.cellStatus)
-        wifiStatus = root.findViewById(R.id.wifiStatus)
-        bleStatus = root.findViewById(R.id.bleStatus)
-        sensorStatus = root.findViewById(R.id.sensorStatus)
-        gnssStatus = root.findViewById(R.id.gnssStatus)
-        cellSwitch = root.findViewById(R.id.cellSwitch)
-        wifiSwitch = root.findViewById(R.id.wifiSwitch)
-        bleSwitch = root.findViewById(R.id.bleSwitch)
-        sensorSwitch = root.findViewById(R.id.sensorSwitch)
-        gnssSwitch = root.findViewById(R.id.gnssSwitch)
-
-        root.findViewById<View>(R.id.cellCard).setOnClickListener {
-            EnvDetailActivity.start(requireContext(), TYPE_CELL)
-        }
-        root.findViewById<View>(R.id.wifiCard).setOnClickListener {
-            EnvDetailActivity.start(requireContext(), TYPE_WIFI)
-        }
-        root.findViewById<View>(R.id.bleCard).setOnClickListener {
-            EnvDetailActivity.start(requireContext(), TYPE_BLE)
-        }
-        root.findViewById<View>(R.id.sensorCard).setOnClickListener {
-            EnvDetailActivity.start(requireContext(), TYPE_SENSOR)
-        }
-        root.findViewById<View>(R.id.gnssCard).setOnClickListener {
-            EnvDetailActivity.start(requireContext(), TYPE_GNSS)
-        }
-
-        cellSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_CELL, checked) }
-        wifiSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_WIFI, checked) }
-        bleSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_BLE, checked) }
-        sensorSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_SENSOR, checked) }
-        gnssSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_GNSS, checked) }
-
         refreshStatuses()
-        return root
+        return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                EnvScreen(this@EnvFragment)
+            }
+        }
     }
 
     override fun onResume() {
@@ -83,9 +76,97 @@ class EnvFragment : Fragment() {
         refreshStatuses()
     }
 
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden) refreshStatuses()
+    }
+
     override fun onDestroyView() {
         executor.shutdown()
         super.onDestroyView()
+    }
+
+    @Composable
+    private fun EnvScreen(fragment: EnvFragment) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                val colors = glassColors()
+                BasicText(
+                    getString(R.string.env_title),
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                )
+                BasicText(
+                    getString(R.string.env_subtitle),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+                items.forEach { item ->
+                    EnvCard(
+                        item = item,
+                        backdrop = backdrop,
+                        onCardClick = {
+                            EnvDetailActivity.start(requireContext(), item.type)
+                        },
+                        onToggle = { checked -> fragment.toggleEnv(item.type, checked) }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun EnvCard(
+        item: EnvItem,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onCardClick: () -> Unit,
+        onToggle: (Boolean) -> Unit
+    ) {
+        val colors = glassColors()
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onCardClick,
+            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+        ) {
+            Row(
+                Modifier
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        getString(item.titleRes),
+                        style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    )
+                    BasicText(
+                        item.summary,
+                        Modifier.padding(top = 2.dp),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                    )
+                }
+                GlassToggle(
+                    selected = { item.switchState },
+                    onSelect = onToggle,
+                    backdrop = backdrop,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
     }
 
     /** 快捷开关：关闭时 Hook 放行真实数据（数据保留），开启时恢复。 */
@@ -95,7 +176,7 @@ class EnvFragment : Fragment() {
             val result = ApiClient.setEnvEnabled(type, enabled)
             requireActivity().runOnUiThread {
                 if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                    android.widget.Toast.makeText(requireContext(), result.message, android.widget.Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                     refreshStatuses()
                 }
             }
@@ -104,27 +185,35 @@ class EnvFragment : Fragment() {
 
     private fun refreshStatuses() {
         listOf(
-            TYPE_CELL to (cellStatus to cellSwitch),
-            TYPE_WIFI to (wifiStatus to wifiSwitch),
-            TYPE_BLE to (bleStatus to bleSwitch),
-            TYPE_SENSOR to (sensorStatus to sensorSwitch),
-            TYPE_GNSS to (gnssStatus to gnssSwitch)
-        ).forEach { (type, pair) ->
-            val (statusView, switchView) = pair
+            TYPE_CELL to R.string.env_cell_title,
+            TYPE_WIFI to R.string.env_wifi_title,
+            TYPE_BLE to R.string.env_ble_title,
+            TYPE_SENSOR to R.string.env_sensor_title,
+            TYPE_GNSS to R.string.env_gnss_title
+        ).forEach { (type, titleRes) ->
             executor.execute {
                 val result = ApiClient.getEnvStatus(type)
                 requireActivity().runOnUiThread {
                     val data = result.data
                     val enabled = data != null && data.optBoolean("enabled", false)
                     val summary = configSummary(type, data)
-                    statusView.text = getString(
-                        R.string.env_card_status_format,
-                        getString(if (enabled) R.string.env_status_active else R.string.env_status_inactive),
-                        summary
-                    )
-                    updatingSwitch = true
-                    switchView.isChecked = enabled
-                    updatingSwitch = false
+                    val current = items
+                    items = current.map { item ->
+                        if (item.type == type) {
+                            EnvItem(
+                                type = item.type,
+                                titleRes = item.titleRes,
+                                switchState = enabled,
+                                summary = getString(
+                                    R.string.env_card_status_format,
+                                    getString(if (enabled) R.string.env_status_active else R.string.env_status_inactive),
+                                    summary
+                                )
+                            )
+                        } else {
+                            item
+                        }
+                    }
                 }
             }
         }
