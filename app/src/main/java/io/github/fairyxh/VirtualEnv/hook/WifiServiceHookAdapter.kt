@@ -152,12 +152,34 @@ class WifiServiceHookAdapter(
                 setField(scan, "level", n.optInt("rssi", -70))
                 setField(scan, "frequency", n.optInt("frequency", 2412))
                 setField(scan, "capabilities", n.optString("capabilities", "[WPA2-PSK-CCMP]"))
+                setField(scan, "timestamp", android.os.SystemClock.elapsedRealtimeNanos())
+                // 必须设置信息元素数组：Oplus DCS 统计回调 getInformationElements()
+                // 会 Arrays.asList 该字段，null 直接 NPE 导致 system_server 崩溃
+                setEmptyInformationElements(scan)
                 result.add(scan)
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "build virtual wifi result failed", t)
             }
         }
         return result
+    }
+
+    /** 设置空的 InformationElement[]，避免 Oplus 统计 NPE。
+     *  Oplus 15 字段名为 informationElements（无 m 前缀，JADX 真机确认），
+     *  其他 ROM 兼容 mInformationElements。 */
+    private fun setEmptyInformationElements(scan: Any) {
+        try {
+            val ieClass = Class.forName("android.net.wifi.ScanResult\$InformationElement")
+            val empty = java.lang.reflect.Array.newInstance(ieClass, 0)
+            val field = try {
+                scan.javaClass.getField("informationElements")
+            } catch (_: NoSuchFieldException) {
+                scan.javaClass.getField("mInformationElements")
+            }
+            field.set(scan, empty)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "set informationElements failed", t)
+        }
     }
 
     /** 用 hook 方法自身的返回类型 Class 反射构造 ParceledListSlice（避免 classloader 不一致）。 */
@@ -216,10 +238,28 @@ class WifiServiceHookAdapter(
         val networks = data.optJSONArray("networks")
         val first = networks?.optJSONObject(0)
         if (first != null) {
-            setField(info, "mSSID", first.optString("ssid", ""))
-            setField(info, "mBSSID", first.optString("bssid", ""))
-            setField(info, "mRssi", first.optInt("rssi", -70))
-            setField(info, "mFrequency", first.optInt("frequency", 2412))
+            try {
+                val ssid = first.optString("ssid", "")
+                val bssid = first.optString("bssid", "")
+                val rssi = first.optInt("rssi", -70)
+                val freq = first.optInt("frequency", 2412)
+                // Oplus 15 WifiInfo 的字段全部 private（无 mSSID 字段，SSID 存 WifiSsid 对象），
+                // 直接 getField 全部失败导致返回空壳 WifiInfo → Oplus NAS 读 mWifiSsid NPE。
+                // 统一走公开 setter（hidden API，反射调用），跨 ROM 兼容。
+                if (ssid.isNotEmpty()) {
+                    val wifiSsid = Class.forName("android.net.wifi.WifiSsid")
+                        .getMethod("createFromAsciiEncoded", String::class.java)
+                        .invoke(null, ssid)
+                    info.javaClass.getMethod(
+                        "setSSID", Class.forName("android.net.wifi.WifiSsid")
+                    ).invoke(info, wifiSsid)
+                }
+                info.javaClass.getMethod("setBSSID", String::class.java).invoke(info, bssid)
+                info.javaClass.getMethod("setRssi", Int::class.java).invoke(info, rssi)
+                info.javaClass.getMethod("setFrequency", Int::class.java).invoke(info, freq)
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "build virtual wifi info failed", t)
+            }
         }
         return info
     }

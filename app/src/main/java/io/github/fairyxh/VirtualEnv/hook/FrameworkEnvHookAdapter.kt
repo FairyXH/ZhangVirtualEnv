@@ -411,12 +411,34 @@ class FrameworkEnvHookAdapter(
                 setField(scan, "level", n.optInt("rssi", -70))
                 setField(scan, "frequency", n.optInt("frequency", 2412))
                 setField(scan, "capabilities", n.optString("capabilities", "[WPA2-PSK-CCMP]"))
+                setField(scan, "timestamp", android.os.SystemClock.elapsedRealtimeNanos())
+                // 必须设置信息元素数组：Oplus DCS 统计回调 getInformationElements()
+                // 会 Arrays.asList 该字段，null 直接 NPE 导致 system_server 崩溃
+                setEmptyInformationElements(scan)
                 result.add(scan)
             } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "build wifi result failed", t)
+                ZLog.w(TAG_SCOPE, "build virtual wifi result failed", t)
             }
         }
         return result
+    }
+
+    /** 设置空的 InformationElement[]，避免 Oplus 统计 NPE。
+     *  Oplus 15 字段名为 informationElements（无 m 前缀，JADX 真机确认），
+     *  其他 ROM 兼容 mInformationElements。 */
+    private fun setEmptyInformationElements(scan: Any) {
+        try {
+            val ieClass = Class.forName("android.net.wifi.ScanResult\$InformationElement")
+            val empty = java.lang.reflect.Array.newInstance(ieClass, 0)
+            val field = try {
+                scan.javaClass.getField("informationElements")
+            } catch (_: NoSuchFieldException) {
+                scan.javaClass.getField("mInformationElements")
+            }
+            field.set(scan, empty)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "set informationElements failed", t)
+        }
     }
 
     private fun setField(target: Any, fieldName: String, value: Any) {

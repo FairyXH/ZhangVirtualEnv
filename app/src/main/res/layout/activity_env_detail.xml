@@ -157,7 +157,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/space_xs"
                         android:hint="@string/env_cell_rsrp_hint"
-                        android:inputType="number"
+                        android:inputType="numberSigned"
                         android:maxLines="1"
                         style="@style/EditText.Field" />
                 </LinearLayout>
@@ -196,7 +196,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/space_xs"
                         android:hint="@string/env_wifi_rssi_hint"
-                        android:inputType="number"
+                        android:inputType="numberSigned"
                         android:maxLines="1"
                         style="@style/EditText.Field" />
 
@@ -245,7 +245,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/space_xs"
                         android:hint="@string/env_ble_rssi_hint"
-                        android:inputType="number"
+                        android:inputType="numberSigned"
                         android:maxLines="1"
                         style="@style/EditText.Field" />
                 </LinearLayout>
