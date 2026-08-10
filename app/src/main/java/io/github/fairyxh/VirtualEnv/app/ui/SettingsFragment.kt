@@ -2,6 +2,7 @@ package io.github.fairyxh.VirtualEnv.app.ui
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -10,10 +11,25 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.pm.Signature
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.location.GnssStatus
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.net.wifi.ScanResult as WifiScanResult
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.Looper
+import android.telephony.CellInfo
+import android.telephony.CellInfoGsm
+import android.telephony.CellInfoLte
+import android.telephony.CellInfoNr
+import android.telephony.CellInfoWcdma
+import android.telephony.TelephonyManager
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -29,10 +45,16 @@ import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意 + BLE 扫描测试（不 Suspend）。
+ * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意。
+ *
+ * 底部「环境实时测试（普通 App 视角）」：不 Suspend，用标准系统 API 持续读取
+ * 位置 / 基站 / 蓝牙 / WiFi / 传感器 / GNSS，实时分栏刷新，点击结束停止。
  */
 class SettingsFragment : Fragment() {
 
@@ -41,7 +63,8 @@ class SettingsFragment : Fragment() {
         private const val PREFS = "amap_config"
         private const val KEY_AMAP_KEY = "amap_key"
         private const val KEY_AMAP_SECURITY = "amap_security_key"
-        private const val BLE_TEST_SCAN_MS = 8_000L
+        private const val REFRESH_MS = 1000L
+        private const val BLE_RESULTS_LIMIT = 20
 
         private const val AMAP_PRIVACY_URL = "https://lbs.amap.com/api/android-sdk/guide/create-project/dev-attention"
     }
@@ -52,35 +75,81 @@ class SettingsFragment : Fragment() {
     private lateinit var amapSecurityInput: EditText
     private lateinit var privacyAgreeCheck: CheckBox
 
-    private lateinit var bleTestButton: Button
-    private lateinit var bleTestResult: TextView
-    private val bleTestBusy = AtomicBoolean(false)
+    private lateinit var envTestStartButton: Button
+    private lateinit var envTestStopButton: Button
+    private lateinit var envTestLocationValue: TextView
+    private lateinit var envTestCellValue: TextView
+    private lateinit var envTestBleValue: TextView
+    private lateinit var envTestWifiValue: TextView
+    private lateinit var envTestSensorValue: TextView
+    private lateinit var envTestGnssValue: TextView
+
+    // ---- 环境实时测试状态 ----
+    private val envTestRunning = AtomicBoolean(false)
+    private var envTestScheduler: ScheduledExecutorService? = null
+
+    private var locationManager: LocationManager? = null
+    private var telephonyManager: TelephonyManager? = null
+    private var wifiManager: WifiManager? = null
+    private var sensorManager: SensorManager? = null
     private var bleScanner: BluetoothLeScanner? = null
+    private var stepSensor: Sensor? = null
+
+    private val bleFound = LinkedHashMap<String, String>()
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            // 刷新线程也会读取 getLastKnownLocation，这里只作触发
+        }
+    }
+    private val gnssListener = object : GnssStatus.Callback() {
+        override fun onSatelliteStatusChanged(status: GnssStatus) {
+            lastGnssStatus = status
+        }
+    }
+    @Volatile
+    private var lastGnssStatus: GnssStatus? = null
+    private val stepListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type == Sensor.TYPE_STEP_COUNTER && event.values.isNotEmpty()) {
+                lastStepCount = event.values[0].toLong()
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+    @Volatile
+    private var lastStepCount: Long = -1L
+    @Volatile
+    private var lastStepTickMs: Long = 0L
+
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
-            // 虚拟设备无 BluetoothDevice 系统缓存名：优先读 ScanRecord 中的本地名
             val name = result.scanRecord?.deviceName ?: device.name ?: "(no name)"
-            val line = "${name}  ${device.address}  RSSI=${result.rssi}"
-            ZLog.i(TAG_SCOPE, "ble test result: $line")
-            requireActivity().runOnUiThread {
-                bleTestResult.append(line + "\n")
+            val line = "${name} ${device.address} ${result.rssi}dBm"
+            synchronized(bleFound) {
+                bleFound[device.address] = line
+                while (bleFound.size > BLE_RESULTS_LIMIT) {
+                    val it = bleFound.entries.iterator()
+                    if (it.hasNext()) it.remove()
+                }
             }
         }
 
         override fun onScanFailed(errorCode: Int) {
-            ZLog.w(TAG_SCOPE, "ble test scan failed errorCode=$errorCode")
-            requireActivity().runOnUiThread {
-                bleTestResult.text = getString(R.string.settings_ble_test_none) + "\nerrorCode=$errorCode"
-                bleTestButton.isEnabled = true
-            }
+            ZLog.w(TAG_SCOPE, "env test ble scan failed errorCode=$errorCode")
         }
     }
 
-    private val blePermissionLauncher = registerForActivityResult(
+    private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        startBleTestScan()
+    ) { result ->
+        if (result.values.all { it }) {
+            startEnvTest()
+        } else {
+            envTestStartButton.isEnabled = true
+            Toast.makeText(requireContext(), R.string.settings_env_test_perm, Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -90,8 +159,15 @@ class SettingsFragment : Fragment() {
         amapKeyInput = root.findViewById(R.id.amapKeyInput)
         amapSecurityInput = root.findViewById(R.id.amapSecurityInput)
         privacyAgreeCheck = root.findViewById(R.id.privacyAgreeCheck)
-        bleTestButton = root.findViewById(R.id.bleTestButton)
-        bleTestResult = root.findViewById(R.id.bleTestResult)
+
+        envTestStartButton = root.findViewById(R.id.envTestStartButton)
+        envTestStopButton = root.findViewById(R.id.envTestStopButton)
+        envTestLocationValue = root.findViewById(R.id.envTestLocationValue)
+        envTestCellValue = root.findViewById(R.id.envTestCellValue)
+        envTestBleValue = root.findViewById(R.id.envTestBleValue)
+        envTestWifiValue = root.findViewById(R.id.envTestWifiValue)
+        envTestSensorValue = root.findViewById(R.id.envTestSensorValue)
+        envTestGnssValue = root.findViewById(R.id.envTestGnssValue)
 
         val context = requireContext()
         packageValue.text = context.packageName
@@ -118,31 +194,41 @@ class SettingsFragment : Fragment() {
             }
         }
         root.findViewById<Button>(R.id.saveAmapButton).setOnClickListener { saveAmapConfig() }
-        bleTestButton.setOnClickListener { onBleTestClicked() }
+
+        envTestStartButton.setOnClickListener { onEnvTestStart() }
+        envTestStopButton.setOnClickListener { stopEnvTest() }
 
         loadAmapConfig()
         return root
     }
 
-    // ---------- BLE 扫描测试（不 Suspend） ----------
+    override fun onDestroyView() {
+        stopEnvTest()
+        super.onDestroyView()
+    }
 
-    private fun onBleTestClicked() {
-        if (!bleTestBusy.compareAndSet(false, true)) return
-        val missing = bleRequiredPermissions().filter {
+    // ---------- 环境实时测试（普通 App 视角，不 Suspend） ----------
+
+    private fun onEnvTestStart() {
+        if (envTestRunning.get()) return
+        val missing = requiredPermissions().filter {
             ContextCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            blePermissionLauncher.launch(missing.toTypedArray())
+            permissionLauncher.launch(missing.toTypedArray())
         } else {
-            startBleTestScan()
+            startEnvTest()
         }
     }
 
-    private fun bleRequiredPermissions(): List<String> {
+    private fun requiredPermissions(): List<String> {
         val perms = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.READ_PHONE_STATE
         )
         if (Build.VERSION.SDK_INT >= 31) {
             perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
@@ -150,59 +236,341 @@ class SettingsFragment : Fragment() {
         return perms
     }
 
-    private fun startBleTestScan() {
-        if (!isAdded) {
-            bleTestBusy.set(false)
-            return
-        }
-        if (bleRequiredPermissions().any {
-                ContextCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
-            }
-        ) {
-            bleTestResult.text = getString(R.string.settings_ble_test_perm)
-            bleTestButton.isEnabled = true
-            bleTestBusy.set(false)
-            return
-        }
+    private fun startEnvTest() {
+        if (!isAdded) return
+        val context = requireContext()
+        locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         val adapter = BluetoothAdapter.getDefaultAdapter()
-        if (adapter == null || !adapter.isEnabled) {
-            bleTestResult.text = "蓝牙未开启"
-            bleTestButton.isEnabled = true
-            bleTestBusy.set(false)
-            return
-        }
-        bleScanner = adapter.bluetoothLeScanner
-        val scanner = bleScanner
-        if (scanner == null) {
-            bleTestResult.text = "BluetoothLeScanner 不可用"
-            bleTestButton.isEnabled = true
-            bleTestBusy.set(false)
-            return
-        }
-        bleTestResult.text = getString(R.string.settings_ble_test_running)
-        bleTestButton.isEnabled = false
-        ZLog.i(TAG_SCOPE, "ble test startScan (no suspend)")
+        bleScanner = adapter?.bluetoothLeScanner
+
+        envTestRunning.set(true)
+        envTestStartButton.isEnabled = false
+        envTestStopButton.isEnabled = true
+        envTestLocationValue.text = getString(R.string.settings_env_test_running)
+        envTestCellValue.text = getString(R.string.settings_env_test_running)
+        envTestBleValue.text = getString(R.string.settings_env_test_running)
+        envTestWifiValue.text = getString(R.string.settings_env_test_running)
+        envTestSensorValue.text = getString(R.string.settings_env_test_running)
+        envTestGnssValue.text = getString(R.string.settings_env_test_running)
+        synchronized(bleFound) { bleFound.clear() }
+        lastStepCount = -1L
+        lastStepTickMs = 0L
+
+        // 传感器：计步器监听（步频注入会表现为持续/加快的 step counter）
         try {
-            scanner.startScan(bleScanCallback)
+            stepSensor?.let {
+                sensorManager?.registerListener(stepListener, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
         } catch (t: Throwable) {
-            bleTestResult.text = "startScan 异常: ${t.message}"
-            bleTestButton.isEnabled = true
-            bleTestBusy.set(false)
-            ZLog.w(TAG_SCOPE, "ble test startScan failed", t)
+            ZLog.w(TAG_SCOPE, "env test sensor register failed", t)
+        }
+
+        // 位置：请求一次定位更新（普通 App 视角：getLastKnownLocation + 回调）
+        try {
+            locationManager?.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper()
+            )
+        } catch (_: Throwable) {
+        }
+        try {
+            locationManager?.requestLocationUpdates(
+                LocationManager.NETWORK_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper()
+            )
+        } catch (_: Throwable) {
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                locationManager?.registerGnssStatusCallback(
+                    Executors.newSingleThreadExecutor(),
+                    gnssListener
+                )
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test gnss register failed", t)
+        }
+
+        // 蓝牙：持续 LE 扫描（蓝牙栈 Hook 会投递虚拟设备）
+        try {
+            bleScanner?.startScan(bleScanCallback)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test ble startScan failed", t)
+        }
+        // 主动触发 WiFi 扫描（每 2 个周期一次）
+        try {
+            wifiManager?.startScan()
+        } catch (_: Throwable) {
+        }
+
+        val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "ZVE-EnvTest").apply { isDaemon = true }
+        }
+        envTestScheduler = scheduler
+        scheduler.scheduleWithFixedDelay(
+            { refreshEnvTest() },
+            500,
+            REFRESH_MS,
+            TimeUnit.MILLISECONDS
+        )
+        ZLog.i(TAG_SCOPE, "env test started")
+    }
+
+    private fun refreshEnvTest() {
+        if (!envTestRunning.get() || !isAdded) return
+        val ctx = requireContext()
+        try {
+            // 位置：优先 last known，兼容虚拟定位（栈内注入）
+            val locationText = buildLocationText(ctx)
+            requireActivity().runOnUiThread {
+                envTestLocationValue.text = locationText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test location read failed", t)
+        }
+        try {
+            val cellText = buildCellText()
+            requireActivity().runOnUiThread {
+                envTestCellValue.text = cellText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test cell read failed", t)
+        }
+        try {
+            val bleText = buildBleText()
+            requireActivity().runOnUiThread {
+                envTestBleValue.text = bleText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test ble read failed", t)
+        }
+        try {
+            val wifiText = buildWifiText()
+            requireActivity().runOnUiThread {
+                envTestWifiValue.text = wifiText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test wifi read failed", t)
+        }
+        try {
+            val sensorText = buildSensorText()
+            requireActivity().runOnUiThread {
+                envTestSensorValue.text = sensorText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test sensor read failed", t)
+        }
+        try {
+            val gnssText = buildGnssText()
+            requireActivity().runOnUiThread {
+                envTestGnssValue.text = gnssText
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test gnss read failed", t)
+        }
+    }
+
+    private fun buildLocationText(context: Context): String {
+        val lm = locationManager ?: return "LocationManager 不可用"
+        val sb = StringBuilder()
+        for (provider in arrayOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        )) {
+            try {
+                val loc = lm.getLastKnownLocation(provider)
+                if (loc != null) {
+                    sb.append(provider).append(": ")
+                        .append(String.format("%.6f", loc.latitude)).append(",")
+                        .append(String.format("%.6f", loc.longitude))
+                        .append(" acc=").append(loc.accuracy)
+                        .append(" alt=").append(String.format("%.1f", loc.altitude))
+                        .append(" speed=").append(String.format("%.1f", loc.speed))
+                        .append(" time=").append(loc.time)
+                        .append("\n")
+                }
+            } catch (t: Throwable) {
+                sb.append(provider).append(": ").append(t.message).append("\n")
+            }
+        }
+        if (sb.isEmpty()) sb.append("无位置（等待定位或虚拟位置未启用）")
+        return sb.toString().trim()
+    }
+
+    private fun buildCellText(): String {
+        val tm = telephonyManager ?: return "TelephonyManager 不可用"
+        val cells: List<CellInfo> = try {
+            @Suppress("DEPRECATION")
+            tm.allCellInfo ?: emptyList()
+        } catch (t: Throwable) {
+            return "读取失败: ${t.message}"
+        }
+        if (cells.isEmpty()) return "无基站（虚拟基站未启用或权限不足）"
+        val sb = StringBuilder()
+        cells.forEach { info ->
+            when (info) {
+                is CellInfoLte -> {
+                    val id = info.cellIdentity
+                    sb.append("LTE mcc=").append(id.mcc)
+                        .append(" mnc=").append(id.mnc)
+                        .append(" tac=").append(id.tac)
+                        .append(" ci=").append(id.ci)
+                        .append(" pci=").append(id.pci)
+                        .append(" rsrp=").append(info.cellSignalStrength?.dbm).append("\n")
+                }
+                is CellInfoNr -> {
+                    val id = info.cellIdentity as? android.telephony.CellIdentityNr
+                    sb.append("NR")
+                    if (id != null) {
+                        sb.append(" mcc=").append(id.mccString)
+                            .append(" mnc=").append(id.mncString)
+                            .append(" tac=").append(id.tac)
+                            .append(" nci=").append(id.nci)
+                    }
+                    sb.append(" ss=").append(info.cellSignalStrength?.dbm).append("\n")
+                }
+                is CellInfoGsm -> {
+                    val id = info.cellIdentity
+                    sb.append("GSM mcc=").append(id.mcc)
+                        .append(" mnc=").append(id.mnc)
+                        .append(" lac=").append(id.lac)
+                        .append(" cid=").append(id.cid)
+                        .append(" asu=").append(info.cellSignalStrength?.asuLevel).append("\n")
+                }
+                is CellInfoWcdma -> {
+                    val id = info.cellIdentity
+                    sb.append("WCDMA mcc=").append(id.mcc)
+                        .append(" mnc=").append(id.mnc)
+                        .append(" lac=").append(id.lac)
+                        .append(" cid=").append(id.cid)
+                        .append(" asu=").append(info.cellSignalStrength?.asuLevel).append("\n")
+                }
+                else -> sb.append(info.javaClass.simpleName).append("\n")
+            }
+        }
+        return sb.toString().trim()
+    }
+
+    private fun buildBleText(): String {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        if (adapter == null || !adapter.isEnabled) return "蓝牙未开启"
+        val sb = StringBuilder()
+        synchronized(bleFound) {
+            bleFound.values.forEach { sb.append(it).append("\n") }
+        }
+        val bonded = adapter.bondedDevices
+        if (bonded.isNotEmpty()) {
+            sb.append("已配对: ").append(bonded.map { it.name ?: it.address }.joinToString(", ")).append("\n")
+        }
+        if (sb.isEmpty()) sb.append("扫描中未发现设备（等待虚拟 BLE 或真实设备）")
+        return sb.toString().trim()
+    }
+
+    private fun buildWifiText(): String {
+        val wm = wifiManager ?: return "WifiManager 不可用"
+        // 每 2 秒主动触发一次扫描（普通 App 视角），读取最近结果
+        try {
+            wm.startScan()
+        } catch (_: Throwable) {
+        }
+        val results: List<WifiScanResult> = try {
+            wm.scanResults ?: emptyList()
+        } catch (t: Throwable) {
+            return "读取失败: ${t.message}"
+        }
+        if (results.isEmpty()) return "无 WiFi 结果（虚拟 WiFi 未启用或未扫描）"
+        val sb = StringBuilder()
+        results.sortedByDescending { it.level }.take(10).forEach { r ->
+            val ssid = r.SSID.ifEmpty { "(hidden)" }
+            sb.append(ssid).append(" ").append(r.BSSID)
+                .append(" ").append(r.level).append("dBm")
+                .append(" ").append(if (r.frequency > 0) "${r.frequency}MHz" else "")
+                .append("\n")
+        }
+        return sb.toString().trim()
+    }
+
+    private fun buildSensorText(): String {
+        val sm = sensorManager ?: return "SensorManager 不可用"
+        val sb = StringBuilder()
+        if (stepSensor != null) {
+            sb.append("计步器: ")
+            if (lastStepCount >= 0) {
+                sb.append(lastStepCount).append(" 步")
+            } else {
+                sb.append("等待事件")
+            }
+            sb.append("\n")
+        }
+        // 读取当前常用传感器列表（普通 App 视角可见的）
+        val present = listOf(
+            Sensor.TYPE_ACCELEROMETER to "加速度",
+            Sensor.TYPE_GYROSCOPE to "陀螺仪",
+            Sensor.TYPE_MAGNETIC_FIELD to "磁力",
+            Sensor.TYPE_LIGHT to "光线",
+            Sensor.TYPE_PROXIMITY to "距离"
+        ).mapNotNull { (t, label) ->
+            sm.getDefaultSensor(t)?.let { "$label: 有" }
+        }
+        if (present.isNotEmpty()) sb.append(present.joinToString(", ")).append("\n")
+        if (sb.isEmpty()) sb.append("无可用传感器")
+        return sb.toString().trim()
+    }
+
+    private fun buildGnssText(): String {
+        val lm = locationManager ?: return "LocationManager 不可用"
+        val sb = StringBuilder()
+        val status = lastGnssStatus
+        if (status != null) {
+            val used = (0 until status.satelliteCount).count { status.usedInFix(it) }
+            sb.append("卫星: ").append(status.satelliteCount)
+                .append(" 使用: ").append(used).append("\n")
+        } else {
+            sb.append("GNSS 回调未收到数据\n")
+        }
+        try {
+            val isGnssEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            sb.append("GPS 开关: ").append(if (isGnssEnabled) "开" else "关").append("\n")
+        } catch (_: Throwable) {
+        }
+        if (sb.isEmpty()) sb.append("无 GNSS 数据")
+        return sb.toString().trim()
+    }
+
+    private fun stopEnvTest() {
+        if (!envTestRunning.compareAndSet(true, false)) {
+            envTestScheduler?.shutdownNow()
+            envTestScheduler = null
             return
         }
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                scanner.stopScan(bleScanCallback)
-            } catch (_: Throwable) {
+        envTestScheduler?.shutdownNow()
+        envTestScheduler = null
+        try {
+            bleScanner?.stopScan(bleScanCallback)
+        } catch (_: Throwable) {
+        }
+        try {
+            stepSensor?.let { sensorManager?.unregisterListener(stepListener, it) }
+        } catch (_: Throwable) {
+        }
+        try {
+            locationManager?.removeUpdates(locationListener)
+        } catch (_: Throwable) {
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                locationManager?.unregisterGnssStatusCallback(gnssListener)
             }
-            bleTestButton.isEnabled = true
-            bleTestBusy.set(false)
-            if (bleTestResult.text.toString() == getString(R.string.settings_ble_test_running)) {
-                bleTestResult.text = getString(R.string.settings_ble_test_none)
-            }
-            ZLog.i(TAG_SCOPE, "ble test scan stopped")
-        }, BLE_TEST_SCAN_MS)
+        } catch (_: Throwable) {
+        }
+        if (isAdded) {
+            envTestStartButton.isEnabled = true
+            envTestStopButton.isEnabled = false
+        }
+        ZLog.i(TAG_SCOPE, "env test stopped")
     }
 
     private fun loadAmapConfig() {

@@ -194,7 +194,7 @@
                 style="@style/Button.Pill" />
         </LinearLayout>
 
-        <!-- BLE 扫描测试（不 Suspend） -->
+        <!-- 环境实时测试（普通 App 视角，不 Suspend） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -206,33 +206,184 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/settings_ble_test_title"
+                android:text="@string/settings_env_test_title"
                 style="@style/Text.Headline" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/settings_ble_test_desc"
+                android:text="@string/settings_env_test_desc"
                 style="@style/Text.Caption" />
 
-            <Button
-                android:id="@+id/bleTestButton"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_md"
-                android:text="@string/settings_ble_test_start"
-                style="@style/Button.Pill" />
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/bleTestResult"
+                <Button
+                    android:id="@+id/envTestStartButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/settings_env_test_start"
+                    style="@style/Button.Pill" />
+
+                <Button
+                    android:id="@+id/envTestStopButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:layout_weight="1"
+                    android:enabled="false"
+                    android:text="@string/settings_env_test_stop"
+                    style="@style/Button.Pill.Secondary" />
+            </LinearLayout>
+
+            <!-- 位置 -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_md"
-                android:fontFamily="monospace"
-                android:text="@string/settings_ble_test_idle"
-                android:textColor="@color/text_secondary"
-                android:textSize="@dimen/text_caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_location_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestLocationValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- 基站 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_cell_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestCellValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- 蓝牙 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_ble_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestBleValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- WiFi -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_wifi_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestWifiValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- 传感器 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_sensor_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestSensorValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- GNSS -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_env_test_gnss_title"
+                    style="@style/Text.Caption" />
+
+                <TextView
+                    android:id="@+id/envTestGnssValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_xs"
+                    android:fontFamily="monospace"
+                    android:text="@string/settings_env_test_idle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
