@@ -85,8 +85,8 @@
     <string name="location_enabled">已启用</string>
     <string name="location_disabled">未启用</string>
     <string name="location_map_hint">点击地图选点</string>
-    <string name="map_collapse">收起</string>
-    <string name="map_expand">展开</string>
+    <string name="map_panel_collapse">▲</string>
+    <string name="map_panel_expand">▼</string>
     <string name="location_search_hint">搜索地址/POI，如：人民广场</string>
     <string name="location_search">搜索</string>
     <string name="location_search_empty">未找到相关地址</string>

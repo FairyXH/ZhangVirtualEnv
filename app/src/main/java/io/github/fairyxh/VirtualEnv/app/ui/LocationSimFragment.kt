@@ -70,6 +70,7 @@ class LocationSimFragment : Fragment() {
     private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
     private var mapCollapsed = false
     private lateinit var mapCollapseButton: TextView
+    private lateinit var mapPanel: View
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -125,6 +126,7 @@ class LocationSimFragment : Fragment() {
         locateButton.setOnClickListener { locateCurrentPosition() }
         setupSearch()
         mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
+        mapPanel = root.findViewById(R.id.mapPanel)
         mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
 
         initMapSafely(savedInstanceState)
@@ -145,11 +147,13 @@ class LocationSimFragment : Fragment() {
         refreshSavedPoints()
     }
 
-    /** 收起/展开地图：GONE 时暂停 GLSurfaceView，节省空间。 */
+    /** 收起/展开地图面板：从搜索框到当前位置按钮整体收起（GONE 时暂停 GLSurfaceView）。 */
     private fun toggleMapCollapsed() {
         mapCollapsed = !mapCollapsed
-        mapContainer.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
-        mapCollapseButton.text = getString(if (mapCollapsed) R.string.map_expand else R.string.map_collapse)
+        mapPanel.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
+        mapCollapseButton.text = getString(
+            if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse
+        )
         try {
             if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
         } catch (_: Throwable) {

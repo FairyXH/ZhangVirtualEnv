@@ -273,6 +273,10 @@ class HomeFragment : Fragment() {
         val remark = collectRemarkInput.text.toString().trim()
         executor.execute {
             val apiResult = ApiClient.createEnvSnapshot(name, remark, "collect", result)
+            if (apiResult.code == ApiResult.CODE_OK) {
+                // 轨道化：同名称备注拆分保存到 基站/WiFi/GNSS 轨道 + 位置轨道
+                saveCollectTracks(name, remark, result)
+            }
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), apiResult.message, Toast.LENGTH_SHORT).show()
                 if (apiResult.code == ApiResult.CODE_OK) {
@@ -282,6 +286,75 @@ class HomeFragment : Fragment() {
                 }
             }
         }
+    }
+
+    /**
+     * 采集拆分轨道：
+     * - 基站 / WiFi / GNSS → 三个同名称备注的 env_snapshot（备注追加来源标记）
+     * - 单次采集位置 → 位置模拟（已保存地点）
+     * 轨道被单独删除后，回放该轨道即留空（真实信息）。
+     */
+    private fun saveCollectTracks(name: String, remark: String, collect: JSONObject) {
+        val tag = io.github.fairyxh.VirtualEnv.core.Backend.TRACK_SOURCE_TAG
+        val sourceRemark = if (remark.isBlank()) tag else "$remark $tag"
+
+        // 基站轨道：采集 cells → entries[]
+        val cellData = collect.optJSONObject("cell")
+        val cells = cellData?.optJSONArray("cells") ?: org.json.JSONArray()
+        if (cells.length() > 0) {
+            val entries = org.json.JSONArray()
+            for (i in 0 until cells.length()) {
+                val src = cells.optJSONObject(i) ?: continue
+                val e = JSONObject().apply {
+                    put("type", src.optString("type", "LTE"))
+                    put("mcc", src.optInt("mcc", -1))
+                    put("mnc", src.optInt("mnc", -1))
+                    // GSM/WCDMA 采集用 lac/cid，统一映射到 tac/ci 字段
+                    put("tac", if (src.has("tac")) src.optInt("tac", -1) else src.optInt("lac", -1))
+                    put("ci", if (src.has("ci")) src.optLong("ci", -1L) else src.optLong("cid", -1L))
+                    put("pci", src.optInt("pci", -1))
+                }
+                entries.put(e)
+            }
+            if (entries.length() > 0) {
+                ApiClient.createEnvSnapshot(
+                    name, sourceRemark, "cell",
+                    JSONObject().apply { put("entries", entries) }
+                )
+            }
+        }
+
+        // WiFi 轨道：采集 networks[]
+        val wifiData = collect.optJSONObject("wifi")
+        val networks = wifiData?.optJSONArray("networks") ?: org.json.JSONArray()
+        if (networks.length() > 0) {
+            ApiClient.createEnvSnapshot(
+                name, sourceRemark, "wifi",
+                JSONObject().apply { put("networks", networks) }
+            )
+        }
+
+        // GNSS 轨道：采集到卫星才创建
+        val gnssData = collect.optJSONObject("gnss")
+        if (gnssData != null && gnssData.optInt("satelliteCount", 0) > 0) {
+            ApiClient.createEnvSnapshot(
+                name, sourceRemark, "gnss",
+                JSONObject().apply {
+                    put("satelliteCount", gnssData.optInt("satelliteCount", -1))
+                    put("usedInFix", gnssData.optInt("usedInFix", -1))
+                    put("cn0", gnssData.optDouble("cn0", -1.0))
+                }
+            )
+        }
+
+        // 位置轨道：单次采集位置 → 位置模拟（已保存地点）
+        val loc = collect.optJSONObject("location")
+        val lat = loc?.optDouble("latitude", Double.NaN) ?: Double.NaN
+        val lon = loc?.optDouble("longitude", Double.NaN) ?: Double.NaN
+        if (!lat.isNaN() && !lon.isNaN()) {
+            ApiClient.createLocationPoint(name, sourceRemark, lat, lon)
+        }
+        ZLog.i(TAG_SCOPE, "collect tracks saved for name=$name")
     }
 
     private fun refreshSavedCollects() {
@@ -451,6 +524,10 @@ class HomeFragment : Fragment() {
             // 恢复录制前被临时停用的虚拟环境
             ApiClient.resumeEnv()
             val result = ApiClient.stopRecording(id)
+            if (result.code == ApiResult.CODE_OK) {
+                // 录像轨道：录制轨迹保存为路线模拟（备注追加来源标记）
+                saveRecordingAsRoute(id, recordingName)
+            }
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()
                 recordingStatus.text = getString(R.string.home_recording_idle)
@@ -458,6 +535,34 @@ class HomeFragment : Fragment() {
                     refreshRecordings()
                 }
             }
+        }
+    }
+
+    /** 录像帧坐标序列 → 路线模拟轨道。 */
+    private fun saveRecordingAsRoute(recordingId: Long, name: String) {
+        try {
+            val framesResult = ApiClient.getRecordingFrames(recordingId)
+            val frames = framesResult.data?.optJSONArray("frames") ?: return
+            val points = mutableListOf<com.amap.api.maps.model.LatLng>()
+            for (i in 0 until frames.length()) {
+                val frame = frames.optJSONObject(i) ?: continue
+                val loc = frame.optJSONObject("location") ?: continue
+                val lat = loc.optDouble("latitude", Double.NaN)
+                val lon = loc.optDouble("longitude", Double.NaN)
+                if (!lat.isNaN() && !lon.isNaN()) {
+                    points.add(com.amap.api.maps.model.LatLng(lat, lon))
+                }
+            }
+            if (points.size >= 2) {
+                val tag = io.github.fairyxh.VirtualEnv.core.Backend.TRACK_SOURCE_ROUTE_TAG
+                val routeName = if (name.isBlank()) "录像路线$tag" else "$name$tag"
+                ApiClient.createRoute(routeName, points)
+                ZLog.i(TAG_SCOPE, "recording->route saved ${points.size} points")
+            } else {
+                ZLog.w(TAG_SCOPE, "recording->route skipped, points<2: ${points.size}")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "saveRecordingAsRoute failed", t)
         }
     }
 

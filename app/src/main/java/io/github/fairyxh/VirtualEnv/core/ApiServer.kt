@@ -83,30 +83,31 @@ class ApiServer(
         try {
             socket.use { s ->
                 s.soTimeout = 5000
-                val reader = BufferedReader(InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))
-                val requestLine = reader.readLine() ?: return
+                val input = java.io.BufferedInputStream(s.getInputStream())
+                val requestLine = readLineBytes(input) ?: return
                 val parts = requestLine.split(" ")
                 if (parts.size < 2) return
                 val method = parts[0].uppercase()
                 val path = parts[1].substringBefore('?')
 
+                // 字节级读 header（避免 Reader 预缓冲 body 导致 UTF-8 中文长度错位）
                 var contentLength = 0
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readLineBytes(input) ?: break
                     if (line.isEmpty()) break
                     if (line.startsWith("Content-Length:", ignoreCase = true)) {
                         contentLength = line.substringAfter(':').trim().toIntOrNull() ?: 0
                     }
                 }
                 val body = if (contentLength > 0 && contentLength <= MAX_BODY) {
-                    val chars = CharArray(contentLength)
+                    val bytes = ByteArray(contentLength)
                     var read = 0
                     while (read < contentLength) {
-                        val n = reader.read(chars, read, contentLength - read)
+                        val n = input.read(bytes, read, contentLength - read)
                         if (n < 0) break
                         read += n
                     }
-                    String(chars, 0, read)
+                    String(bytes, 0, read, StandardCharsets.UTF_8)
                 } else {
                     ""
                 }
@@ -117,6 +118,18 @@ class ApiServer(
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "handle request failed", t)
         }
+    }
+
+    /** 按字节读一行（\n 结尾，剔除 \r），返回 null 表示流结束。 */
+    private fun readLineBytes(input: java.io.BufferedInputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val c = input.read()
+            if (c < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (c == '\n'.code) break
+            if (c != '\r'.code) sb.append(c.toChar())
+        }
+        return sb.toString()
     }
 
     private fun route(method: String, path: String, body: String): ApiResult {

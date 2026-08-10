@@ -7,24 +7,53 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:paddingStart="@dimen/space_lg"
         android:paddingTop="@dimen/space_lg"
         android:paddingEnd="@dimen/space_lg">
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/location_title"
-            style="@style/Text.Hero" />
+            android:layout_weight="1"
+            android:orientation="vertical">
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/location_title"
+                style="@style/Text.Hero" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/location_subtitle"
+                style="@style/Text.Caption" />
+        </LinearLayout>
+
+        <!-- 地图面板收起/展开箭头 -->
         <TextView
+            android:id="@+id/mapCollapseButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_xs"
-            android:text="@string/location_subtitle"
-            style="@style/Text.Caption" />
+            android:layout_marginStart="@dimen/space_sm"
+            android:background="@drawable/bg_pill_secondary"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_xs"
+            android:text="@string/map_panel_collapse"
+            android:textSize="@dimen/text_caption" />
     </LinearLayout>
+
+    <!-- 可收起面板：搜索 + 结果 + 提示 + 地图 + 当前位置 -->
+    <LinearLayout
+        android:id="@+id/mapPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
     <!-- 地址搜索区（地图上方） -->
     <LinearLayout
@@ -68,42 +97,21 @@
         android:orientation="vertical"
         android:visibility="gone" />
 
-    <!-- 地图选点提示 + 收起/展开（地图框上方、搜索框下方） -->
-    <LinearLayout
+    <!-- 地图选点提示（地图框上方、搜索框下方） -->
+    <TextView
+        android:id="@+id/mapHint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/space_md"
         android:layout_marginTop="@dimen/space_sm"
         android:layout_marginEnd="@dimen/space_md"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/mapHint"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/bg_pill_secondary"
-            android:paddingStart="@dimen/space_md"
-            android:paddingTop="@dimen/space_xs"
-            android:paddingEnd="@dimen/space_md"
-            android:paddingBottom="@dimen/space_xs"
-            android:text="@string/location_map_hint"
-            android:textSize="@dimen/text_caption" />
-
-        <TextView
-            android:id="@+id/mapCollapseButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="@dimen/space_sm"
-            android:background="@drawable/bg_pill_secondary"
-            android:paddingStart="@dimen/space_md"
-            android:paddingTop="@dimen/space_xs"
-            android:paddingEnd="@dimen/space_md"
-            android:paddingBottom="@dimen/space_xs"
-            android:text="@string/map_collapse"
-            android:textSize="@dimen/text_caption" />
-    </LinearLayout>
+        android:background="@drawable/bg_pill_secondary"
+        android:paddingStart="@dimen/space_md"
+        android:paddingTop="@dimen/space_xs"
+        android:paddingEnd="@dimen/space_md"
+        android:paddingBottom="@dimen/space_xs"
+        android:text="@string/location_map_hint"
+        android:textSize="@dimen/text_caption" />
 
     <!-- 地图选点区 -->
     <FrameLayout
@@ -152,6 +160,7 @@
         android:minWidth="0dp"
         android:text="@string/route_locate"
         android:textSize="@dimen/text_caption" />
+    </LinearLayout><!-- /mapPanel -->
 
     <ScrollView
         android:layout_width="match_parent"
