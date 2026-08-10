@@ -7,11 +7,33 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.FrameLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.amap.api.location.AMapLocation
@@ -30,6 +52,13 @@ import com.amap.api.maps.model.PolylineOptions
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.util.concurrent.Executors
 
@@ -38,6 +67,9 @@ import java.util.concurrent.Executors
  *
  * 隐私合规：未同意高德隐私政策前不创建 MapView（避免白屏）；
  * 初始化任何 SDK 接口前先调用 updatePrivacyShow / updatePrivacyAgree。
+ *
+ * 视图层已迁移到 Compose Liquid Glass，高德 MapView 通过 AndroidView 保留，
+ * 全部业务逻辑（绘制/保存/启动/搜索/定位）不变。
  */
 class RouteSimFragment : Fragment(), AMapLocationListener {
 
@@ -50,30 +82,38 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         private const val DEFAULT_ZOOM = 12f
     }
 
-    private lateinit var mapContainer: FrameLayout
-    private lateinit var privacyPrompt: View
-    private lateinit var routeNameInput: EditText
-    private lateinit var routeRemarkInput: EditText
-    private lateinit var routeSpeedInput: EditText
-    private lateinit var routeStepInput: EditText
-    private lateinit var drawHint: TextView
-    private lateinit var locateButton: Button
-    private lateinit var savedRoutesEmpty: TextView
-    private lateinit var savedRouteList: android.widget.LinearLayout
-    private lateinit var routeEnableSwitch: android.widget.Switch
-    private lateinit var routeStatusText: TextView
-    private lateinit var searchInput: EditText
-    private lateinit var searchButton: Button
-    private lateinit var searchResults: android.widget.LinearLayout
+    private data class SavedRoute(
+        val id: Long,
+        val name: String,
+        val remark: String,
+        val meta: String,
+        val pointsCount: Int,
+        val pointsArr: org.json.JSONArray? = null
+    )
+
+    // ---------- Compose 视图状态 ----------
+
+    private var routeName by mutableStateOf("")
+    private var routeRemark by mutableStateOf("")
+    private var routeSpeed by mutableStateOf("")
+    private var routeStep by mutableStateOf("")
+    private var drawHint by mutableStateOf("")
+    private var statusText by mutableStateOf("")
+    private var switchChecked by mutableStateOf(false)
+    private var searchText by mutableStateOf("")
+    private var mapCollapsed by mutableStateOf(false)
+    private var mapSatellite by mutableStateOf(false)
+    private var privacyShown by mutableStateOf(false)
+    private var mapReady by mutableStateOf(false)
+    private val savedRoutes = mutableStateListOf<SavedRoute>()
+    private val searchResults = mutableStateListOf<Pair<String, com.amap.api.services.core.PoiItem>>()
+    private var searchResultsVisible by mutableStateOf(false)
+
+    // ---------- 高德地图 ----------
 
     private var mapView: MapView? = null
     private var amap: AMap? = null
     private var locationClient: AMapLocationClient? = null
-    private var mapCollapsed = false
-    private var mapSatellite = false
-    private lateinit var mapCollapseButton: TextView
-    private lateinit var satelliteToggle: TextView
-    private lateinit var mapPanel: View
 
     private val points = mutableListOf<LatLng>()
     private val markers = mutableListOf<Marker>()
@@ -88,51 +128,24 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private var updatingSwitch = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        val root = inflater.inflate(R.layout.fragment_route, container, false)
-        mapContainer = root.findViewById(R.id.mapContainer)
-        privacyPrompt = root.findViewById(R.id.privacyPrompt)
-        routeNameInput = root.findViewById(R.id.routeNameInput)
-        routeRemarkInput = root.findViewById(R.id.routeRemarkInput)
-        drawHint = root.findViewById(R.id.drawHint)
-        locateButton = root.findViewById(R.id.locateButton)
-        savedRoutesEmpty = root.findViewById(R.id.savedRoutesEmpty)
-        savedRouteList = root.findViewById(R.id.savedRouteList)
-        routeEnableSwitch = root.findViewById(R.id.routeEnableSwitch)
-        routeStatusText = root.findViewById(R.id.routeStatusText)
-        searchInput = root.findViewById(R.id.searchInput)
-        searchButton = root.findViewById(R.id.searchButton)
-        searchResults = root.findViewById(R.id.searchResults)
-
-        routeEnableSwitch.setOnCheckedChangeListener { _, checked ->
-            if (updatingSwitch) return@setOnCheckedChangeListener
-            if (checked) enableRouteSimulation() else disableRouteSimulation()
-        }
-        setupSearch()
-        routeSpeedInput = root.findViewById(R.id.routeSpeedInput)
-        routeStepInput = root.findViewById(R.id.routeStepInput)
-        setupPresets(root)
-        mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
-        satelliteToggle = root.findViewById(R.id.satelliteToggle)
-        mapPanel = root.findViewById(R.id.mapPanel)
-        mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
-        satelliteToggle.setOnClickListener { toggleSatellite() }
-        // 输入框默认值：路线名称默认时间（有高德选点地址时自动使用地址）
-        routeNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.route_title))
-        )
-
-        locateButton.setOnClickListener { locateCurrentPosition() }
-        root.findViewById<Button>(R.id.clearButton).setOnClickListener { clearRoute() }
-        root.findViewById<Button>(R.id.saveButton).setOnClickListener { saveRoute() }
-
-        initMapSafely(savedInstanceState)
+        routeName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.route_title))
+        drawHint = getString(R.string.route_draw_hint)
+        privacyShown = !AmapPrivacyManager.isAgreed(requireContext())
         refreshSavedRoutes()
         refreshRouteStatus()
-        return root
+        return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                RouteScreen(this@RouteSimFragment, savedInstanceState)
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        if (privacyShown && AmapPrivacyManager.isAgreed(requireContext())) {
+            privacyShown = false
+        }
         if (!mapCollapsed) {
             try {
                 mapView?.onResume()
@@ -143,153 +156,491 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         refreshRouteStatus()
     }
 
-    /** 收起/展开地图面板：从搜索框到当前位置按钮整体收起（GONE 时暂停 GLSurfaceView）。 */
-    private fun toggleMapCollapsed() {
-        mapCollapsed = !mapCollapsed
-        mapPanel.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
-        mapCollapseButton.text = getString(
-            if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse
-        )
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden) {
+            if (privacyShown && AmapPrivacyManager.isAgreed(requireContext())) {
+                privacyShown = false
+            }
+            if (!mapCollapsed) {
+                try {
+                    mapView?.onResume()
+                } catch (_: Throwable) {
+                }
+            }
+            refreshSavedRoutes()
+            refreshRouteStatus()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!mapCollapsed) {
+            try {
+                mapView?.onPause()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
         try {
-            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
+            locationClient?.stopLocation()
+            locationClient?.onDestroy()
         } catch (_: Throwable) {
         }
+        mapView?.onDestroy()
+        mapView = null
+        executor.shutdown()
     }
 
-    /** 速度/步频预设：步行/跑步/自行车/驾车。 */
-    private fun setupPresets(root: View) {
-        fun bind(id: Int, speed: Double, freq: Int) {
-            root.findViewById<TextView>(id).setOnClickListener {
-                routeSpeedInput.setText(speed.toString())
-                routeStepInput.setText(freq.toString())
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        mapView?.onSaveInstanceState(outState)
+    }
+
+    // ---------- Compose UI ----------
+
+    @Composable
+    private fun RouteScreen(fragment: RouteSimFragment, savedInstanceState: Bundle?) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                BasicText(
+                    getString(R.string.route_title),
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                )
+                BasicText(
+                    getString(R.string.route_subtitle),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+
+                // 开关 + 状态卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.route_switch_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.route_switch_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { switchChecked },
+                                onSelect = { checked ->
+                                    if (updatingSwitch) return@GlassToggle
+                                    if (checked) fragment.enableRouteSimulation() else fragment.disableRouteSimulation()
+                                },
+                                backdrop = backdrop
+                            )
+                        }
+                        BasicText(
+                            statusText,
+                            Modifier.padding(top = 10.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                    }
+                }
+
+                // 路线绘制卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                getString(R.string.route_config_title),
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            )
+                            GlassPill(
+                                onClick = { fragment.toggleMapCollapsed() },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(end = 6.dp),
+                                selected = mapCollapsed,
+                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassPill(
+                                onClick = { fragment.toggleSatellite() },
+                                backdrop = backdrop,
+                                selected = mapSatellite,
+                                containerColor = if (mapSatellite) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = if (mapSatellite) androidx.compose.ui.graphics.Color.White else colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                        BasicText(
+                            drawHint,
+                            Modifier.padding(top = 8.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        if (privacyShown) {
+                            BasicText(
+                                getString(R.string.route_privacy_prompt),
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            Box(
+                                Modifier
+                                    .padding(top = 10.dp)
+                                    .fillMaxWidth()
+                                    .height(if (mapCollapsed) 0.dp else 240.dp)
+                            ) {
+                                AndroidView(
+                                    factory = { ctx ->
+                                        initMapView(ctx, savedInstanceState)
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                    onRelease = {
+                                        // 生命周期由 Fragment 管理
+                                    }
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.locateCurrentPosition() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                isInteractive = mapReady,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.route_locate),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { fragment.clearRoute() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                isInteractive = mapReady,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.route_clear),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        // 预设
+                        Row(
+                            Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                R.id.presetWalk to (5.0 to 110),
+                                R.id.presetRun to (10.0 to 180),
+                                R.id.presetBike to (20.0 to 90),
+                                R.id.presetDrive to (60.0 to 60)
+                            ).forEach { (_, preset) ->
+                                GlassPill(
+                                    onClick = {
+                                        routeSpeed = preset.first.toString()
+                                        routeStep = preset.second.toString()
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    selected = false,
+                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                    height = 32.dp
+                                ) {
+                                    BasicText(
+                                        when (preset.second) {
+                                            110 -> getString(R.string.route_preset_walk)
+                                            180 -> getString(R.string.route_preset_run)
+                                            90 -> getString(R.string.route_preset_bike)
+                                            else -> getString(R.string.route_preset_drive)
+                                        },
+                                        Modifier.padding(horizontal = 8.dp),
+                                        style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                    )
+                                }
+                            }
+                        }
+                        // 速度/步频输入 + 保存
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassField(
+                                value = routeSpeed,
+                                onValueChange = { routeSpeed = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                placeholder = getString(R.string.route_speed_hint)
+                            )
+                            GlassField(
+                                value = routeStep,
+                                onValueChange = { routeStep = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                placeholder = getString(R.string.route_step_hint)
+                            )
+                        }
+                        GlassField(
+                            value = routeName,
+                            onValueChange = { routeName = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.route_name_hint)
+                        )
+                        GlassField(
+                            value = routeRemark,
+                            onValueChange = { routeRemark = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.route_remark_hint)
+                        )
+                        GlassButton(
+                            onClick = { fragment.saveRoute() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                getString(R.string.route_save),
+                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // 地址搜索卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.location_search),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassField(
+                                value = searchText,
+                                onValueChange = { searchText = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                placeholder = getString(R.string.location_search_hint)
+                            )
+                            GlassButton(
+                                onClick = { fragment.searchPoi() },
+                                backdrop = backdrop,
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.location_search),
+                                    style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        if (searchResultsVisible) {
+                            searchResults.forEach { (title, poi) ->
+                                GlassPill(
+                                    onClick = { fragment.jumpToSearchResult(poi) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                    selected = false,
+                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                    height = 44.dp
+                                ) {
+                                    BasicText(
+                                        title,
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 已保存路线卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.route_saved_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        if (savedRoutes.isEmpty()) {
+                            BasicText(
+                                getString(R.string.route_saved_empty),
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            savedRoutes.forEach { route ->
+                                SavedRouteRow(
+                                    route = route,
+                                    backdrop = backdrop,
+                                    onUse = { fragment.startRouteSimulation(route) },
+                                    onLoad = { fragment.loadRoute(route) },
+                                    onDelete = { fragment.deleteRoute(route.id) }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
-        bind(R.id.presetWalk, 5.0, 110)
-        bind(R.id.presetRun, 10.0, 180)
-        bind(R.id.presetBike, 20.0, 90)
-        bind(R.id.presetDrive, 60.0, 60)
     }
 
-    /** 读取输入框中的速度/步频（空/非法用 0 表示走路线默认）。 */
-    private fun readSpeedFreq(): Pair<Double, Int> {
-        val speed = routeSpeedInput.text.toString().trim().toDoubleOrNull() ?: 0.0
-        val freq = routeStepInput.text.toString().trim().toIntOrNull() ?: 0
-        return speed to freq
-    }
-
-    /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
-    private fun enableRouteSimulation() {
-        if (currentRouteId <= 0) {
-            Toast.makeText(requireContext(), R.string.route_select_first, Toast.LENGTH_SHORT).show()
-            setSwitchChecked(false)
-            return
-        }
-        val (speed, freq) = readSpeedFreq()
-        executor.execute {
-            val result = ApiClient.startRoute(currentRouteId, speed, freq)
-            requireActivity().runOnUiThread {
-                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                    Toast.makeText(
-                        requireContext(),
-                        getString(R.string.route_started, currentRouteName),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                    setSwitchChecked(false)
+    @Composable
+    private fun SavedRouteRow(
+        route: SavedRoute,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onUse: () -> Unit,
+        onLoad: () -> Unit,
+        onDelete: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onLoad,
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+            selected = false,
+            containerColor = colors.bgTertiary.copy(alpha = 0.35f),
+            height = 64.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        route.name,
+                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    )
+                    if (route.remark.isNotBlank()) {
+                        BasicText(
+                            getString(R.string.location_point_remark_format, route.remark),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                        )
+                    }
+                    BasicText(
+                        route.meta,
+                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    )
                 }
-                refreshRouteStatus()
-            }
-        }
-    }
-
-    /** 开关关闭：停止路线模拟。 */
-    private fun disableRouteSimulation() {
-        executor.execute {
-            val result = ApiClient.stopRoute()
-            requireActivity().runOnUiThread {
-                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                GlassButton(
+                    onClick = onUse,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(72.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.accent.copy(alpha = 0.2f)
+                ) {
+                    BasicText(
+                        getString(R.string.route_start),
+                        style = TextStyle(color = colors.accent, fontSize = 12.sp)
+                    )
                 }
-                refreshRouteStatus()
-            }
-        }
-    }
-
-    /** 刷新路线运行状态：开关与状态文本同步 Backend。 */
-    private fun refreshRouteStatus() {
-        executor.execute {
-            val result = ApiClient.getRouteStatus()
-            requireActivity().runOnUiThread {
-                val data = result.data
-                if (data == null) {
-                    routeStatusText.text = getString(R.string.route_status_offline)
-                    setSwitchChecked(false)
-                    return@runOnUiThread
-                }
-                val running = data.optBoolean("running", false)
-                setSwitchChecked(running)
-                routeStatusText.text = if (running) {
-                    getString(R.string.route_status_running, data.optInt("points", 0))
-                } else {
-                    getString(R.string.route_status_idle)
+                GlassButton(
+                    onClick = onDelete,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.danger.copy(alpha = 0.25f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_recording_delete),
+                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                    )
                 }
             }
         }
     }
 
-    /** 程序性设置开关（不触发业务回调）。 */
-    private fun setSwitchChecked(checked: Boolean) {
-        updatingSwitch = true
-        routeEnableSwitch.isChecked = checked
-        updatingSwitch = false
-    }
+    // ---------- 地图与绘制 ----------
 
-    /**
-     * 安全初始化地图：
-     * 1. 先检查隐私合规（未同意则显示提示，不创建 MapView，避免白屏）
-     * 2. 初始化 SDK 前调用 updatePrivacyShow / updatePrivacyAgree
-     * 3. 任何初始化异常捕获后提示，不崩溃
-     */
-    private fun initMapSafely(savedInstanceState: Bundle?) {
-        val context = requireContext()
-        if (!AmapPrivacyManager.isAgreed(context)) {
-            privacyPrompt.visibility = View.VISIBLE
-            locateButton.visibility = View.GONE
-            ZLog.w(TAG_SCOPE, "privacy not agreed, skip MapView init")
-            return
-        }
+    private fun initMapView(ctx: Context, savedInstanceState: Bundle?): View {
+        if (mapView != null) return mapView!!
         try {
             // 隐私合规接口必须在任何 SDK 调用前执行
-            AmapPrivacyManager.applyPrivacyIfAgreed(context)
-            MapsInitializer.initialize(context)
+            AmapPrivacyManager.applyPrivacyIfAgreed(ctx)
+            MapsInitializer.initialize(ctx)
 
-            val key = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val key = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_AMAP_KEY, "")
             if (!key.isNullOrEmpty()) {
                 MapsInitializer.setApiKey(key)
             }
 
-            mapView = MapView(context).also { mv ->
-                mapContainer.addView(
-                    mv,
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                )
-                mv.onCreate(savedInstanceState)
-                amap = mv.map
+            val mv = MapView(ctx).also { view ->
+                view.onCreate(savedInstanceState)
+                amap = view.map
             }
+            mapView = mv
             setupMap()
-            privacyPrompt.visibility = View.GONE
-            locateButton.visibility = View.VISIBLE
+            mapReady = true
+            return mv
         } catch (t: Throwable) {
             // MapView 初始化异常：显示提示而非白屏
             ZLog.e(TAG_SCOPE, "map init failed", t)
-            privacyPrompt.visibility = View.VISIBLE
-            locateButton.visibility = View.GONE
-            Toast.makeText(context, R.string.route_map_init_failed, Toast.LENGTH_LONG).show()
+            privacyShown = true
+            Toast.makeText(ctx, R.string.route_map_init_failed, Toast.LENGTH_LONG).show()
+            return View(ctx)
         }
     }
 
@@ -317,7 +668,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         // 业务层坐标统一 WGS-84（虚拟定位输出），地图显示层需要 GCJ-02
         points.add(io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng))
         redrawPolyline()
-        drawHint.text = getString(R.string.route_points_count, points.size)
+        drawHint = getString(R.string.route_points_count, points.size)
         ZLog.d(TAG_SCOPE, "add point ${points.size}: gcj=${latLng.latitude},${latLng.longitude}")
     }
 
@@ -345,11 +696,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         points.clear()
         polyline?.remove()
         polyline = null
-        drawHint.text = getString(R.string.route_draw_hint)
+        drawHint = getString(R.string.route_draw_hint)
     }
 
     private fun saveRoute() {
-        val name = routeNameInput.text.toString().trim()
+        val name = routeName.trim()
             .ifEmpty {
                 io.github.fairyxh.VirtualEnv.util.DefaultNames.locationOrRoute(getString(R.string.route_title))
             }
@@ -357,7 +708,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             Toast.makeText(requireContext(), R.string.route_points_required, Toast.LENGTH_SHORT).show()
             return
         }
-        val remark = routeRemarkInput.text.toString().trim()
+        val remark = routeRemark.trim()
         executor.execute {
             val result = ApiClient.createRoute(name, remark, points)
             requireActivity().runOnUiThread {
@@ -366,60 +717,22 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                     currentRouteId = result.data?.optLong("id", -1L) ?: -1L
                     currentRouteName = name
                     clearRoute()
-                    routeNameInput.setText(
-                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
-                            getString(R.string.route_title)
-                        )
+                    routeName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                        getString(R.string.route_title)
                     )
-                    routeRemarkInput.text.clear()
+                    routeRemark = ""
                     refreshSavedRoutes()
                 }
             }
         }
     }
 
-    // ---------- 已保存路线列表 ----------
-
-    private fun refreshSavedRoutes() {
-        executor.execute {
-            val result = ApiClient.listRoutes()
-            requireActivity().runOnUiThread {
-                renderSavedRoutes(result)
-            }
-        }
-    }
-
-    private fun renderSavedRoutes(result: io.github.fairyxh.VirtualEnv.core.model.ApiResult) {
-        savedRouteList.removeAllViews()
-        val routes = result.data?.optJSONArray("routes") ?: return
-        val count = routes.length()
-        savedRoutesEmpty.visibility = if (count == 0) View.VISIBLE else View.GONE
-        if (count == 0) return
-
-        for (i in 0 until count) {
-            val item = routes.optJSONObject(i) ?: continue
-            val row = layoutInflater.inflate(R.layout.item_saved_route, savedRouteList, false)
-            row.findViewById<android.widget.TextView>(R.id.routeName).text = item.optString("name", "")
-            val remark = item.optString("remark", "")
-            val remarkView = row.findViewById<android.widget.TextView>(R.id.routeRemark)
-            if (remark.isBlank()) {
-                remarkView.visibility = View.GONE
-            } else {
-                remarkView.text = getString(R.string.location_point_remark_format, remark)
-            }
-            row.findViewById<android.widget.TextView>(R.id.routeMeta).text = getString(
-                R.string.route_point_count_format,
-                item.optJSONArray("points")?.length() ?: 0
-            )
-            row.findViewById<Button>(R.id.useButton).setOnClickListener {
-                startRouteSimulation(item)
-            }
-            row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
-                deleteRoute(item.optLong("id"))
-            }
-            // 点击行文本区域：加载到地图继续编辑
-            row.setOnClickListener { loadRoute(item) }
-            savedRouteList.addView(row)
+    /** 收起/展开地图面板（GONE 时暂停 GLSurfaceView）。 */
+    private fun toggleMapCollapsed() {
+        mapCollapsed = !mapCollapsed
+        try {
+            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
+        } catch (_: Throwable) {
         }
     }
 
@@ -431,27 +744,125 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "map type switch failed", t)
         }
-        satelliteToggle.setBackgroundResource(if (mapSatellite) R.drawable.bg_pill else R.drawable.bg_pill_secondary)
-        satelliteToggle.setTextColor(
-            resources.getColor(if (mapSatellite) R.color.bg_secondary else R.color.text_secondary, null)
-        )
-        satelliteToggle.text = getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite)
     }
 
-    /** 一键启动路线模拟（Backend RouteEngine 沿路线推进）。 */
-    private fun startRouteSimulation(item: org.json.JSONObject) {
-        val id = item.optLong("id")
-        val name = item.optString("name", "")
-        currentRouteId = id
-        currentRouteName = name
+    // ---------- 开关与状态 ----------
+
+    /** 读取输入框中的速度/步频（空/非法用 0 表示走路线默认）。 */
+    private fun readSpeedFreq(): Pair<Double, Int> {
+        val speed = routeSpeed.trim().toDoubleOrNull() ?: 0.0
+        val freq = routeStep.trim().toIntOrNull() ?: 0
+        return speed to freq
+    }
+
+    /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
+    private fun enableRouteSimulation() {
+        if (currentRouteId <= 0) {
+            Toast.makeText(requireContext(), R.string.route_select_first, Toast.LENGTH_SHORT).show()
+            updateSwitchState(false)
+            return
+        }
         val (speed, freq) = readSpeedFreq()
         executor.execute {
-            val result = ApiClient.startRoute(id, speed, freq)
+            val result = ApiClient.startRoute(currentRouteId, speed, freq)
             requireActivity().runOnUiThread {
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(
                         requireContext(),
-                        getString(R.string.route_started, name),
+                        getString(R.string.route_started, currentRouteName),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                    updateSwitchState(false)
+                }
+                refreshRouteStatus()
+            }
+        }
+    }
+
+    /** 开关关闭：停止路线模拟。 */
+    private fun disableRouteSimulation() {
+        executor.execute {
+            val result = ApiClient.stopRoute()
+            requireActivity().runOnUiThread {
+                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+                refreshRouteStatus()
+            }
+        }
+    }
+
+    /** 刷新路线运行状态：开关与状态文本同步 Backend。 */
+    private fun refreshRouteStatus() {
+        executor.execute {
+            val result = ApiClient.getRouteStatus()
+            requireActivity().runOnUiThread {
+                val data = result.data
+                if (data == null) {
+                    statusText = getString(R.string.route_status_offline)
+                    updateSwitchState(false)
+                    return@runOnUiThread
+                }
+                val running = data.optBoolean("running", false)
+                updateSwitchState(running)
+                statusText = if (running) {
+                    getString(R.string.route_status_running, data.optInt("points", 0))
+                } else {
+                    getString(R.string.route_status_idle)
+                }
+            }
+        }
+    }
+
+    /** 程序性设置开关（不触发业务回调）。 */
+    private fun updateSwitchState(checked: Boolean) {
+        updatingSwitch = true
+        switchChecked = checked
+        updatingSwitch = false
+    }
+
+    // ---------- 已保存路线列表 ----------
+
+    private fun refreshSavedRoutes() {
+        executor.execute {
+            val result = ApiClient.listRoutes()
+            requireActivity().runOnUiThread {
+                savedRoutes.clear()
+                val routes = result.data?.optJSONArray("routes") ?: return@runOnUiThread
+                for (i in 0 until routes.length()) {
+                    val item = routes.optJSONObject(i) ?: continue
+                    savedRoutes.add(
+                        SavedRoute(
+                            id = item.optLong("id", -1L),
+                            name = item.optString("name", ""),
+                            remark = item.optString("remark", ""),
+                            meta = getString(
+                                R.string.route_point_count_format,
+                                item.optJSONArray("points")?.length() ?: 0
+                            ),
+                            pointsCount = item.optJSONArray("points")?.length() ?: 0,
+                            pointsArr = item.optJSONArray("points")
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /** 一键启动路线模拟（Backend RouteEngine 沿路线推进）。 */
+    private fun startRouteSimulation(route: SavedRoute) {
+        currentRouteId = route.id
+        currentRouteName = route.name
+        val (speed, freq) = readSpeedFreq()
+        executor.execute {
+            val result = ApiClient.startRoute(route.id, speed, freq)
+            requireActivity().runOnUiThread {
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.route_started, route.name),
                         Toast.LENGTH_SHORT
                     ).show()
                 } else {
@@ -463,14 +874,14 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     }
 
     /** 一键使用：把已保存路线加载到地图（可继续编辑或重新保存）。 */
-    private fun loadRoute(item: org.json.JSONObject) {
-        val pointsArr = item.optJSONArray("points") ?: return
-        currentRouteId = item.optLong("id", -1L)
-        currentRouteName = item.optString("name", "")
+    private fun loadRoute(route: SavedRoute) {
+        currentRouteId = route.id
+        currentRouteName = route.name
         if (amap == null) {
             Toast.makeText(requireContext(), R.string.route_map_init_failed, Toast.LENGTH_SHORT).show()
             return
         }
+        val pointsArr = route.pointsArr ?: return
         clearRoute()
         for (i in 0 until pointsArr.length()) {
             val p = pointsArr.optJSONObject(i) ?: continue
@@ -482,8 +893,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 addPoint(com.amap.api.maps.model.LatLng(gcj.first, gcj.second))
             }
         }
-        routeNameInput.setText(item.optString("name", ""))
-        routeRemarkInput.setText(item.optString("remark", ""))
+        routeName = route.name
+        routeRemark = route.remark
         if (points.isNotEmpty()) {
             val center = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(points.first())
             amap?.moveCamera(
@@ -492,7 +903,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         }
         Toast.makeText(
             requireContext(),
-            getString(R.string.route_loaded, item.optString("name", "")),
+            getString(R.string.route_loaded, route.name),
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -508,6 +919,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             }
         }
     }
+
+    // ---------- 定位 ----------
 
     /** 定位到当前位置（高德定位 SDK，一次定位）。 */
     private fun locateCurrentPosition() {
@@ -617,20 +1030,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     // ---------- 地址搜索 ----------
 
-    private fun setupSearch() {
-        searchButton.setOnClickListener { searchPoi() }
-        searchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
-                searchPoi()
-                true
-            } else {
-                false
-            }
-        }
-    }
-
     private fun searchPoi() {
-        val keyword = searchInput.text.toString().trim()
+        val keyword = searchText.trim()
         if (keyword.isEmpty()) return
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -665,28 +1066,16 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     }
 
     private fun renderSearchResults(pois: List<com.amap.api.services.core.PoiItem>) {
-        searchResults.removeAllViews()
+        searchResults.clear()
         if (pois.isEmpty()) {
-            searchResults.visibility = View.GONE
+            searchResultsVisible = false
             Toast.makeText(requireContext(), R.string.location_search_empty, Toast.LENGTH_SHORT).show()
             return
         }
         pois.forEach { poi ->
-            val row = TextView(requireContext())
-            row.text = "${poi.title} · ${poi.snippet}"
-            row.setTextColor(resources.getColor(R.color.text_primary, null))
-            row.setTextSize(13f)
-            row.setPadding(48, 40, 48, 40)
-            row.setOnClickListener { jumpToSearchResult(poi) }
-            searchResults.addView(row)
-            if (poi != pois.last()) {
-                val divider = View(requireContext())
-                divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
-                divider.setBackgroundColor(resources.getColor(R.color.separator, null))
-                searchResults.addView(divider)
-            }
+            searchResults.add("${poi.title} · ${poi.snippet}" to poi)
         }
-        searchResults.visibility = View.VISIBLE
+        searchResultsVisible = true
     }
 
     /** 搜索跳转：仅移动地图视野（选点由用户点击地图完成）。 */
@@ -695,7 +1084,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         val latLng = LatLng(point.latitude, point.longitude)
         io.github.fairyxh.VirtualEnv.util.DefaultNames.rememberPoi(poi.title)
         amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
-        searchResults.visibility = View.GONE
+        searchResultsVisible = false
         hideKeyboard()
     }
 
@@ -703,35 +1092,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         try {
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE)
                 as android.view.inputmethod.InputMethodManager
-            imm.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            imm.hideSoftInputFromWindow(
+                requireView().windowToken,
+                0
+            )
         } catch (_: Throwable) {
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (!mapCollapsed) {
-            try {
-                mapView?.onPause()
-            } catch (_: Throwable) {
-            }
-        }
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        try {
-            locationClient?.stopLocation()
-            locationClient?.onDestroy()
-        } catch (_: Throwable) {
-        }
-        mapView?.onDestroy()
-        mapView = null
-        executor.shutdown()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        mapView?.onSaveInstanceState(outState)
     }
 }
