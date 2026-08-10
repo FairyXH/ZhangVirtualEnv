@@ -43,33 +43,40 @@ Android Framework / system_server / GMS
 
 ### Phase 2：路线模拟 + 地图可视化 + 摇杆
 
-- Route Engine：路线存储、插值、轨迹生成
-- Timeline Engine 完整实现（开始/暂停/跳转/倍速）
-- 高德地图 SDK 集成：单点选点、路线 Polyline 绘制/编辑、GPX 导入导出
-- 摇杆移动模拟（Velocity Vector → Location Generator）
-- API：`/api/route/*`、`/api/location/start|stop`
-- GPS provider 主动注入（无真实 GPS 信号时也能输出位置）
+- [x] Route Engine：路线存储、插值、轨迹生成
+- [x] Timeline Engine 完整实现（开始/暂停/跳转/倍速）
+- [x] 高德地图 SDK 集成：单点选点、路线 Polyline 绘制/编辑（GPX 导入导出待补）
+- [x] 摇杆移动模拟（Velocity Vector → Location Generator）
+- [x] API：`/api/route/*`、`/api/location/start|stop`
+- [x] GPS provider 主动注入（无真实 GPS 信号时也能输出位置）
 
 ### Phase 3：基站 / WiFi / BLE / Sensor
 
-- Cell Engine：MCC/MNC/TAC/CID/PCI/RSRP（TelephonyManager / TelephonyRegistry / PhoneInterfaceManager）
-- Wifi Engine：SSID/BSSID/RSSI/Frequency（WifiManager / WifiServiceImpl）
-- BLE Engine：Beacon UUID/Major/Minor/RSSI（BluetoothLeScanner / BluetoothManagerService）
-- Sensor Engine：加速度 / 陀螺仪 / 步频（SensorManager / SensorService）
-- 采集系统（Collector）与模拟开关
+- [x] Cell Engine：MCC/MNC/TAC/CID/PCI/RSRP（TelephonyManager / TelephonyRegistry / PhoneInterfaceManager）
+- [x] Wifi Engine：SSID/BSSID/RSSI/Frequency（WifiManager / WifiServiceImpl）
+- [x] BLE Engine：Beacon UUID/Major/Minor/RSSI（BluetoothLeScanner / BluetoothManagerService）
+- [x] Sensor Engine：加速度 / 陀螺仪 / 步频（SensorManager / SensorService）
+- [x] 采集系统（Collector）与模拟开关
 
 ### Phase 4：GNSS + 环境录制回放
 
-- GNSS Engine：GnssStatus / GnssMeasurementsEvent 模拟（仅 Android 数据层）
-- ReplayEngine：环境包录制与回放（location.db / cell.db / wifi.db / ble.db / sensor.db / gnss.db）
-- EnvironmentManager 完整实现
+- [x] GNSS Engine：GnssStatus / GnssMeasurementsEvent 模拟（仅 Android 数据层）
+- [x] ReplayEngine：环境包录制与回放（location.db / cell.db / wifi.db / ble.db / sensor.db / gnss.db）
+- [x] EnvironmentManager 完整实现
 
 ### Phase 5：多版本 Profile 自动适配
 
-- adapter/Android11..Android15 差异适配
-- 按 `Build.VERSION.SDK_INT` / `Build.FINGERPRINT` / `ro.product.device` 选择 Profile
-- default.json 回退机制
-- GMS FusedLocationProvider 适配
+- [x] adapter/Android11..Android15 差异适配（Profile JSON 驱动）
+- [x] 按 `Build.VERSION.SDK_INT` / `Build.FINGERPRINT` / `ro.product.device` 选择 Profile
+- [x] default.json 回退机制
+- [x] GMS FusedLocationProvider 适配（被动缓存刷新 + 主动 fix 注入）
+
+## 已解决问题记录
+
+- Release 包「位置 / 路线」页闪退：R8 混淆 AMap SDK 导致 `libAMapSDK_MAP_v11_2_100.so` JNI 反查类失败
+  SIGABRT；已在 proguard-rules.pro 增加 `com.amap.api/com.autonavi/com.loc` keep 规则。
+  详见 `docs/reverse/release-mapview-jni-crash.md`。
+- 环境页 GNSS 快照“一键使用”此前返回 unsupported：Backend 已接入 gnss/sensor 引擎。
 
 ## 架构约束（硬性）
 

@@ -21,7 +21,8 @@ import java.util.concurrent.Executors
  * 环境模拟页：基站 / WiFi / GNSS 三卡片。
  *
  * 每个卡片可填写名称/备注与数据字段并保存（Backend env_snapshot），
- * 已保存环境支持删除；一键使用需等对应模拟引擎实现（当前占位提示）。
+ * 已保存环境支持删除；一键使用把快照加载到对应模拟引擎（wifi/cell/gnss 已接入，
+ * ble/sensor 通过 /api/<type>/set 直接设置）。
  */
 class EnvFragment : Fragment() {
 

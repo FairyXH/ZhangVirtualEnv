@@ -187,6 +187,25 @@ object ApiClient {
 
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
+    /** 直接设置指定环境类型的虚拟数据（cell/wifi/bluetooth/sensor/gnss）。 */
+    fun setEnvData(type: String, data: org.json.JSONObject): ApiResult {
+        val body = JSONObject().apply { put("data", data) }
+        return post("/api/${envPath(type)}/set", body)
+    }
+
+    /** 查询指定环境类型的虚拟数据状态。 */
+    fun getEnvStatus(type: String): ApiResult = get("/api/${envPath(type)}/status")
+
+    /** 当前生效 Profile 信息（排障用）。 */
+    fun getProfileStatus(): ApiResult = get("/api/profile/status")
+
+    private fun envPath(type: String): String {
+        return when (type) {
+            "ble" -> "bluetooth"
+            else -> type
+        }
+    }
+
     // ---------- Recording ----------
 
     fun startRecording(name: String, remark: String = ""): ApiResult {

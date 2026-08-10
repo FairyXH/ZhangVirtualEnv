@@ -150,6 +150,17 @@ class ApiServer(
                 path == "/api/env/use" && method == "POST" -> envUse(body)
                 path == "/api/env/clear" && method == "POST" -> envClear(body)
                 path == "/api/env/status" && method == "GET" -> envStatus()
+                path == "/api/cell/status" && method == "GET" -> envStatus("cell")
+                path == "/api/cell/set" && method == "POST" -> envSet("cell", body)
+                path == "/api/wifi/status" && method == "GET" -> envStatus("wifi")
+                path == "/api/wifi/set" && method == "POST" -> envSet("wifi", body)
+                path == "/api/bluetooth/status" && method == "GET" -> envStatus("ble")
+                path == "/api/bluetooth/set" && method == "POST" -> envSet("ble", body)
+                path == "/api/sensor/status" && method == "GET" -> envStatus("sensor")
+                path == "/api/sensor/set" && method == "POST" -> envSet("sensor", body)
+                path == "/api/gnss/status" && method == "GET" -> envStatus("gnss")
+                path == "/api/gnss/set" && method == "POST" -> envSet("gnss", body)
+                path == "/api/profile/status" && method == "GET" -> profileStatus()
                 path == "/api/recording/start" && method == "POST" -> recordingStart(body)
                 path == "/api/recording/append" && method == "POST" -> recordingAppend(body)
                 path == "/api/recording/stop" && method == "POST" -> recordingStop(body)
@@ -373,6 +384,28 @@ class ApiServer(
 
     private fun envStatus(): ApiResult {
         return ApiResult.ok("ok", backend.envStatusJson())
+    }
+
+    /** 指定环境类型状态（cell/wifi/bluetooth/sensor/gnss）。 */
+    private fun envStatus(type: String): ApiResult {
+        val status = backend.envStatus(type)
+            ?: return ApiResult.error("unsupported env type: $type", 404)
+        return ApiResult.ok("ok", status)
+    }
+
+    /** 指定环境类型直接设置虚拟数据（body 内 data 字段，缺省时整体作为数据）。 */
+    private fun envSet(type: String, body: String): ApiResult {
+        val json = JSONObject(body)
+        val data = json.optJSONObject("data") ?: json
+        if (!backend.setEnvData(type, data)) {
+            return ApiResult.error("unsupported env type: $type", 404)
+        }
+        ZLog.i(TAG_SCOPE, "env set type=$type keys=${data.length()}")
+        return ApiResult.ok("ok", backend.envStatus(type))
+    }
+
+    private fun profileStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.profileInfoJson())
     }
 
     // ---------- Recording ----------

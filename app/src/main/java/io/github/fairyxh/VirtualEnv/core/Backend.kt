@@ -76,6 +76,10 @@ class Backend private constructor(private val dataDir: File) {
     val cellEngine = EnvStateEngine("cell")
     val bleEngine = EnvStateEngine("ble")
 
+    /** 虚拟 GNSS / 传感器（步频）状态（Phase 4 接入 Hook，状态由同一引擎管理）。 */
+    val gnssEngine = EnvStateEngine("gnss")
+    val sensorEngine = EnvStateEngine("sensor")
+
     /** 环境录制与回放引擎。 */
     lateinit var recordingEngine: RecordingEngine
         private set
@@ -288,6 +292,8 @@ class Backend private constructor(private val dataDir: File) {
             "wifi" -> wifiEngine.update(data)
             "cell" -> cellEngine.update(data)
             "ble" -> bleEngine.update(data)
+            "gnss" -> gnssEngine.update(data)
+            "sensor" -> sensorEngine.update(data)
             "collect" -> loadCollectSnapshot(data)
             else -> return null
         }
@@ -300,6 +306,34 @@ class Backend private constructor(private val dataDir: File) {
         data.optJSONObject("wifi")?.let { wifiEngine.update(it) }
         data.optJSONObject("cell")?.let { cellEngine.update(it) }
         data.optJSONObject("bluetooth")?.let { bleEngine.update(it) }
+        data.optJSONObject("gnss")?.let { gnssEngine.update(it) }
+        data.optJSONObject("sensor")?.let { sensorEngine.update(it) }
+    }
+
+    /** 直接设置指定类型的虚拟环境数据（经 ApiServer 调用，/api/<type>/set）。 */
+    fun setEnvData(type: String, data: org.json.JSONObject): Boolean {
+        when (type) {
+            "wifi" -> wifiEngine.update(data)
+            "cell" -> cellEngine.update(data)
+            "ble" -> bleEngine.update(data)
+            "gnss" -> gnssEngine.update(data)
+            "sensor" -> sensorEngine.update(data)
+            else -> return false
+        }
+        ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
+        return true
+    }
+
+    /** 查询指定类型的虚拟环境状态。 */
+    fun envStatus(type: String): org.json.JSONObject? {
+        return when (type) {
+            "wifi" -> wifiEngine.statusJson()
+            "cell" -> cellEngine.statusJson()
+            "ble" -> bleEngine.statusJson()
+            "gnss" -> gnssEngine.statusJson()
+            "sensor" -> sensorEngine.statusJson()
+            else -> null
+        }
     }
 
     /** 清除指定类型的虚拟环境。 */
@@ -308,10 +342,14 @@ class Backend private constructor(private val dataDir: File) {
             "wifi" -> wifiEngine.clear()
             "cell" -> cellEngine.clear()
             "ble" -> bleEngine.clear()
+            "gnss" -> gnssEngine.clear()
+            "sensor" -> sensorEngine.clear()
             "collect" -> {
                 wifiEngine.clear()
                 cellEngine.clear()
                 bleEngine.clear()
+                gnssEngine.clear()
+                sensorEngine.clear()
             }
         }
         ZLog.i(TAG_SCOPE, "env cleared type=$type")
@@ -323,6 +361,24 @@ class Backend private constructor(private val dataDir: File) {
             put("wifi", wifiEngine.statusJson())
             put("cell", cellEngine.statusJson())
             put("ble", bleEngine.statusJson())
+            put("gnss", gnssEngine.statusJson())
+            put("sensor", sensorEngine.statusJson())
+        }
+    }
+
+    // ---------- Profile API ----------
+
+    /** 当前 Profile 信息（App 展示 / 排障用）。 */
+    fun profileInfoJson(): org.json.JSONObject {
+        val p = profileManager.current
+        val hooks = p?.optJSONObject("hooks")
+        return org.json.JSONObject().apply {
+            put("name", p?.optString("name", "") ?: "")
+            put("device", p?.optString("device", "") ?: "")
+            put("minSdk", p?.optInt("minSdk", 0) ?: 0)
+            put("maxSdk", p?.optInt("maxSdk", 99) ?: 99)
+            put("hookModules", hooks?.length() ?: 0)
+            put("apiVersion", 1)
         }
     }
 
