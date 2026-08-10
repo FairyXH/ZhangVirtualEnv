@@ -5,8 +5,10 @@ import io.github.fairyxh.VirtualEnv.core.Backend
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * LSPosed API 101 模块入口。
@@ -16,7 +18,11 @@ import java.io.File
  * 2. 启动 ApiServer（供 App 控制端 HTTP 调用）
  * 3. 加载 Profile 并安装 Hook Adapter
  *
- * 不在入口内编写任何业务逻辑；不保存业务状态。
+ * 重要：`ModuleLoadedParam` 不提供宿主 classLoader。system 进程（com.android.phone /
+ * com.android.bluetooth）的 Hook 目标类位于各自 APK，必须用 `onPackageReady` 的
+ * `PackageReadyParam.getClassLoader()` 安装；`ClassLoader.getSystemClassLoader()`
+ * 只能解析 boot classpath 的 framework 类，会导致这些 Hook 静默失败。
+ * 进程识别以 `onModuleLoaded` 的 processName 为准（onPackageReady 无 processName）。
  */
 class VirtualEnvEntry : XposedModule() {
 
@@ -28,16 +34,45 @@ class VirtualEnvEntry : XposedModule() {
     private var backend: Backend? = null
     private var appCache: io.github.fairyxh.VirtualEnv.core.EnvStateCache? = null
 
+    @Volatile
+    private var processName: String = ""
+
+    private val appHooksInstalled = AtomicBoolean(false)
+    private val phoneHooksInstalled = AtomicBoolean(false)
+    private val bleHooksInstalled = AtomicBoolean(false)
+
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onModuleLoaded process=${param.processName} systemServer=${param.isSystemServer}")
         if (param.isSystemServer) return
 
-        // App 进程：安装第一层 Framework API Hook（Telephony / BLE / WiFi）。
-        // 虚拟环境状态保存在 system_server Backend，此处通过 EnvStateCache 轮询获取。
+        processName = param.processName
+        // App 进程：初始化 EnvStateCache 与注册器。
+        // 具体 Hook 安装延迟到 onPackageReady（此时才有宿主 classLoader）。
         try {
             if (appCache != null) return
-            val cache = io.github.fairyxh.VirtualEnv.core.EnvStateCache()
-            appCache = cache
+            appCache = io.github.fairyxh.VirtualEnv.core.EnvStateCache()
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "[$TAG_SCOPE] onModuleLoaded cache init failed", t)
+        }
+    }
+
+    /**
+     * 包加载完成（宿主 classLoader 就绪）：用真实宿主 classLoader 安装 Hook。
+     *
+     * 对 com.android.phone / com.android.bluetooth 等系统进程，Hook 目标类位于宿主 APK，
+     * 必须用 `param.getClassLoader()`；framework 层 Hook 也统一用宿主 classLoader
+     * （boot classpath 委托一致，framework 类同样可解析）。
+     */
+    override fun onPackageReady(param: PackageReadyParam) {
+        try {
+            if (backend != null) return // system_server 不在此回调
+            val cache = appCache ?: return
+            val hostClassLoader = try {
+                param.getClassLoader()
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "host classLoader unavailable, fallback system", t)
+                ClassLoader.getSystemClassLoader()
+            }
             val registrar = HookRegistrar { executable, interceptor ->
                 try {
                     hook(executable).intercept(interceptor)
@@ -47,17 +82,28 @@ class VirtualEnvEntry : XposedModule() {
                     false
                 }
             }
-            // com.android.phone 是基站 Binder 服务端所在进程：Hook 服务端方法，
-            // 对所有 App（含第三方地图）全局阻断真实基站网络定位。
-            if (param.processName == "com.android.phone") {
-                PhoneInterfaceManagerHookAdapter(cache, registrar).install(ClassLoader.getSystemClassLoader())
-                log(Log.INFO, TAG, "[$TAG_SCOPE] phone interface manager hooks installed for ${param.processName}")
-                return
+            val pkg = try { param.packageName } catch (t: Throwable) { "" }
+
+            // com.android.phone：基站 Binder 服务端（对任意 App 全局阻断真实基站网络定位）
+            if (processName == "com.android.phone" && phoneHooksInstalled.compareAndSet(false, true)) {
+                val hooked = PhoneInterfaceManagerHookAdapter(cache, registrar).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] phone interface manager hooks installed pkg=$pkg hooked=$hooked loader=${hostClassLoader}")
             }
-            FrameworkEnvHookAdapter(cache, registrar).install(ClassLoader.getSystemClassLoader())
-            log(Log.INFO, TAG, "[$TAG_SCOPE] framework env hooks installed for ${param.processName}")
+            // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
+            if (processName == "com.android.bluetooth" && bleHooksInstalled.compareAndSet(false, true)) {
+                val logSink: (Int, String, String) -> Unit = { level, tag, msg ->
+                    log(level, tag, msg)
+                }
+                val hooked = BleStackHookAdapter(cache, registrar, logSink).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] ble stack hooks installed pkg=$pkg hooked=$hooked loader=${hostClassLoader}")
+            }
+            // 通用 framework 层 Hook（Telephony/WiFi/BLE 框架 API + 传感器注入）
+            if (appHooksInstalled.compareAndSet(false, true)) {
+                FrameworkEnvHookAdapter(cache, registrar).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] framework env hooks installed for pkg=$pkg")
+            }
         } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "[$TAG_SCOPE] framework env hook install failed", t)
+            log(Log.ERROR, TAG, "[$TAG_SCOPE] onPackageReady hook install failed", t)
         }
     }
 

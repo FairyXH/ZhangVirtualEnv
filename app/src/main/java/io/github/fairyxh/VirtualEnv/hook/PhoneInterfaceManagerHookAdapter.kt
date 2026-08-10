@@ -30,23 +30,25 @@ class PhoneInterfaceManagerHookAdapter(
         private const val CLASS_NAME = "com.android.phone.PhoneInterfaceManager"
     }
 
-    fun install(classLoader: ClassLoader) {
-        hookGetAllCellInfo(classLoader)
-        hookGetCellLocation(classLoader)
-        hookGetNeighboringCellInfo(classLoader)
+    fun install(classLoader: ClassLoader): Int {
+        var hooked = 0
+        hooked += hookGetAllCellInfo(classLoader)
+        hooked += hookGetCellLocation(classLoader)
+        hooked += hookGetNeighboringCellInfo(classLoader)
+        return hooked
     }
 
     private fun virtualLocationEnabled(): Boolean = cache.isLocationEnabled()
 
     // ---------- getAllCellInfo(String, String): List<CellInfo> ----------
 
-    private fun hookGetAllCellInfo(classLoader: ClassLoader) {
-        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return
+    private fun hookGetAllCellInfo(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return 0
         val method = HookSupport.findMethods(clazz, "getAllCellInfo")
             .firstOrNull { it.parameterCount == 2 }
         if (method == null) {
             ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo not found")
-            return
+            return 0
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
@@ -74,17 +76,18 @@ class PhoneInterfaceManagerHookAdapter(
             }
         }
         if (ok) ZLog.i(TAG_SCOPE, "hooked PhoneInterfaceManager.getAllCellInfo")
+        return if (ok) 1 else 0
     }
 
     // ---------- getCellLocation(String, String): CellIdentity ----------
 
-    private fun hookGetCellLocation(classLoader: ClassLoader) {
-        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return
+    private fun hookGetCellLocation(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return 0
         val method = HookSupport.findMethods(clazz, "getCellLocation")
             .firstOrNull { it.parameterCount == 2 }
         if (method == null) {
             ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getCellLocation not found")
-            return
+            return 0
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
@@ -103,17 +106,18 @@ class PhoneInterfaceManagerHookAdapter(
             }
         }
         if (ok) ZLog.i(TAG_SCOPE, "hooked PhoneInterfaceManager.getCellLocation")
+        return if (ok) 1 else 0
     }
 
     // ---------- getNeighboringCellInfo(String, String): List<NeighboringCellInfo> ----------
 
-    private fun hookGetNeighboringCellInfo(classLoader: ClassLoader) {
-        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return
+    private fun hookGetNeighboringCellInfo(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return 0
         val method = HookSupport.findMethods(clazz, "getNeighboringCellInfo")
             .firstOrNull { it.parameterCount == 2 }
         if (method == null) {
             ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getNeighboringCellInfo not found")
-            return
+            return 0
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
@@ -127,5 +131,6 @@ class PhoneInterfaceManagerHookAdapter(
             }
         }
         if (ok) ZLog.i(TAG_SCOPE, "hooked PhoneInterfaceManager.getNeighboringCellInfo")
+        return if (ok) 1 else 0
     }
 }

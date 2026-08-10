@@ -4,7 +4,6 @@ import io.github.fairyxh.VirtualEnv.core.EnvStateCache
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.lang.reflect.Method
-import java.util.HashSet
 
 /**
  * Framework API Hook Adapter（第一层：覆盖普通应用）。
@@ -297,7 +296,7 @@ class FrameworkEnvHookAdapter(
     private fun deliverVirtualBle(callback: Any): Boolean? {
         val virtual = cache.currentBle() ?: return null
         try {
-            val results = buildScanResults(virtual)
+            val results = VirtualBleFactory.buildScanResults(virtual)
             val callbackClass = callback.javaClass
             val resultClass = Class.forName("android.bluetooth.le.ScanResult")
             val onScanResult: Method = try {
@@ -315,54 +314,6 @@ class FrameworkEnvHookAdapter(
             ZLog.w(TAG_SCOPE, "deliver virtual ble failed, fallback", t)
             return null
         }
-    }
-
-    /**
-     * 构造虚拟 BLE 扫描结果：优先使用采集的附近设备（devices），
-     * 再合并已配对设备（bonded），两者均支持。
-     */
-    private fun buildScanResults(data: JSONObject): List<Any> {
-        val resultClass = Class.forName("android.bluetooth.le.ScanResult")
-        val ctor = resultClass.getConstructor(
-            Class.forName("android.bluetooth.BluetoothDevice"),
-            Class.forName("android.bluetooth.le.ScanRecord"),
-            Int::class.java,
-            Long::class.java
-        )
-        val adapterClass = Class.forName("android.bluetooth.BluetoothAdapter")
-        val getRemoteDevice = adapterClass.getMethod("getRemoteDevice", String::class.java)
-        val recordClass = Class.forName("android.bluetooth.le.ScanRecord")
-        val parseFromBytes = recordClass.getMethod("parseFromBytes", ByteArray::class.java)
-        // LE General Discoverable | BR/EDR Not Supported
-        val advBytes = byteArrayOf(0x02, 0x01, 0x1A)
-
-        val result = mutableListOf<Any>()
-        val seen = HashSet<String>()
-        fun addEntry(d: JSONObject) {
-            val address = d.optString("address", "")
-            if (address.isBlank() || !seen.add(address)) return
-            try {
-                val device = getRemoteDevice.invoke(null, address)
-                val record = parseFromBytes.invoke(null, advBytes)
-                result.add(
-                    ctor.newInstance(
-                        device,
-                        record,
-                        d.optInt("rssi", -70),
-                        android.os.SystemClock.elapsedRealtimeNanos()
-                    )
-                )
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "build scan result $address failed", t)
-            }
-        }
-        data.optJSONArray("devices")?.let { arr ->
-            for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
-        }
-        data.optJSONArray("bonded")?.let { arr ->
-            for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
-        }
-        return result
     }
 
     // ---------- WiFi：WifiManager.getScanResults ----------
