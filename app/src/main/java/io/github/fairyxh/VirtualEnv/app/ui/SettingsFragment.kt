@@ -193,6 +193,7 @@ class SettingsFragment : Fragment() {
     @Volatile
     private var lastWifiText: String = ""
 
+    @android.annotation.SuppressLint("MissingPermission")
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
@@ -580,6 +581,7 @@ class SettingsFragment : Fragment() {
         return perms
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun startEnvTest() {
         if (!isAdded) return
         val context = requireContext()
@@ -671,6 +673,7 @@ class SettingsFragment : Fragment() {
         ZLog.i(TAG_SCOPE, "env test started")
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun refreshEnvTest() {
         if (!envTestRunning.get() || !isAdded) return
         val ctx = requireContext()
@@ -905,6 +908,7 @@ class SettingsFragment : Fragment() {
         return if (satOk && usedOk) Verdict.PASS else Verdict.FAIL
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun readLastLocation(): Location? {
         val lm = locationManager ?: return null
         var best: Location? = null
@@ -932,6 +936,7 @@ class SettingsFragment : Fragment() {
             "\ntime=" + loc.time
     }
 
+    @android.annotation.SuppressLint("MissingPermission", "NewApi")
     private fun buildCellText(): String {
         val tm = telephonyManager ?: return "TelephonyManager 不可用"
         val cells: List<CellInfo> = try {
@@ -992,6 +997,7 @@ class SettingsFragment : Fragment() {
         return sb.toString().trim()
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun buildBleText(): String {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) return "蓝牙未开启"
@@ -1007,6 +1013,7 @@ class SettingsFragment : Fragment() {
         return sb.toString().trim()
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun buildWifiText(): String {
         val wm = wifiManager ?: return "WifiManager 不可用"
         // 每 2 秒主动触发一次扫描（普通 App 视角），读取最近结果
@@ -1105,6 +1112,7 @@ class SettingsFragment : Fragment() {
         return sb.toString().trim()
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun stopEnvTest() {
         if (!envTestRunning.compareAndSet(true, false)) {
             envTestScheduler?.shutdownNow()

@@ -1001,6 +1001,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     }
 
     /** 最后的兜底：系统最近已知位置（仅作最后手段）。 */
+    @android.annotation.SuppressLint("MissingPermission")
     private fun useLastKnownFallback() {
         try {
             val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
