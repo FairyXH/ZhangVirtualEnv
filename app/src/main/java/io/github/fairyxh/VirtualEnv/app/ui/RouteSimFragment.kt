@@ -301,6 +301,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         }
     }
 
+    /** 地图点击加点（latLng 为高德 GCJ-02 显示坐标）：marker 显示在点击处，内部点统一存 WGS-84。 */
     private fun addPoint(latLng: LatLng) {
         val map = amap ?: return
         val marker = map.addMarker(
@@ -309,19 +310,22 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 .title("${points.size + 1}")
         )
         markers.add(marker)
-        points.add(latLng)
+        // 业务层坐标统一 WGS-84（虚拟定位输出），地图显示层需要 GCJ-02
+        points.add(io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng))
         redrawPolyline()
         drawHint.text = getString(R.string.route_points_count, points.size)
-        ZLog.d(TAG_SCOPE, "add point ${points.size}: ${latLng.latitude},${latLng.longitude}")
+        ZLog.d(TAG_SCOPE, "add point ${points.size}: gcj=${latLng.latitude},${latLng.longitude}")
     }
 
     private fun redrawPolyline() {
         val map = amap ?: return
         polyline?.remove()
         if (points.size >= 2) {
+            // 内部点（WGS-84）转回 GCJ-02 绘制到高德地图，避免路线偏移
+            val display = points.map { io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(it) }
             polyline = map.addPolyline(
                 PolylineOptions()
-                    .addAll(points)
+                    .addAll(display)
                     .width(8f)
                     .color(0xFF0071E3.toInt())
                     .geodesic(true)
@@ -473,14 +477,17 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             val lat = p.optDouble("lat", Double.NaN)
             val lon = p.optDouble("lon", Double.NaN)
             if (!lat.isNaN() && !lon.isNaN()) {
-                addPoint(com.amap.api.maps.model.LatLng(lat, lon))
+                // 后端点已统一 WGS-84，转为 GCJ-02 后画到高德地图
+                val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(lat, lon)
+                addPoint(com.amap.api.maps.model.LatLng(gcj.first, gcj.second))
             }
         }
         routeNameInput.setText(item.optString("name", ""))
         routeRemarkInput.setText(item.optString("remark", ""))
         if (points.isNotEmpty()) {
+            val center = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(points.first())
             amap?.moveCamera(
-                com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(points.first(), 14f)
+                com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(center, 14f)
             )
         }
         Toast.makeText(
@@ -564,8 +571,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 requireActivity().runOnUiThread {
                     if (loc != null) {
                         ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
+                        val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(loc.latitude, loc.longitude)
                         amap?.moveCamera(
-                            CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f)
+                            CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
                         )
                         Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
                     } else {
@@ -588,8 +596,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             if (loc != null) {
                 ZLog.i(TAG_SCOPE, "fallback last known ${loc.latitude},${loc.longitude}")
                 requireActivity().runOnUiThread {
+                    val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(loc.latitude, loc.longitude)
                     amap?.moveCamera(
-                        CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f)
+                        CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
                     )
                     Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
                 }

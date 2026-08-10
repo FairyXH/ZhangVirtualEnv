@@ -37,7 +37,7 @@
     <string name="home_recording_title">持续记录（录像）</string>
     <string name="home_recording_desc">按采样间隔记录位置 / 基站 / WiFi / 蓝牙，形成时间轴录像</string>
     <string name="home_recording_name_hint">录像名称，如：通勤路线 1</string>
-    <string name="home_recording_interval_hint">间隔 秒</string>
+    <string name="home_recording_interval_hint">间隔 秒（0.1~300，支持小数）</string>
     <string name="home_recording_start">开始录制</string>
     <string name="home_recording_stop">停止录制</string>
     <string name="home_recording_running">录制中：%1$s · 已 %2$d 帧</string>

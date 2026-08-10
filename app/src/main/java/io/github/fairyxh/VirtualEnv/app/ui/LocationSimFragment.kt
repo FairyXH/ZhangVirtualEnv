@@ -242,7 +242,10 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /** 地图选点：更新 marker 与经纬度输入框。 */
+    /**
+     * 地图选点（坐标来自高德地图，GCJ-02）：更新 marker 与经纬度输入框。
+     * 输入框统一显示 WGS-84（虚拟定位实际输出坐标），选点坐标自动转换。
+     */
     private fun selectOnMap(latLng: LatLng) {
         val map = amap ?: return
         selectedMarker?.remove()
@@ -251,9 +254,31 @@ class LocationSimFragment : Fragment() {
                 .position(latLng)
                 .title(getString(R.string.location_map_hint))
         )
-        latitudeInput.setText(formatCoord(latLng.latitude))
-        longitudeInput.setText(formatCoord(latLng.longitude))
-        ZLog.d(TAG_SCOPE, "map picked ${latLng.latitude},${latLng.longitude}")
+        // 高德地图坐标是 GCJ-02，转换为 WGS-84 后填入输入框（注入系统/保存地点统一用 WGS-84）
+        val wgs = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng)
+        latitudeInput.setText(formatCoord(wgs.latitude))
+        longitudeInput.setText(formatCoord(wgs.longitude))
+        ZLog.d(TAG_SCOPE, "map picked gcj=${latLng.latitude},${latLng.longitude} wgs=${wgs.latitude},${wgs.longitude}")
+    }
+
+    /**
+     * 系统定位结果（WGS-84）回填：输入框直接填 WGS-84；
+     * marker 需按 WGS→GCJ 转换后显示在高德地图上（否则图标偏移）。
+     * @return 地图显示坐标（GCJ-02），供 moveCamera 使用。
+     */
+    private fun selectOnMapFromWgs(wgsLat: Double, wgsLon: Double): LatLng? {
+        val map = amap ?: return null
+        val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(wgsLat, wgsLon)
+        selectedMarker?.remove()
+        selectedMarker = map.addMarker(
+            MarkerOptions()
+                .position(LatLng(gcj.first, gcj.second))
+                .title(getString(R.string.location_map_hint))
+        )
+        latitudeInput.setText(formatCoord(wgsLat))
+        longitudeInput.setText(formatCoord(wgsLon))
+        ZLog.d(TAG_SCOPE, "system locate wgs=$wgsLat,$wgsLon gcj=${gcj.first},${gcj.second}")
+        return LatLng(gcj.first, gcj.second)
     }
 
     private fun formatCoord(value: Double): String {
@@ -475,10 +500,11 @@ class LocationSimFragment : Fragment() {
             io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->
                 requireActivity().runOnUiThread {
                     if (loc != null) {
-                        val latLng = LatLng(loc.latitude, loc.longitude)
                         ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
-                        selectOnMap(latLng)
-                        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+                        val display = selectOnMapFromWgs(loc.latitude, loc.longitude)
+                        if (display != null) {
+                            amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(display, 16f))
+                        }
                         Toast.makeText(requireContext(), R.string.location_locate_fallback, Toast.LENGTH_SHORT).show()
                     } else {
                         useLastKnownFallback()
@@ -500,9 +526,10 @@ class LocationSimFragment : Fragment() {
             if (loc != null) {
                 ZLog.i(TAG_SCOPE, "fallback last known ${loc.latitude},${loc.longitude}")
                 requireActivity().runOnUiThread {
-                    val latLng = LatLng(loc.latitude, loc.longitude)
-                    selectOnMap(latLng)
-                    amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+                    val display = selectOnMapFromWgs(loc.latitude, loc.longitude)
+                    if (display != null) {
+                        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(display, 16f))
+                    }
                     Toast.makeText(requireContext(), R.string.location_locate_fallback, Toast.LENGTH_SHORT).show()
                 }
             } else {

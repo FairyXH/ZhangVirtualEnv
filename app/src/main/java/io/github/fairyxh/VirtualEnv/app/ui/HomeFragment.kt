@@ -15,6 +15,7 @@ import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
+import io.github.fairyxh.VirtualEnv.app.collect.StreamEnvironmentSampler
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
@@ -100,6 +101,9 @@ class HomeFragment : Fragment() {
     private var collector: EnvironmentCollector? = null
     private var lastCollectResult: JSONObject? = null
 
+    /** 录像期间持续监听环境（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询），采样线程按间隔截帧。 */
+    private var streamSampler: StreamEnvironmentSampler? = null
+
     /** 录像期间连续采集真实传感器数据（加速度/陀螺仪/计步）并逐帧追加。 */
     private var sensorRecorder: SensorStreamRecorder? = null
 
@@ -157,6 +161,7 @@ class HomeFragment : Fragment() {
         recordingStopButton = root.findViewById(R.id.recordingStopButton)
         recordingStatus = root.findViewById(R.id.recordingStatus)
         sensorRecorder = SensorStreamRecorder(requireContext())
+        streamSampler = StreamEnvironmentSampler(requireContext())
 
         playbackSelected = root.findViewById(R.id.playbackSelected)
         playbackEnableButton = root.findViewById(R.id.playbackEnableButton)
@@ -237,6 +242,7 @@ class HomeFragment : Fragment() {
         recordingScheduler?.shutdownNow()
         recordingScheduler = null
         sensorRecorder?.stop()
+        streamSampler?.stop()
         if (recordingId > 0) {
             val id = recordingId
             recordingId = -1L
@@ -494,8 +500,9 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.home_recording_name_required, Toast.LENGTH_SHORT).show()
             return
         }
-        val interval = (recordingIntervalInput.text.toString().toIntOrNull() ?: 5).coerceIn(2, 300)
-        recordingIntervalInput.setText(interval.toString())
+        // 流式采集：间隔支持小数秒，最低 0.1s（0.1~300）
+        val interval = (recordingIntervalInput.text.toString().toDoubleOrNull() ?: 1.0).coerceIn(0.1, 300.0)
+        recordingIntervalInput.setText(if (interval % 1.0 == 0.0) interval.toInt().toString() else interval.toString())
         executor.execute {
             val result = ApiClient.startRecording(name, "")
             // 采集真实环境前先临时停用虚拟环境；必须在后台线程（主线程禁止网络）
@@ -508,7 +515,9 @@ class HomeFragment : Fragment() {
                     recordingFrames = 0
                     recordingName = name
                     recordingNameInput.text.clear()
-                    // 连续传感器采集（加速度/陀螺仪/计步）随录像启动
+                    // 启动流式监听（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询）
+                    streamSampler?.start()
+                    // 连续传感器事件流（加速度/陀螺仪/计步）随录像启动
                     if (recordingId > 0) sensorRecorder?.start(recordingId)
                     Toast.makeText(
                         requireContext(),
@@ -524,50 +533,44 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun startSamplingLoop(intervalSec: Int) {
+    private fun startSamplingLoop(intervalSec: Double) {
         recordingScheduler?.shutdownNow()
         val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "ZVE-Recorder").apply { isDaemon = true }
         }
         recordingScheduler = scheduler
+        val intervalMs = (intervalSec * 1000.0).toLong().coerceAtLeast(100L)
         scheduler.scheduleWithFixedDelay(
             {
                 try {
                     if (recordingId <= 0) return@scheduleWithFixedDelay
-                    // collectAll 是异步链（WiFi/GNSS/BLE 回调），上一轮未完成时跳过
+                    // 流式截帧：直接从最新快照取当前状态（不再每次重新注册监听）
                     if (!samplingBusy.compareAndSet(false, true)) return@scheduleWithFixedDelay
-                    collector?.collectAll { frame ->
+                    executor.execute {
                         try {
-                            // collectAll 回调运行在主线程，HTTP 追加必须切到后台线程
-                            executor.execute {
-                                try {
-                                    val id = recordingId
-                                    if (id > 0) {
-                                        val result = ApiClient.appendRecordingFrame(id, frame)
-                                        if (result.code == ApiResult.CODE_OK) {
-                                            recordingFrames++
-                                            requireActivity().runOnUiThread {
-                                                if (isAdded) {
-                                                    recordingStatus.text = getString(
-                                                        R.string.home_recording_running,
-                                                        recordingName,
-                                                        recordingFrames
-                                                    )
-                                                }
-                                            }
-                                        } else {
-                                            ZLog.w(TAG_SCOPE, "append frame rejected: ${result.message}")
+                            val id = recordingId
+                            if (id > 0) {
+                                val frame = streamSampler?.snapshot() ?: JSONObject()
+                                val result = ApiClient.appendRecordingFrame(id, frame)
+                                if (result.code == ApiResult.CODE_OK) {
+                                    recordingFrames++
+                                    requireActivity().runOnUiThread {
+                                        if (isAdded) {
+                                            recordingStatus.text = getString(
+                                                R.string.home_recording_running,
+                                                recordingName,
+                                                recordingFrames
+                                            )
                                         }
                                     }
-                                } catch (t: Throwable) {
-                                    ZLog.w(TAG_SCOPE, "append frame failed", t)
-                                } finally {
-                                    samplingBusy.set(false)
+                                } else {
+                                    ZLog.w(TAG_SCOPE, "append frame rejected: ${result.message}")
                                 }
                             }
                         } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "append frame failed", t)
+                        } finally {
                             samplingBusy.set(false)
-                            ZLog.w(TAG_SCOPE, "append frame dispatch failed", t)
                         }
                     }
                 } catch (t: Throwable) {
@@ -576,8 +579,8 @@ class HomeFragment : Fragment() {
                 }
             },
             0,
-            intervalSec.toLong(),
-            TimeUnit.SECONDS
+            intervalMs,
+            TimeUnit.MILLISECONDS
         )
     }
 
@@ -585,6 +588,7 @@ class HomeFragment : Fragment() {
         recordingScheduler?.shutdownNow()
         recordingScheduler = null
         sensorRecorder?.stop()
+        streamSampler?.stop()
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L
