@@ -1,45 +1,45 @@
 package io.github.fairyxh.VirtualEnv.app
 
 import android.os.Bundle
-import androidx.activity.compose.setContent
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.fairyxh.VirtualEnv.R
+import io.github.fairyxh.VirtualEnv.app.ui.EnvFragment
 import io.github.fairyxh.VirtualEnv.app.ui.HomeFragment
 import io.github.fairyxh.VirtualEnv.app.ui.LocationSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
-import io.github.fairyxh.VirtualEnv.app.ui.EnvFragment
 import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTab
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTabs
@@ -56,8 +56,9 @@ import io.github.fairyxh.VirtualEnv.util.ZLog
  * - 环境（基站 / WiFi / GNSS 骨架）
  * - 设置（高德 Key 配置等）
  *
- * UI 已迁移到 Compose：根视图为 backdrop 宿主，Fragment 内容作为
- * LayerBackdrop 采样层，底栏 GlassBottomTabs 对其做真实背景模糊/折射。
+ * 视图结构：FragmentContainerView 保留在普通 View 树（FragmentManager 依赖它在
+ * onCreate/onStart 时立即可用），底栏单独用 ComposeView 渲染 GlassBottomTabs。
+ * currentTab 为 Compose state，底栏滑块通过 snapshotFlow 跟随点击动画。
  */
 class MainActivity : FragmentActivity() {
 
@@ -80,19 +81,56 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    private var currentTab = 0
+    /** Compose state：底栏滑块跟随此值动画。 */
+    private var currentTab by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         currentTab = savedInstanceState?.getInt(KEY_TAB, 0) ?: 0
 
-        setContent {
-            LiquidGlassScaffold(
-                selectedTabIndex = { currentTab },
-                onTabSelected = { switchTab(it, true) },
-                tabIcons = TAB_ICONS,
-                tabLabels = TAB_LABELS
+        // Fragment 容器必须在视图树中立即可用（FragmentManager onStart 时按 id 查找），
+        // 因此不放进 Compose AndroidView，底栏单独用 ComposeView 叠加。
+        val root = FrameLayout(this)
+        root.setBackgroundColor(
+            ContextCompat.getColor(this, R.color.bg_primary)
+        )
+        val container = FragmentContainerView(this).apply {
+            id = R.id.fragmentContainer
+        }
+        root.addView(
+            container,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
+        )
+        val bottomBar = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                LiquidBottomBar(
+                    selectedTabIndex = { currentTab },
+                    onTabSelected = { switchTab(it, true) },
+                    tabIcons = TAB_ICONS,
+                    tabLabels = TAB_LABELS
+                )
+            }
+        }
+        root.addView(
+            bottomBar,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+            )
+        )
+        setContentView(root)
+
+        // 页面底部留白：避免底栏遮挡最下方卡片（底栏高度 + 导航条）
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val bottomReserve = (96 * resources.displayMetrics.density).toInt() + navBar
+            container.setPadding(0, 0, 0, bottomReserve)
+            insets
         }
 
         if (savedInstanceState == null) {
@@ -140,7 +178,7 @@ class MainActivity : FragmentActivity() {
 }
 
 @Composable
-private fun LiquidGlassScaffold(
+private fun LiquidBottomBar(
     selectedTabIndex: () -> Int,
     onTabSelected: (Int) -> Unit,
     tabIcons: IntArray,
@@ -148,37 +186,24 @@ private fun LiquidGlassScaffold(
 ) {
     val backdrop = rememberLayerBackdrop()
     val colors = glassColors()
+    val density = LocalDensity.current
 
-    Box(Modifier.fillMaxSize()) {
-        // Backdrop 采样层：背景渐变 + Fragment 内容
+    Box(Modifier.fillMaxWidth()) {
+        // 极淡玻璃采样层：只提供 Backdrop blur 可模糊的内容，视觉上接近全透明
         Box(
             Modifier
+                .matchParentSize()
                 .layerBackdrop(backdrop)
-                .fillMaxSize()
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        drawRect(
-                            Brush.verticalGradient(
-                                0f to colors.bgPrimary,
-                                1f to colors.bgTertiary.copy(alpha = 0.5f)
-                            )
+                .drawBehind {
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = 0.04f),
+                            1f to Color.White.copy(alpha = 0.02f)
                         )
-                    }
-            )
-            AndroidView(
-                factory = { context ->
-                    FragmentContainerView(context).apply {
-                        id = R.id.fragmentContainer
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+                    )
+                }
+        )
 
-        // Liquid Glass 底栏
         val current = selectedTabIndex()
         GlassBottomTabs(
             selectedTabIndex = selectedTabIndex,
@@ -186,7 +211,7 @@ private fun LiquidGlassScaffold(
             backdrop = backdrop,
             tabsCount = tabIcons.size,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
         ) {
@@ -225,4 +250,3 @@ private fun TabIcon(
         style = TextStyle(color = tint, fontSize = 10.sp)
     )
 }
-

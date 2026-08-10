@@ -83,9 +83,10 @@ fun GlassBottomTabs(
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
+    // App Store 风格：底栏本身接近全透明，仅靠 blur + 边缘高光表达玻璃质感
     val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.4f)
-        else Color(0xFF121212).copy(0.4f)
+        if (isLightTheme) Color(0xFFFAFAFA).copy(0.05f)
+        else Color(0xFF121212).copy(0.08f)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -250,6 +251,17 @@ fun GlassBottomTabs(
                         if (isLtr) dampedDragAnimation.value * tabWidth + panelOffset
                         else size.width - (dampedDragAnimation.value + 1f) * tabWidth + panelOffset
                 }
+                .clickable(
+                    interactionSource = null,
+                    indication = null,
+                    role = Role.Tab,
+                    // 滑块覆盖当前 tab：点击时直接切到滑块所在 tab，
+                    // 避免滑块抢走点击导致"主页点不动"
+                    onClick = {
+                        val index = currentIndex.fastCoerceIn(0, tabsCount - 1)
+                        onTabSelected(index)
+                    }
+                )
                 .then(interactiveHighlight.gestureModifier)
                 .then(dampedDragAnimation.modifier)
                 .drawBackdrop(

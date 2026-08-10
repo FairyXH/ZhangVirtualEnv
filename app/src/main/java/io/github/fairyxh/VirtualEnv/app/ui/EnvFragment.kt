@@ -56,7 +56,15 @@ class EnvFragment : Fragment() {
         val summary: String
     )
 
-    private var items by mutableStateOf(listOf<EnvItem>())
+    private var items by mutableStateOf(
+        listOf(
+            EnvItem(TYPE_CELL, R.string.env_cell_title, false, ""),
+            EnvItem(TYPE_WIFI, R.string.env_wifi_title, false, ""),
+            EnvItem(TYPE_BLE, R.string.env_ble_title, false, ""),
+            EnvItem(TYPE_SENSOR, R.string.env_sensor_title, false, ""),
+            EnvItem(TYPE_GNSS, R.string.env_gnss_title, false, ""),
+        )
+    )
     private var updatingSwitch = false
 
     private val executor = Executors.newSingleThreadExecutor()
