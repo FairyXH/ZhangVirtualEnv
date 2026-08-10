@@ -116,14 +116,64 @@ class EnvFragment : Fragment() {
                 requireActivity().runOnUiThread {
                     val data = result.data
                     val enabled = data != null && data.optBoolean("enabled", false)
+                    val summary = configSummary(type, data)
                     statusView.text = getString(
-                        if (enabled) R.string.env_status_active else R.string.env_status_inactive
+                        R.string.env_card_status_format,
+                        getString(if (enabled) R.string.env_status_active else R.string.env_status_inactive),
+                        summary
                     )
                     updatingSwitch = true
                     switchView.isChecked = enabled
                     updatingSwitch = false
                 }
             }
+        }
+    }
+
+    /** 卡片显示当前使用的配置摘要（原始 data 的要点；未配置显示“未配置”）。 */
+    private fun configSummary(type: String, status: org.json.JSONObject?): String {
+        val data = status?.optJSONObject("data")
+        val none = getString(R.string.env_card_no_config)
+        if (data == null) return none
+        return when (type) {
+            TYPE_CELL -> {
+                val arr = data.optJSONArray("entries") ?: org.json.JSONArray()
+                if (arr.length() == 0) none else {
+                    val e = arr.optJSONObject(0)
+                    val first = e?.let {
+                        "${it.optString("type", "LTE")} ${it.optInt("mcc", -1)}/${it.optInt("mnc", -1)}"
+                    } ?: ""
+                    getString(R.string.env_card_config_summary_cell, arr.length(), first)
+                }
+            }
+            TYPE_WIFI -> {
+                val arr = data.optJSONArray("networks") ?: org.json.JSONArray()
+                if (arr.length() == 0) none else {
+                    val first = arr.optJSONObject(0)?.optString("ssid", "") ?: ""
+                    getString(R.string.env_card_config_summary_wifi, arr.length(), first)
+                }
+            }
+            TYPE_BLE -> {
+                val arr = data.optJSONArray("devices") ?: org.json.JSONArray()
+                if (arr.length() == 0) none else {
+                    val e = arr.optJSONObject(0)
+                    val first = e?.let {
+                        it.optString("name", "").ifEmpty { it.optString("address", "") }
+                    } ?: ""
+                    getString(R.string.env_card_config_summary_ble, arr.length(), first)
+                }
+            }
+            TYPE_SENSOR -> {
+                val step = data.optInt("stepFrequency", 0)
+                if (step <= 0) none else getString(R.string.env_card_config_summary_sensor, step)
+            }
+            TYPE_GNSS -> {
+                val count = data.optInt("satelliteCount", -1)
+                if (count <= 0) none else {
+                    getString(R.string.env_card_config_summary_gnss, count, data.optInt("usedInFix", 0))
+                }
+            }
+            else -> none
         }
     }
 }

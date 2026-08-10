@@ -30,195 +30,225 @@
             android:id="@+id/cellCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_lg"
+            android:layout_marginTop="@dimen/space_md"
             android:background="@drawable/bg_card"
             android:clickable="true"
             android:focusable="true"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/env_cell_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/env_cell_desc"
-                style="@style/Text.Caption" />
-
-            <TextView
-                android:id="@+id/cellStatus"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
                 android:layout_weight="1"
-                android:text="@string/env_pending"
-                style="@style/Text.Caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_cell_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/cellStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/env_pending"
+                    style="@style/Text.Caption" />
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/cellSwitch"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_sm" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/wifiCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_sm"
             android:background="@drawable/bg_card"
             android:clickable="true"
             android:focusable="true"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/env_wifi_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/env_wifi_desc"
-                style="@style/Text.Caption" />
-
-            <TextView
-                android:id="@+id/wifiStatus"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
                 android:layout_weight="1"
-                android:text="@string/env_pending"
-                style="@style/Text.Caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_wifi_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/wifiStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/env_pending"
+                    style="@style/Text.Caption" />
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/wifiSwitch"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_sm" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/bleCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_sm"
             android:background="@drawable/bg_card"
             android:clickable="true"
             android:focusable="true"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/env_ble_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/env_ble_desc"
-                style="@style/Text.Caption" />
-
-            <TextView
-                android:id="@+id/bleStatus"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
                 android:layout_weight="1"
-                android:text="@string/env_pending"
-                style="@style/Text.Caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_ble_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/bleStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/env_pending"
+                    style="@style/Text.Caption" />
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/bleSwitch"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_sm" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/sensorCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_sm"
             android:background="@drawable/bg_card"
             android:clickable="true"
             android:focusable="true"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/env_sensor_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/env_sensor_desc"
-                style="@style/Text.Caption" />
-
-            <TextView
-                android:id="@+id/sensorStatus"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
                 android:layout_weight="1"
-                android:text="@string/env_pending"
-                style="@style/Text.Caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_sensor_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/sensorStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/env_pending"
+                    style="@style/Text.Caption" />
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/sensorSwitch"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_sm" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/gnssCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_sm"
             android:background="@drawable/bg_card"
             android:clickable="true"
             android:focusable="true"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_sm">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/env_gnss_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/env_gnss_desc"
-                style="@style/Text.Caption" />
-
-            <TextView
-                android:id="@+id/gnssStatus"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
                 android:layout_weight="1"
-                android:text="@string/env_pending"
-                style="@style/Text.Caption" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/env_gnss_title"
+                    style="@style/Text.Headline" />
+
+                <TextView
+                    android:id="@+id/gnssStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/env_pending"
+                    style="@style/Text.Caption" />
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/gnssSwitch"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_sm" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
