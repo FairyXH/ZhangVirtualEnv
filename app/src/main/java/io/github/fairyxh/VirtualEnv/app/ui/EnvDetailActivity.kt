@@ -4,14 +4,40 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONArray
@@ -26,8 +52,10 @@ import java.util.concurrent.Executors
  * - gnss：详细设置（卫星总数 / 使用中 / 平均 CN0）
  *
  * 已保存配置列表即“多配置切换”：点使用加载到对应引擎。
+ *
+ * 视图层已迁移到 Compose Liquid Glass，业务逻辑不变。
  */
-class EnvDetailActivity : Activity() {
+class EnvDetailActivity : ComponentActivity() {
 
     companion object {
         private const val TAG_SCOPE = "UI"
@@ -47,22 +75,45 @@ class EnvDetailActivity : Activity() {
     }
 
     private lateinit var type: String
-    private lateinit var detailTitle: TextView
-    private lateinit var detailStatus: TextView
-    private lateinit var entryList: LinearLayout
-    private lateinit var cellFields: View
-    private lateinit var wifiFields: View
-    private lateinit var bleFields: View
-    private lateinit var sensorFields: View
-    private lateinit var gnssFields: View
-    private lateinit var addEntryButton: Button
-    private lateinit var saveNameInput: EditText
-    private lateinit var saveRemarkInput: EditText
-    private lateinit var savedEmpty: TextView
-    private lateinit var savedList: LinearLayout
+
+    // ---------- Compose 视图状态 ----------
+
+    private var detailTitle by mutableStateOf("")
+    private var detailStatus by mutableStateOf("")
+
+    // cell 表单
+    private var cellType by mutableStateOf("")
+    private var cellMcc by mutableStateOf("")
+    private var cellMnc by mutableStateOf("")
+    private var cellTac by mutableStateOf("")
+    private var cellCi by mutableStateOf("")
+    private var cellPci by mutableStateOf("")
+    private var cellRsrp by mutableStateOf("")
+
+    // wifi 表单
+    private var wifiSsid by mutableStateOf("")
+    private var wifiBssid by mutableStateOf("")
+    private var wifiRssi by mutableStateOf("")
+    private var wifiFrequency by mutableStateOf("")
+
+    // ble 表单
+    private var bleName by mutableStateOf("")
+    private var bleAddress by mutableStateOf("")
+    private var bleRssi by mutableStateOf("")
+
+    // sensor / gnss 表单
+    private var sensorStep by mutableStateOf("")
+    private var gnssCount by mutableStateOf("")
+    private var gnssUsed by mutableStateOf("")
+    private var gnssCn0 by mutableStateOf("")
+
+    private var saveName by mutableStateOf("")
+    private var saveRemark by mutableStateOf("")
 
     /** 当前组合条目（cell/wifi/ble 多条目；gnss/sensor 为单配置）。 */
-    private val entries = mutableListOf<JSONObject>()
+    private val entries = mutableStateListOf<JSONObject>()
+    private val savedItems = mutableStateListOf<JSONObject>()
+    private var savedEmptyVisible by mutableStateOf(false)
 
     /** 当前正在使用的配置 id（-1 表示无）。 */
     private var activeSnapshotId = -1L
@@ -71,26 +122,9 @@ class EnvDetailActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_env_detail)
         type = intent.getStringExtra(EXTRA_TYPE) ?: TYPE_CELL
 
-        detailTitle = findViewById(R.id.detailTitle)
-        detailStatus = findViewById(R.id.detailStatus)
-        entryList = findViewById(R.id.entryList)
-        cellFields = findViewById(R.id.cellFields)
-        wifiFields = findViewById(R.id.wifiFields)
-        bleFields = findViewById(R.id.bleFields)
-        sensorFields = findViewById(R.id.sensorFields)
-        gnssFields = findViewById(R.id.gnssFields)
-        addEntryButton = findViewById(R.id.addEntryButton)
-        saveNameInput = findViewById(R.id.saveNameInput)
-        saveRemarkInput = findViewById(R.id.saveRemarkInput)
-        savedEmpty = findViewById(R.id.savedEmpty)
-        savedList = findViewById(R.id.savedList)
-
-        findViewById<View>(R.id.backButton).setOnClickListener { finish() }
-
-        detailTitle.text = when (type) {
+        detailTitle = when (type) {
             TYPE_CELL -> getString(R.string.env_cell_title)
             TYPE_WIFI -> getString(R.string.env_wifi_title)
             TYPE_BLE -> getString(R.string.env_ble_title)
@@ -99,35 +133,12 @@ class EnvDetailActivity : Activity() {
             else -> type
         }
 
-        when (type) {
-            TYPE_CELL -> cellFields.visibility = View.VISIBLE
-            TYPE_WIFI -> wifiFields.visibility = View.VISIBLE
-            TYPE_BLE -> bleFields.visibility = View.VISIBLE
-            TYPE_SENSOR -> {
-                sensorFields.visibility = View.VISIBLE
-                // 传感器为单配置：表单即配置，无“添加条目”
-                addEntryButton.visibility = View.GONE
-                findViewById<View>(R.id.entriesDesc).visibility = View.GONE
-                findViewById<View>(R.id.entryList).visibility = View.GONE
-            }
-            TYPE_GNSS -> {
-                gnssFields.visibility = View.VISIBLE
-                // GNSS 为单配置：表单即配置，无“添加条目”
-                addEntryButton.visibility = View.GONE
-                findViewById<View>(R.id.entriesDesc).visibility = View.GONE
-                findViewById<View>(R.id.entryList).visibility = View.GONE
-            }
-        }
-
-        addEntryButton.setOnClickListener { addEntry() }
-        findViewById<Button>(R.id.saveButton).setOnClickListener { saveConfig() }
         // 输入框默认值：配置名称默认时间
-        saveNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
-                detailTitle.text.toString()
-            )
-        )
+        saveName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(detailTitle)
 
+        setContent {
+            DetailScreen(this)
+        }
         refreshSaved()
         refreshStatus()
     }
@@ -143,27 +154,423 @@ class EnvDetailActivity : Activity() {
         super.onDestroy()
     }
 
+    // ---------- Compose UI ----------
+
+    @Composable
+    private fun DetailScreen(activity: EnvDetailActivity) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlassPill(
+                        onClick = { activity.finish() },
+                        backdrop = backdrop,
+                        selected = false,
+                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                        height = 36.dp
+                    ) {
+                        BasicText(
+                            getString(R.string.env_detail_back),
+                            Modifier.padding(horizontal = 16.dp),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                        )
+                    }
+                    BasicText(
+                        detailTitle,
+                        Modifier.padding(start = 12.dp).weight(1f),
+                        style = TextStyle(
+                            color = colors.textPrimary,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
+                        )
+                    )
+                    GlassPill(
+                        onClick = {},
+                        backdrop = backdrop,
+                        selected = false,
+                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                        height = 30.dp
+                    ) {
+                        BasicText(
+                            detailStatus,
+                            Modifier.padding(horizontal = 12.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                        )
+                    }
+                }
+
+                when (type) {
+                    TYPE_CELL -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    getString(R.string.env_detail_entries_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.env_detail_entries_desc),
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                EntryFormField("type", cellType, { cellType = it }, getString(R.string.env_cell_type_hint), backdrop)
+                                EntryFormField("mcc", cellMcc, { cellMcc = it }, getString(R.string.env_cell_mcc_hint), backdrop)
+                                EntryFormField("mnc", cellMnc, { cellMnc = it }, getString(R.string.env_cell_mnc_hint), backdrop)
+                                EntryFormField("tac", cellTac, { cellTac = it }, getString(R.string.env_cell_tac_hint), backdrop)
+                                EntryFormField("ci", cellCi, { cellCi = it }, getString(R.string.env_cell_ci_hint), backdrop)
+                                EntryFormField("pci", cellPci, { cellPci = it }, getString(R.string.env_cell_pci_hint), backdrop)
+                                EntryFormField("rsrp", cellRsrp, { cellRsrp = it }, getString(R.string.env_cell_rsrp_hint), backdrop)
+                                GlassButton(
+                                    onClick = { activity.addEntry() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.env_detail_add_entry),
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                RenderEntries(backdrop)
+                            }
+                        }
+                    }
+                    TYPE_WIFI -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    getString(R.string.env_detail_entries_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.env_detail_entries_desc),
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                EntryFormField("ssid", wifiSsid, { wifiSsid = it }, getString(R.string.env_wifi_ssid_hint), backdrop)
+                                EntryFormField("bssid", wifiBssid, { wifiBssid = it }, getString(R.string.env_wifi_bssid_hint), backdrop)
+                                EntryFormField("rssi", wifiRssi, { wifiRssi = it }, getString(R.string.env_wifi_rssi_hint), backdrop)
+                                EntryFormField("frequency", wifiFrequency, { wifiFrequency = it }, getString(R.string.env_wifi_frequency_hint), backdrop)
+                                GlassButton(
+                                    onClick = { activity.addEntry() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.env_detail_add_entry),
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                RenderEntries(backdrop)
+                            }
+                        }
+                    }
+                    TYPE_BLE -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    getString(R.string.env_detail_entries_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.env_detail_entries_desc),
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                EntryFormField("name", bleName, { bleName = it }, getString(R.string.env_ble_name_hint), backdrop)
+                                EntryFormField("address", bleAddress, { bleAddress = it }, getString(R.string.env_ble_address_hint), backdrop)
+                                EntryFormField("rssi", bleRssi, { bleRssi = it }, getString(R.string.env_ble_rssi_hint), backdrop)
+                                GlassButton(
+                                    onClick = { activity.addEntry() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.env_detail_add_entry),
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                RenderEntries(backdrop)
+                            }
+                        }
+                    }
+                    TYPE_SENSOR -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    getString(R.string.env_sensor_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                EntryFormField("step", sensorStep, { sensorStep = it }, getString(R.string.env_sensor_step_hint), backdrop)
+                            }
+                        }
+                    }
+                    TYPE_GNSS -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    getString(R.string.env_gnss_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                EntryFormField("count", gnssCount, { gnssCount = it }, getString(R.string.env_gnss_count_hint), backdrop)
+                                EntryFormField("used", gnssUsed, { gnssUsed = it }, getString(R.string.env_gnss_used_hint), backdrop)
+                                EntryFormField("cn0", gnssCn0, { gnssCn0 = it }, getString(R.string.env_gnss_cn0_hint), backdrop)
+                            }
+                        }
+                    }
+                }
+
+                // 保存卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.env_detail_save_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        GlassField(
+                            value = saveName,
+                            onValueChange = { saveName = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.env_detail_name_hint)
+                        )
+                        GlassField(
+                            value = saveRemark,
+                            onValueChange = { saveRemark = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.env_detail_remark_hint)
+                        )
+                        GlassButton(
+                            onClick = { activity.saveConfig() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                getString(R.string.env_save),
+                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // 已保存配置卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.env_detail_saved_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        if (savedEmptyVisible) {
+                            BasicText(
+                                getString(R.string.env_saved_empty),
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            savedItems.forEach { item ->
+                                SavedItemRow(item, backdrop, activity)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun EntryFormField(
+        label: String,
+        value: String,
+        onValueChange: (String) -> Unit,
+        placeholder: String,
+        backdrop: com.kyant.backdrop.Backdrop
+    ) {
+        val colors = glassColors()
+        Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+            BasicText(
+                label,
+                style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+            )
+            GlassField(
+                value = value,
+                onValueChange = onValueChange,
+                backdrop = backdrop,
+                modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
+                placeholder = placeholder
+            )
+        }
+    }
+
+    @Composable
+    private fun RenderEntries(backdrop: com.kyant.backdrop.Backdrop) {
+        val colors = glassColors()
+        entries.forEachIndexed { index, entry ->
+            Row(
+                Modifier
+                    .padding(top = 8.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicText(
+                    entrySummary(entry),
+                    Modifier.weight(1f),
+                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                )
+                GlassPill(
+                    onClick = {
+                        entries.removeAt(index)
+                    },
+                    backdrop = backdrop,
+                    selected = false,
+                    containerColor = colors.danger.copy(alpha = 0.25f),
+                    height = 28.dp
+                ) {
+                    BasicText(
+                        getString(R.string.env_detail_remove),
+                        Modifier.padding(horizontal = 10.dp),
+                        style = TextStyle(color = colors.danger, fontSize = 11.sp)
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SavedItemRow(
+        item: JSONObject,
+        backdrop: com.kyant.backdrop.Backdrop,
+        activity: EnvDetailActivity
+    ) {
+        val colors = glassColors()
+        val isActive = item.optLong("id", -1L) == activeSnapshotId
+        Row(
+            Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BasicText(
+                if (isActive) {
+                    getString(R.string.env_detail_in_use_badge) + " " + item.optString("name", "")
+                } else {
+                    item.optString("name", "")
+                },
+                Modifier.weight(1f),
+                style = TextStyle(
+                    color = if (isActive) colors.accent else colors.textPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                )
+            )
+            GlassPill(
+                onClick = { activity.showDetailDialog(item) },
+                backdrop = backdrop,
+                modifier = Modifier.padding(end = 4.dp),
+                selected = false,
+                containerColor = colors.bgTertiary.copy(alpha = 0.35f),
+                height = 28.dp
+            ) {
+                BasicText(
+                    getString(R.string.env_detail_view),
+                    Modifier.padding(horizontal = 10.dp),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                )
+            }
+            GlassPill(
+                onClick = { activity.useConfig(item) },
+                backdrop = backdrop,
+                modifier = Modifier.padding(end = 4.dp),
+                selected = false,
+                containerColor = colors.accent.copy(alpha = 0.2f),
+                height = 28.dp
+            ) {
+                BasicText(
+                    getString(R.string.env_use),
+                    Modifier.padding(horizontal = 10.dp),
+                    style = TextStyle(color = colors.accent, fontSize = 11.sp)
+                )
+            }
+            GlassPill(
+                onClick = { activity.deleteConfig(item.optLong("id")) },
+                backdrop = backdrop,
+                selected = false,
+                containerColor = colors.danger.copy(alpha = 0.25f),
+                height = 28.dp
+            ) {
+                BasicText(
+                    getString(R.string.env_delete),
+                    Modifier.padding(horizontal = 10.dp),
+                    style = TextStyle(color = colors.danger, fontSize = 11.sp)
+                )
+            }
+        }
+    }
+
     // ---------- 条目编辑 ----------
 
     private fun addEntry() {
         val entry = readEntryForm() ?: return
         entries.add(entry)
         clearEntryForm()
-        renderEntries()
     }
 
     private fun readEntryForm(): JSONObject? {
         return when (type) {
             TYPE_CELL -> {
                 val obj = JSONObject().apply {
-                    val netType = findViewById<EditText>(R.id.cellTypeInput).text.toString().trim()
+                    val netType = cellType.trim()
                     put("type", if (netType.isEmpty()) "LTE" else netType)
-                    put("mcc", findViewById<EditText>(R.id.cellMccInput).text.toString().toIntOrNull() ?: -1)
-                    put("mnc", findViewById<EditText>(R.id.cellMncInput).text.toString().toIntOrNull() ?: -1)
-                    put("tac", findViewById<EditText>(R.id.cellTacInput).text.toString().toIntOrNull() ?: -1)
-                    put("ci", findViewById<EditText>(R.id.cellCiInput).text.toString().toLongOrNull() ?: -1L)
-                    put("pci", findViewById<EditText>(R.id.cellPciInput).text.toString().toIntOrNull() ?: -1)
-                    put("rsrp", findViewById<EditText>(R.id.cellRsrpInput).text.toString().toIntOrNull() ?: -1)
+                    put("mcc", cellMcc.toIntOrNull() ?: -1)
+                    put("mnc", cellMnc.toIntOrNull() ?: -1)
+                    put("tac", cellTac.toIntOrNull() ?: -1)
+                    put("ci", cellCi.toLongOrNull() ?: -1L)
+                    put("pci", cellPci.toIntOrNull() ?: -1)
+                    put("rsrp", cellRsrp.toIntOrNull() ?: -1)
                 }
                 if (obj.optInt("mcc", -1) < 0) {
                     Toast.makeText(this, R.string.env_cell_mcc_required, Toast.LENGTH_SHORT).show()
@@ -172,28 +579,28 @@ class EnvDetailActivity : Activity() {
                 obj
             }
             TYPE_WIFI -> {
-                val ssid = findViewById<EditText>(R.id.wifiSsidInput).text.toString().trim()
+                val ssid = wifiSsid.trim()
                 if (ssid.isEmpty()) {
                     Toast.makeText(this, R.string.env_wifi_ssid_required, Toast.LENGTH_SHORT).show()
                     return null
                 }
                 JSONObject().apply {
                     put("ssid", ssid)
-                    put("bssid", findViewById<EditText>(R.id.wifiBssidInput).text.toString().trim())
-                    put("rssi", findViewById<EditText>(R.id.wifiRssiInput).text.toString().toIntOrNull() ?: -60)
-                    put("frequency", findViewById<EditText>(R.id.wifiFrequencyInput).text.toString().toIntOrNull() ?: 2412)
+                    put("bssid", wifiBssid.trim())
+                    put("rssi", wifiRssi.toIntOrNull() ?: -60)
+                    put("frequency", wifiFrequency.toIntOrNull() ?: 2412)
                 }
             }
             TYPE_BLE -> {
-                val address = findViewById<EditText>(R.id.bleAddressInput).text.toString().trim()
+                val address = bleAddress.trim()
                 if (address.isEmpty()) {
                     Toast.makeText(this, R.string.env_ble_address_required, Toast.LENGTH_SHORT).show()
                     return null
                 }
                 JSONObject().apply {
-                    put("name", findViewById<EditText>(R.id.bleNameInput).text.toString().trim())
+                    put("name", bleName.trim())
                     put("address", address)
-                    put("rssi", findViewById<EditText>(R.id.bleRssiInput).text.toString().toIntOrNull() ?: -70)
+                    put("rssi", bleRssi.toIntOrNull() ?: -70)
                 }
             }
             else -> null
@@ -201,46 +608,27 @@ class EnvDetailActivity : Activity() {
     }
 
     private fun clearEntryForm() {
-        if (type == TYPE_CELL) {
-            listOf(R.id.cellTypeInput, R.id.cellMccInput, R.id.cellMncInput, R.id.cellTacInput,
-                R.id.cellCiInput, R.id.cellPciInput, R.id.cellRsrpInput)
-                .forEach { findViewById<EditText>(it).text.clear() }
-        } else if (type == TYPE_WIFI) {
-            listOf(R.id.wifiSsidInput, R.id.wifiBssidInput, R.id.wifiRssiInput, R.id.wifiFrequencyInput)
-                .forEach { findViewById<EditText>(it).text.clear() }
-        } else if (type == TYPE_BLE) {
-            listOf(R.id.bleNameInput, R.id.bleAddressInput, R.id.bleRssiInput)
-                .forEach { findViewById<EditText>(it).text.clear() }
-        }
-    }
-
-    private fun renderEntries() {
-        entryList.removeAllViews()
-        entries.forEachIndexed { index, entry ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = android.view.Gravity.CENTER_VERTICAL
-            row.setPadding(0, dp(6), 0, dp(6))
-
-            val summary = TextView(this)
-            summary.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            summary.text = entrySummary(entry)
-            summary.setTextColor(getColor(R.color.text_primary))
-            summary.setTextSize(12f)
-            row.addView(summary)
-
-            val del = TextView(this)
-            del.text = getString(R.string.env_detail_remove)
-            del.setBackgroundResource(R.drawable.bg_pill_secondary)
-            del.setTextColor(getColor(R.color.text_secondary))
-            del.setTextSize(11f)
-            del.setPadding(dp(8), dp(4), dp(8), dp(4))
-            del.setOnClickListener {
-                entries.removeAt(index)
-                renderEntries()
+        when (type) {
+            TYPE_CELL -> {
+                cellType = ""
+                cellMcc = ""
+                cellMnc = ""
+                cellTac = ""
+                cellCi = ""
+                cellPci = ""
+                cellRsrp = ""
             }
-            row.addView(del)
-            entryList.addView(row)
+            TYPE_WIFI -> {
+                wifiSsid = ""
+                wifiBssid = ""
+                wifiRssi = ""
+                wifiFrequency = ""
+            }
+            TYPE_BLE -> {
+                bleName = ""
+                bleAddress = ""
+                bleRssi = ""
+            }
         }
     }
 
@@ -273,29 +661,24 @@ class EnvDetailActivity : Activity() {
     // ---------- 保存 / 使用 / 删除 ----------
 
     private fun saveConfig() {
-        val name = saveNameInput.text.toString().trim()
+        val name = saveName.trim()
         if (name.isEmpty()) {
             Toast.makeText(this, R.string.location_point_name_required, Toast.LENGTH_SHORT).show()
             return
         }
-        val remark = saveRemarkInput.text.toString().trim()
+        val remark = saveRemark.trim()
         val data = buildConfigData() ?: return
         executor.execute {
             val result = ApiClient.createEnvSnapshot(name, remark, type, data)
             runOnUiThread {
                 Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == ApiResult.CODE_OK) {
-                    saveNameInput.setText(
-                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
-                            detailTitle.text.toString()
-                        )
-                    )
-                    saveRemarkInput.text.clear()
+                    saveName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(detailTitle)
+                    saveRemark = ""
                     entries.clear()
                     if (type == TYPE_SENSOR) {
-                        findViewById<EditText>(R.id.sensorStepInput).text.clear()
+                        sensorStep = ""
                     }
-                    renderEntries()
                     refreshSaved()
                 }
             }
@@ -308,7 +691,7 @@ class EnvDetailActivity : Activity() {
             TYPE_WIFI -> JSONObject().apply { put("networks", JSONArray(entries.toList())) }
             TYPE_BLE -> JSONObject().apply { put("devices", JSONArray(entries.toList())) }
             TYPE_SENSOR -> {
-                val step = findViewById<EditText>(R.id.sensorStepInput).text.toString().toIntOrNull()
+                val step = sensorStep.toIntOrNull()
                 if (step == null || step <= 0) {
                     Toast.makeText(this, R.string.env_sensor_step_hint, Toast.LENGTH_SHORT).show()
                     return null
@@ -316,9 +699,9 @@ class EnvDetailActivity : Activity() {
                 JSONObject().apply { put("stepFrequency", step) }
             }
             TYPE_GNSS -> JSONObject().apply {
-                put("satelliteCount", findViewById<EditText>(R.id.gnssCountInput).text.toString().toIntOrNull() ?: -1)
-                put("usedInFix", findViewById<EditText>(R.id.gnssUsedInput).text.toString().toIntOrNull() ?: -1)
-                put("cn0", findViewById<EditText>(R.id.gnssCn0Input).text.toString().toDoubleOrNull() ?: -1.0)
+                put("satelliteCount", gnssCount.toIntOrNull() ?: -1)
+                put("usedInFix", gnssUsed.toIntOrNull() ?: -1)
+                put("cn0", gnssCn0.toDoubleOrNull() ?: -1.0)
             }
             else -> null
         }
@@ -337,63 +720,15 @@ class EnvDetailActivity : Activity() {
     }
 
     private fun renderSaved(result: ApiResult) {
-        savedList.removeAllViews()
+        savedItems.clear()
         val snapshots = result.data?.optJSONArray("snapshots") ?: return
         val items = mutableListOf<JSONObject>()
         for (i in 0 until snapshots.length()) {
             val item = snapshots.optJSONObject(i) ?: continue
             if (item.optString("type", "") == type) items.add(item)
         }
-        savedEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-        items.forEach { item ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = android.view.Gravity.CENTER_VERTICAL
-            row.setPadding(0, dp(6), 0, dp(6))
-
-            val name = TextView(this)
-            name.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            val isActive = item.optLong("id", -1L) == activeSnapshotId
-            name.text = if (isActive) {
-                getString(R.string.env_detail_in_use_badge) + " " + item.optString("name", "")
-            } else {
-                item.optString("name", "")
-            }
-            name.setTextColor(
-                if (isActive) getColor(R.color.accent) else getColor(R.color.text_primary)
-            )
-            name.setTextSize(13f)
-            row.addView(name)
-
-            val detail = TextView(this)
-            detail.text = getString(R.string.env_detail_view)
-            detail.setBackgroundResource(R.drawable.bg_pill_secondary)
-            detail.setTextColor(getColor(R.color.text_secondary))
-            detail.setTextSize(11f)
-            detail.setPadding(dp(8), dp(4), dp(8), dp(4))
-            detail.setOnClickListener { showDetailDialog(item) }
-            row.addView(detail)
-
-            val use = TextView(this)
-            use.text = getString(R.string.env_use)
-            use.setBackgroundResource(R.drawable.bg_pill)
-            use.setTextColor(getColor(R.color.text_primary))
-            use.setTextSize(11f)
-            use.setPadding(dp(8), dp(4), dp(8), dp(4))
-            use.setOnClickListener { useConfig(item) }
-            row.addView(use)
-
-            val del = TextView(this)
-            del.text = getString(R.string.env_delete)
-            del.setBackgroundResource(R.drawable.bg_pill_secondary)
-            del.setTextColor(getColor(R.color.text_secondary))
-            del.setTextSize(11f)
-            del.setPadding(dp(8), dp(4), dp(8), dp(4))
-            del.setOnClickListener { deleteConfig(item.optLong("id")) }
-            row.addView(del)
-
-            savedList.addView(row)
-        }
+        savedEmptyVisible = items.isEmpty()
+        savedItems.addAll(items)
     }
 
     /** 配置详情弹窗：展示保存的完整数据。 */
@@ -492,12 +827,10 @@ class EnvDetailActivity : Activity() {
             runOnUiThread {
                 val data = result.data
                 val enabled = data != null && data.optBoolean("enabled", false)
-                detailStatus.text = getString(
+                detailStatus = getString(
                     if (enabled) R.string.env_detail_active else R.string.env_detail_inactive
                 )
             }
         }
     }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 }
