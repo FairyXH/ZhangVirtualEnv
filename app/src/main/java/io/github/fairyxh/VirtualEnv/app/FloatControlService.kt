@@ -50,6 +50,8 @@ class FloatControlService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
+    private var panelView: View? = null
+    private var ballView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private lateinit var joystickView: JoystickView
@@ -87,7 +89,13 @@ class FloatControlService : Service() {
             overlayView?.let { windowManager.removeView(it) }
         } catch (_: Throwable) {
         }
+        try {
+            ballView?.let { windowManager.removeView(it) }
+        } catch (_: Throwable) {
+        }
         overlayView = null
+        panelView = null
+        ballView = null
         executor.shutdown()
         super.onDestroy()
     }
@@ -97,6 +105,7 @@ class FloatControlService : Service() {
         val inflater = LayoutInflater.from(this)
         val view = inflater.inflate(R.layout.float_control_window, null) ?: return
         overlayView = view
+        panelView = view
 
         joystickView = view.findViewById(R.id.joystickPad)
         speedSeek = view.findViewById(R.id.speedSeek)
@@ -198,11 +207,7 @@ class FloatControlService : Service() {
             joystickView.visibility = View.GONE
             loadRoutes()
         }
-        view.findViewById<View>(R.id.closeButton).setOnClickListener { stopSelf() }
-        view.findViewById<View>(R.id.collapseButton).setOnClickListener {
-            joystickView.visibility = View.GONE
-            routePanel.visibility = View.GONE
-        }
+        view.findViewById<View>(R.id.collapseButton).setOnClickListener { collapseToBall() }
 
         view.findViewById<View>(R.id.routeStartButton).setOnClickListener {
             if (selectedRouteId <= 0) {
@@ -283,6 +288,82 @@ class FloatControlService : Service() {
 
     private fun toast(resId: Int) {
         runOnUi { Toast.makeText(this, getString(resId), Toast.LENGTH_SHORT).show() }
+    }
+
+    // ---------- 收起为悬浮球 / 展开 ----------
+
+    /** 收起面板为悬浮球（无关闭按钮；再次点击悬浮球展开）。 */
+    private fun collapseToBall() {
+        stopJoystick()
+        val panel = panelView ?: return
+        val params = layoutParams ?: return
+        try {
+            windowManager.removeView(panel)
+        } catch (_: Throwable) {
+            return
+        }
+        val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
+        ballView = ball
+        ball.setOnClickListener { expandFromBall() }
+        setupBallDrag(ball)
+        try {
+            windowManager.addView(ball, params)
+            ZLog.d(TAG_SCOPE, "collapsed to ball")
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "add ball failed, restore panel", t)
+            ballView = null
+            try {
+                windowManager.addView(panel, params)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /** 点击悬浮球展开面板。 */
+    private fun expandFromBall() {
+        val ball = ballView ?: return
+        val params = layoutParams ?: return
+        try {
+            windowManager.removeView(ball)
+        } catch (_: Throwable) {
+        }
+        ballView = null
+        val panel = panelView ?: return
+        try {
+            windowManager.addView(panel, params)
+            ZLog.d(TAG_SCOPE, "expanded from ball")
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "re-add panel failed", t)
+        }
+    }
+
+    private fun setupBallDrag(ball: View) {
+        var initialX = 0
+        var initialY = 0
+        var touchX = 0f
+        var touchY = 0f
+        ball.setOnTouchListener { _, event ->
+            val params = layoutParams ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    touchX = event.rawX
+                    touchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initialX + (event.rawX - touchX).toInt()
+                    params.y = initialY + (event.rawY - touchY).toInt()
+                    try {
+                        windowManager.updateViewLayout(ball, params)
+                    } catch (_: Throwable) {
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     // ---------- 拖拽 ----------

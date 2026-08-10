@@ -219,6 +219,58 @@ class RouteEngine : LocationEngine {
         }
     }
 
+    /** 导出可恢复的完整运行快照（采集暂停时使用）。 */
+    fun snapshotJson(): org.json.JSONObject {
+        val s = state.get()
+        val arr = org.json.JSONArray()
+        s.points.forEach { (lat, lon) ->
+            arr.put(org.json.JSONObject().apply {
+                put("lat", lat)
+                put("lon", lon)
+            })
+        }
+        return org.json.JSONObject().apply {
+            put("enabled", s.enabled)
+            put("running", s.running)
+            put("points", arr)
+            put("speedMps", s.speedMps)
+            put("stepFrequency", s.stepFrequency)
+            put("stepCount", s.stepCount)
+            put("segmentIndex", s.segmentIndex)
+            put("progress", s.progress)
+        }
+    }
+
+    /** 从快照恢复路线（暂停后恢复，保留段索引/进度）。 */
+    fun restoreFrom(json: org.json.JSONObject) {
+        val arr = json.optJSONArray("points") ?: run {
+            ZLog.w("Core", "RouteEngine.restoreFrom: no points")
+            return
+        }
+        val points = (0 until arr.length()).mapNotNull { i ->
+            val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+            val lat = obj.optDouble("lat", Double.NaN)
+            val lon = obj.optDouble("lon", Double.NaN)
+            if (lat.isNaN() || lon.isNaN()) null else Pair(lat, lon)
+        }
+        if (points.size < 2) return
+        state.set(
+            RouteState(
+                enabled = json.optBoolean("enabled", true),
+                running = json.optBoolean("running", true),
+                points = points,
+                speedMps = json.optDouble("speedMps", 1.4).coerceAtLeast(0.1),
+                stepFrequency = json.optInt("stepFrequency", 120).coerceIn(0, 600),
+                stepCount = json.optDouble("stepCount", 0.0),
+                segmentIndex = json.optInt("segmentIndex", 0).coerceIn(0, points.size - 1),
+                progress = json.optDouble("progress", 0.0).coerceIn(0.0, 1.0),
+                lastTime = SystemClock.elapsedRealtime(),
+                updateTime = SystemClock.elapsedRealtime()
+            )
+        )
+        ZLog.i("Core", "RouteEngine restored points=${points.size} segment=${state.get().segmentIndex}")
+    }
+
     private fun parsePoints(pointsJson: String): List<Pair<Double, Double>> {
         return try {
             val arr = JSONArray(pointsJson)

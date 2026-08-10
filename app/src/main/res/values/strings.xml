@@ -27,6 +27,7 @@
     <string name="home_collect_save">保存采集</string>
     <string name="home_collect_name_required">请输入采集名称</string>
     <string name="home_collect_none">请先完成一次采集</string>
+    <string name="home_collect_suspend_notice">开始采集：将临时停用全部虚拟环境，采集完成后自动恢复</string>
     <string name="home_collect_saved">采集已保存</string>
     <string name="home_collect_applied">已加载采集：%1$s</string>
     <string name="home_saved_title">已保存采集</string>
@@ -43,6 +44,7 @@
     <string name="home_recording_idle">未在录制</string>
     <string name="home_recording_name_required">请输入录像名称</string>
     <string name="home_recording_started">录像已开始</string>
+    <string name="home_recording_suspend_notice">录制期间将临时停用虚拟环境，停止录制后自动恢复</string>
     <string name="home_recording_stopped">录像已保存</string>
     <string name="home_recording_delete">删除</string>
     <string name="home_recording_deleted">录像已删除</string>
@@ -83,6 +85,11 @@
     <string name="location_enabled">已启用</string>
     <string name="location_disabled">未启用</string>
     <string name="location_map_hint">点击地图选点</string>
+    <string name="location_search_hint">搜索地址/POI，如：人民广场</string>
+    <string name="location_search">搜索</string>
+    <string name="location_search_empty">未找到相关地址</string>
+    <string name="location_search_failed">搜索失败，请检查网络与高德 Key</string>
+    <string name="location_locate_fallback">定位服务暂不可用，已使用最近一次已知位置</string>
     <string name="location_map_init_failed">地图初始化失败，请检查高德 Key 与隐私同意</string>
     <string name="location_point_name_hint">地点名称，如：公司</string>
     <string name="location_point_remark_hint">备注（可选），如：工位 3 楼</string>
@@ -125,6 +132,13 @@
     <!-- Route -->
     <string name="route_title">路线模拟</string>
     <string name="route_subtitle">地图点击绘制路线 · 保存后可用于路线模拟</string>
+    <string name="route_switch_title">启用路线模拟</string>
+    <string name="route_switch_desc">开启后沿已保存路线移动，与单点虚拟定位互斥</string>
+    <string name="route_status_idle">路线未运行</string>
+    <string name="route_status_running">路线运行中 · %1$d 个路径点</string>
+    <string name="route_status_offline">Backend 未连接</string>
+    <string name="route_select_first">请先加载或保存一条路线</string>
+    <string name="route_locate_fallback">定位服务暂不可用，已使用最近一次已知位置</string>
     <string name="route_draw_hint">点击地图添加路径点</string>
     <string name="route_points_count">已添加 %1$d 个路径点</string>
     <string name="route_name_hint">路线名称，如：学校→公园</string>
@@ -187,6 +201,8 @@
 
     <!-- Float window -->
     <string name="float_window_title">虚拟环境悬浮窗</string>
+    <string name="float_window_title_short">虚拟环境</string>
+    <string name="float_ball_label">摇</string>
     <string name="float_collapse">收起</string>
     <string name="float_close">关闭</string>
     <string name="float_mode_joystick">摇杆</string>

@@ -38,9 +38,10 @@ class WifiServiceHookAdapter(
         private const val MAX_RETRIES = 30
     }
 
-    /** 位置虚拟化启用（单点或路线任一开启）。 */
+    /** 位置虚拟化启用（单点或路线任一开启；采集暂停时强制放行）。 */
     private fun virtualLocationEnabled(): Boolean =
-        backend.locationEngine.isEnabled() || backend.routeEngine.isRunning()
+        !backend.isSuspended() &&
+            (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     private val installThread: HandlerThread by lazy {
         HandlerThread("ZVE-WifiHook").apply { start() }

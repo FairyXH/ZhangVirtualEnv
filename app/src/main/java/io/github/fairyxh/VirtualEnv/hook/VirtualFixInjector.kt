@@ -57,9 +57,10 @@ class VirtualFixInjector(
     @Volatile
     private var started = false
 
-    /** 虚拟位置启用（单点或路线任一开启）。 */
+    /** 虚拟位置启用（单点或路线任一开启；采集暂停时停止注入）。 */
     private fun virtualLocationEnabled(): Boolean =
-        backend.locationEngine.isEnabled() || backend.routeEngine.isRunning()
+        !backend.isSuspended() &&
+            (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     /**
      * 安装注入器：Hook provider manager 构造 + 启动定时注入。

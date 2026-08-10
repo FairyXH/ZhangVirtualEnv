@@ -13,6 +13,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.telephony.CellIdentityGsm
 import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
@@ -38,6 +39,8 @@ class EnvironmentCollector(private val context: Context) {
     companion object {
         private const val TAG_SCOPE = "Collect"
         private const val SCAN_TIMEOUT_MS = 4000L
+        private const val WIFI_POLL_TIMEOUT_MS = 3500L
+        private const val GNSS_WAIT_TIMEOUT_MS = 3000L
         private const val MAX_NEARBY = 20
     }
 
@@ -47,11 +50,16 @@ class EnvironmentCollector(private val context: Context) {
         result.put("timestamp", System.currentTimeMillis())
         result.put("location", collectLocation())
         result.put("cell", collectCell())
-        result.put("wifi", collectWifi())
-        result.put("gnss", collectGnss())
-        collectBluetooth { bt ->
-            result.put("bluetooth", bt)
-            onDone(result)
+        // WiFi / GNSS / 蓝牙均异步：串行完成后回调，避免 GNSS 状态回调晚于 onDone 丢失
+        collectWifi { wifi ->
+            result.put("wifi", wifi)
+            collectGnss { gnss ->
+                result.put("gnss", gnss)
+                collectBluetooth { bt ->
+                    result.put("bluetooth", bt)
+                    onDone(result)
+                }
+            }
         }
     }
 
@@ -157,28 +165,47 @@ class EnvironmentCollector(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun collectWifi(): JSONObject {
+    private fun collectWifi(onDone: (JSONObject) -> Unit) {
         val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val out = JSONObject()
         try {
             out.put("enabled", wm.isWifiEnabled)
-            val results: List<ScanResult> = wm.scanResults
-            val arr = JSONArray()
-            results.take(20).forEach { r ->
-                arr.put(JSONObject().apply {
-                    put("ssid", r.SSID)
-                    put("bssid", r.BSSID)
-                    put("rssi", r.level)
-                    put("frequency", r.frequency)
-                })
+            val handler = Handler(Looper.getMainLooper())
+            val start = SystemClock.elapsedRealtime()
+            val poll = object : Runnable {
+                override fun run() {
+                    val results = wm.scanResults
+                    if (results.isNotEmpty() || SystemClock.elapsedRealtime() - start > WIFI_POLL_TIMEOUT_MS) {
+                        out.put("networks", JSONArray().apply {
+                            results.take(20).forEach { r ->
+                                put(JSONObject().apply {
+                                    put("ssid", r.SSID)
+                                    put("bssid", r.BSSID)
+                                    put("rssi", r.level)
+                                    put("frequency", r.frequency)
+                                })
+                            }
+                        })
+                        ZLog.i(TAG_SCOPE, "wifi collected ${results.size} networks")
+                        onDone(out)
+                    } else {
+                        handler.postDelayed(this, 500)
+                    }
+                }
             }
-            out.put("networks", arr)
+            // 主动触发一次扫描，随后轮询缓存结果（Android 13+ 需定位权限，调用方已申请）
+            try {
+                wm.startScan()
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "wifi startScan failed, use cache", t)
+            }
+            handler.post(poll)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "collectWifi failed", t)
             out.put("networks", JSONArray())
             out.put("error", t.message)
+            onDone(out)
         }
-        return out
     }
 
     @SuppressLint("MissingPermission")
@@ -281,28 +308,32 @@ class EnvironmentCollector(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun collectGnss(): JSONObject {
+    private fun collectGnss(onDone: (JSONObject) -> Unit) {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val out = JSONObject()
         try {
             if (lm.getProvider(LocationManager.GPS_PROVIDER) == null) {
                 out.put("available", false)
-                return out
+                onDone(out)
+                return
             }
             out.put("available", true)
-            val callback = object : GnssStatus.Callback() {
-                override fun onStarted() {
-                    out.put("started", true)
-                }
+            val handler = Handler(Looper.getMainLooper())
+            var callback: GnssStatus.Callback? = null
+            var done = false
 
-                override fun onStopped() {
-                    out.put("started", false)
+            fun finish() {
+                if (done) return
+                done = true
+                try {
+                    callback?.let { lm.unregisterGnssStatusCallback(it) }
+                } catch (_: Throwable) {
                 }
+                handler.removeCallbacksAndMessages(null)
+                onDone(out)
+            }
 
-                override fun onFirstFix(ttffMillis: Int) {
-                    out.put("firstFix", ttffMillis)
-                }
-
+            callback = object : GnssStatus.Callback() {
                 override fun onSatelliteStatusChanged(status: GnssStatus) {
                     out.put("satelliteCount", status.satelliteCount)
                     val sats = JSONArray()
@@ -319,6 +350,8 @@ class EnvironmentCollector(private val context: Context) {
                     }
                     out.put("usedInFix", used)
                     out.put("satellites", sats)
+                    ZLog.i(TAG_SCOPE, "gnss collected sats=${status.satelliteCount} used=$used")
+                    finish()
                 }
             }
             if (Build.VERSION.SDK_INT >= 30) {
@@ -327,12 +360,12 @@ class EnvironmentCollector(private val context: Context) {
                 @Suppress("DEPRECATION")
                 lm.registerGnssStatusCallback(callback)
             }
-            // 主动拉取一次状态；回调异步补充
             out.put("registered", true)
+            handler.postDelayed({ finish() }, GNSS_WAIT_TIMEOUT_MS)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "collectGnss failed", t)
             out.put("error", t.message)
+            onDone(out)
         }
-        return out
     }
 }

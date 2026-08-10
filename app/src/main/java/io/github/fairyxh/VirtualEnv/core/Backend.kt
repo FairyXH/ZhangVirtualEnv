@@ -138,10 +138,95 @@ class Backend private constructor(private val dataDir: File) {
         configManager.setPoint(latitude, longitude, speed, bearing)
     }
 
-    /** App 开关虚拟定位（经 ApiServer 调用）。 */
+    /** App 开关虚拟定位（经 ApiServer 调用）。开启时与路线模拟互斥：先停路线。 */
     fun setLocationEnabled(enabled: Boolean) {
+        if (enabled) {
+            // 互斥：单点虚拟定位与路线模拟不能同时开启
+            routeEngine.stop()
+        }
         locationEngine.setEnabled(enabled)
         configManager.setLocationEnabled(enabled)
+    }
+
+    // ---------- 采集时临时停用虚拟环境 ----------
+
+    @Volatile
+    private var suspendCount = 0
+
+    @Volatile
+    private var locationWasEnabled = false
+
+    @Volatile
+    private var routeSnapshot: org.json.JSONObject? = null
+
+    @Volatile
+    private var envSnapshot: org.json.JSONObject? = null
+
+    /** 是否处于临时停用状态（Hook 层按此放行真实数据）。 */
+    fun isSuspended(): Boolean = suspendCount > 0
+
+    /**
+     * 临时停用全部虚拟环境（采集真实环境前调用）。
+     *
+     * 可嵌套：内部计数，多次调用需对应次数的 [resumeAll]。
+     *
+     * @return true 表示本次调用真正执行了停用（首次）
+     */
+    fun suspendAll(): Boolean {
+        synchronized(this) {
+            val first = suspendCount == 0
+            suspendCount++
+            if (first) {
+                locationWasEnabled = locationEngine.isEnabled()
+                routeSnapshot = if (routeEngine.isEnabled()) routeEngine.snapshotJson() else null
+                envSnapshot = org.json.JSONObject().apply {
+                    put("wifi", wifiEngine.statusJson())
+                    put("cell", cellEngine.statusJson())
+                    put("ble", bleEngine.statusJson())
+                    put("gnss", gnssEngine.statusJson())
+                    put("sensor", sensorEngine.statusJson())
+                }
+                // 停止所有虚拟输出，Hook 层立即放行真实数据
+                setLocationEnabled(false)
+                routeEngine.stop()
+                wifiEngine.clear()
+                cellEngine.clear()
+                bleEngine.clear()
+                gnssEngine.clear()
+                sensorEngine.clear()
+                ZLog.i(TAG_SCOPE, "env suspended")
+            }
+            return first
+        }
+    }
+
+    /** 恢复被 [suspendAll] 停用的虚拟环境（计数归零时真正恢复）。 */
+    fun resumeAll(): Boolean {
+        synchronized(this) {
+            if (suspendCount <= 0) return false
+            suspendCount--
+            if (suspendCount == 0) {
+                if (locationWasEnabled) setLocationEnabled(true)
+                routeSnapshot?.let { routeEngine.restoreFrom(it) }
+                routeSnapshot = null
+                envSnapshot?.let { snap ->
+                    restoreEngine(snap, "wifi", wifiEngine)
+                    restoreEngine(snap, "cell", cellEngine)
+                    restoreEngine(snap, "ble", bleEngine)
+                    restoreEngine(snap, "gnss", gnssEngine)
+                    restoreEngine(snap, "sensor", sensorEngine)
+                }
+                envSnapshot = null
+                ZLog.i(TAG_SCOPE, "env resumed")
+            }
+            return suspendCount == 0
+        }
+    }
+
+    private fun restoreEngine(snap: org.json.JSONObject, key: String, engine: EnvStateEngine) {
+        val status = snap.optJSONObject(key) ?: return
+        val data = status.optJSONObject("data")
+        if (status.optBoolean("enabled", false) && data != null) engine.update(data) else engine.clear()
     }
 
     /** 启动 HTTP API 服务。 */
@@ -182,9 +267,13 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- 路线模拟控制 ----------
 
-    /** 一键启动路线模拟：加载路线点并按速度开始播放。 */
+    /** 一键启动路线模拟：加载路线点并按速度开始播放。与单点虚拟定位互斥。 */
     fun startRoute(id: Long, speedKmh: Double): org.json.JSONObject? {
         val route = databaseManager.getRoute(id) ?: return null
+        // 互斥：启动路线模拟时关闭单点虚拟定位
+        if (locationEngine.isEnabled()) {
+            setLocationEnabled(false)
+        }
         val points = route.optString("points", "")
         val speed = if (speedKmh > 0) speedKmh else route.optDouble("speed", 3.5)
         val stepFrequency = route.optInt("stepFrequency", 120)

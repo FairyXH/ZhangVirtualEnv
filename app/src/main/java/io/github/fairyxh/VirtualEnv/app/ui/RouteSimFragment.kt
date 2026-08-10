@@ -58,6 +58,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private lateinit var locateButton: Button
     private lateinit var savedRoutesEmpty: TextView
     private lateinit var savedRouteList: android.widget.LinearLayout
+    private lateinit var routeEnableSwitch: android.widget.Switch
+    private lateinit var routeStatusText: TextView
+    private lateinit var searchInput: EditText
+    private lateinit var searchButton: Button
+    private lateinit var searchResults: android.widget.LinearLayout
 
     private var mapView: MapView? = null
     private var amap: AMap? = null
@@ -67,6 +72,13 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private val markers = mutableListOf<Marker>()
     private var polyline: Polyline? = null
     private val executor = Executors.newSingleThreadExecutor()
+
+    /** 当前选中的已保存路线（开关启动/一键启动使用）。 */
+    private var currentRouteId = -1L
+    private var currentRouteName = ""
+
+    /** 防止状态回填触发开关回环。 */
+    private var updatingSwitch = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_route, container, false)
@@ -78,6 +90,17 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         locateButton = root.findViewById(R.id.locateButton)
         savedRoutesEmpty = root.findViewById(R.id.savedRoutesEmpty)
         savedRouteList = root.findViewById(R.id.savedRouteList)
+        routeEnableSwitch = root.findViewById(R.id.routeEnableSwitch)
+        routeStatusText = root.findViewById(R.id.routeStatusText)
+        searchInput = root.findViewById(R.id.searchInput)
+        searchButton = root.findViewById(R.id.searchButton)
+        searchResults = root.findViewById(R.id.searchResults)
+
+        routeEnableSwitch.setOnCheckedChangeListener { _, checked ->
+            if (updatingSwitch) return@setOnCheckedChangeListener
+            if (checked) enableRouteSimulation() else disableRouteSimulation()
+        }
+        setupSearch()
 
         locateButton.setOnClickListener { locateCurrentPosition() }
         root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
@@ -86,6 +109,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
         initMapSafely(savedInstanceState)
         refreshSavedRoutes()
+        refreshRouteStatus()
         return root
     }
 
@@ -93,6 +117,74 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         super.onResume()
         mapView?.onResume()
         refreshSavedRoutes()
+        refreshRouteStatus()
+    }
+
+    /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
+    private fun enableRouteSimulation() {
+        if (currentRouteId <= 0) {
+            Toast.makeText(requireContext(), R.string.route_select_first, Toast.LENGTH_SHORT).show()
+            setSwitchChecked(false)
+            return
+        }
+        executor.execute {
+            val result = ApiClient.startRoute(currentRouteId)
+            requireActivity().runOnUiThread {
+                if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.route_started, currentRouteName),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                    setSwitchChecked(false)
+                }
+                refreshRouteStatus()
+            }
+        }
+    }
+
+    /** 开关关闭：停止路线模拟。 */
+    private fun disableRouteSimulation() {
+        executor.execute {
+            val result = ApiClient.stopRoute()
+            requireActivity().runOnUiThread {
+                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+                refreshRouteStatus()
+            }
+        }
+    }
+
+    /** 刷新路线运行状态：开关与状态文本同步 Backend。 */
+    private fun refreshRouteStatus() {
+        executor.execute {
+            val result = ApiClient.getRouteStatus()
+            requireActivity().runOnUiThread {
+                val data = result.data
+                if (data == null) {
+                    routeStatusText.text = getString(R.string.route_status_offline)
+                    setSwitchChecked(false)
+                    return@runOnUiThread
+                }
+                val running = data.optBoolean("running", false)
+                setSwitchChecked(running)
+                routeStatusText.text = if (running) {
+                    getString(R.string.route_status_running, data.optInt("points", 0))
+                } else {
+                    getString(R.string.route_status_idle)
+                }
+            }
+        }
+    }
+
+    /** 程序性设置开关（不触发业务回调）。 */
+    private fun setSwitchChecked(checked: Boolean) {
+        updatingSwitch = true
+        routeEnableSwitch.isChecked = checked
+        updatingSwitch = false
     }
 
     /**
@@ -210,6 +302,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    currentRouteId = result.data?.optLong("id", -1L) ?: -1L
+                    currentRouteName = name
                     clearRoute()
                     routeNameInput.text.clear()
                     routeRemarkInput.text.clear()
@@ -290,6 +384,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private fun startRouteSimulation(item: org.json.JSONObject) {
         val id = item.optLong("id")
         val name = item.optString("name", "")
+        currentRouteId = id
+        currentRouteName = name
         executor.execute {
             val result = ApiClient.startRoute(id)
             requireActivity().runOnUiThread {
@@ -302,6 +398,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 } else {
                     Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 }
+                refreshRouteStatus()
             }
         }
     }
@@ -309,6 +406,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     /** 一键使用：把已保存路线加载到地图（可继续编辑或重新保存）。 */
     private fun loadRoute(item: org.json.JSONObject) {
         val pointsArr = item.optJSONArray("points") ?: return
+        currentRouteId = item.optLong("id", -1L)
+        currentRouteName = item.optString("name", "")
         if (amap == null) {
             Toast.makeText(requireContext(), R.string.route_map_init_failed, Toast.LENGTH_SHORT).show()
             return
@@ -384,15 +483,132 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         if (location == null || location.errorCode != 0) {
             val code = location?.errorCode ?: -1
             ZLog.w(TAG_SCOPE, "amap locate error=$code ${location?.errorInfo}")
-            requireActivity().runOnUiThread {
-                Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
-            }
+            fallbackLastKnown()
             return
         }
         val latLng = LatLng(location.latitude, location.longitude)
         ZLog.i(TAG_SCOPE, "located at ${location.latitude},${location.longitude}")
         requireActivity().runOnUiThread {
             amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        }
+    }
+
+    /** 高德定位失败时回退系统最近已知位置（网络/GPS）。 */
+    private fun fallbackLastKnown() {
+        try {
+            val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val loc = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            if (loc != null) {
+                ZLog.i(TAG_SCOPE, "fallback last known ${loc.latitude},${loc.longitude}")
+                requireActivity().runOnUiThread {
+                    amap?.moveCamera(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f)
+                    )
+                    Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "fallback last known failed", t)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // ---------- 地址搜索 ----------
+
+    private fun setupSearch() {
+        searchButton.setOnClickListener { searchPoi() }
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                searchPoi()
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun searchPoi() {
+        val keyword = searchInput.text.toString().trim()
+        if (keyword.isEmpty()) return
+        val context = requireContext()
+        if (!AmapPrivacyManager.isAgreed(context)) {
+            Toast.makeText(context, R.string.route_privacy_prompt, Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val query = com.amap.api.services.poisearch.PoiSearch.Query(keyword, "", "")
+            query.pageSize = 5
+            query.pageNum = 0
+            val search = com.amap.api.services.poisearch.PoiSearch(context, query)
+            search.setOnPoiSearchListener(object : com.amap.api.services.poisearch.PoiSearch.OnPoiSearchListener {
+                override fun onPoiSearched(result: com.amap.api.services.poisearch.PoiResult?, rCode: Int) {
+                    requireActivity().runOnUiThread {
+                        if (rCode != 1000 || result == null) {
+                            Toast.makeText(requireContext(), R.string.location_search_failed, Toast.LENGTH_SHORT).show()
+                            return@runOnUiThread
+                        }
+                        renderSearchResults(result.pois ?: emptyList())
+                    }
+                }
+
+                override fun onPoiItemSearched(poiItem: com.amap.api.services.core.PoiItem?, rCode: Int) {
+                }
+            })
+            search.searchPOIAsyn()
+            hideKeyboard()
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "poi search failed", t)
+            Toast.makeText(context, R.string.location_search_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun renderSearchResults(pois: List<com.amap.api.services.core.PoiItem>) {
+        searchResults.removeAllViews()
+        if (pois.isEmpty()) {
+            searchResults.visibility = View.GONE
+            Toast.makeText(requireContext(), R.string.location_search_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        pois.forEach { poi ->
+            val row = TextView(requireContext())
+            row.text = "${poi.title} · ${poi.snippet}"
+            row.setTextColor(resources.getColor(R.color.text_primary, null))
+            row.setTextSize(13f)
+            row.setPadding(48, 40, 48, 40)
+            row.setOnClickListener { jumpToSearchResult(poi) }
+            searchResults.addView(row)
+            if (poi != pois.last()) {
+                val divider = View(requireContext())
+                divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                divider.setBackgroundColor(resources.getColor(R.color.separator, null))
+                searchResults.addView(divider)
+            }
+        }
+        searchResults.visibility = View.VISIBLE
+    }
+
+    /** 搜索跳转：仅移动地图视野（选点由用户点击地图完成）。 */
+    private fun jumpToSearchResult(poi: com.amap.api.services.core.PoiItem) {
+        val point = poi.latLonPoint ?: return
+        val latLng = LatLng(point.latitude, point.longitude)
+        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        searchResults.visibility = View.GONE
+        hideKeyboard()
+    }
+
+    private fun hideKeyboard() {
+        try {
+            val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(searchInput.windowToken, 0)
+        } catch (_: Throwable) {
         }
     }
 

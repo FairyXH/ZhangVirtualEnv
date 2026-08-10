@@ -240,8 +240,12 @@ class HomeFragment : Fragment() {
         collectButton.isEnabled = false
         collectResult.text = getString(R.string.home_collect_running)
         collectResult.visibility = View.VISIBLE
+        Toast.makeText(requireContext(), R.string.home_collect_suspend_notice, Toast.LENGTH_LONG).show()
         executor.execute {
+            // 采集前临时停用全部虚拟环境，保证读到真实数据；完成后恢复
+            ApiClient.suspendEnv()
             collector?.collectAll { result ->
+                ApiClient.resumeEnv()
                 lastCollectResult = result
                 requireActivity().runOnUiThread {
                     collectButton.isEnabled = true
@@ -384,7 +388,13 @@ class HomeFragment : Fragment() {
                     recordingFrames = 0
                     recordingName = name
                     recordingNameInput.text.clear()
-                    Toast.makeText(requireContext(), R.string.home_recording_started, Toast.LENGTH_SHORT).show()
+                    // 录制期间临时停用虚拟环境，保证采集帧为真实数据
+                    ApiClient.suspendEnv()
+                    Toast.makeText(
+                        requireContext(),
+                        R.string.home_recording_suspend_notice,
+                        Toast.LENGTH_LONG
+                    ).show()
                     startSamplingLoop(interval)
                     recordingStatus.text = getString(R.string.home_recording_running, name, recordingFrames)
                 } else {
@@ -438,6 +448,8 @@ class HomeFragment : Fragment() {
         if (id <= 0) return
         recordingId = -1L
         executor.execute {
+            // 恢复录制前被临时停用的虚拟环境
+            ApiClient.resumeEnv()
             val result = ApiClient.stopRecording(id)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()

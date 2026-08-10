@@ -149,6 +149,8 @@ class ApiServer(
                 path == "/api/env-snapshot/delete" && method == "POST" -> envSnapshotDelete(body)
                 path == "/api/env/use" && method == "POST" -> envUse(body)
                 path == "/api/env/clear" && method == "POST" -> envClear(body)
+                path == "/api/env/suspend" && method == "POST" -> envSuspend()
+                path == "/api/env/resume" && method == "POST" -> envResume()
                 path == "/api/env/status" && method == "GET" -> envStatus()
                 path == "/api/cell/status" && method == "GET" -> envStatus("cell")
                 path == "/api/cell/set" && method == "POST" -> envSet("cell", body)
@@ -384,6 +386,24 @@ class ApiServer(
 
     private fun envStatus(): ApiResult {
         return ApiResult.ok("ok", backend.envStatusJson())
+    }
+
+    /** 临时停用全部虚拟环境（采集真实环境前调用）。 */
+    private fun envSuspend(): ApiResult {
+        return if (backend.suspendAll()) {
+            ApiResult.ok("suspended")
+        } else {
+            ApiResult.ok("already suspended")
+        }
+    }
+
+    /** 恢复被停用的虚拟环境。 */
+    private fun envResume(): ApiResult {
+        return if (backend.resumeAll()) {
+            ApiResult.ok("resumed")
+        } else {
+            ApiResult.ok("not suspended")
+        }
     }
 
     /** 指定环境类型状态（cell/wifi/bluetooth/sensor/gnss）。 */

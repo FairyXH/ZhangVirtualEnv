@@ -26,11 +26,69 @@
             style="@style/Text.Caption" />
     </LinearLayout>
 
+    <!-- 地址搜索区（地图上方） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/space_md"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/searchInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/location_search_hint"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            style="@style/EditText.Field" />
+
+        <Button
+            android:id="@+id/searchButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_sm"
+            android:minWidth="0dp"
+            android:text="@string/location_search"
+            style="@style/Button.Pill.Secondary" />
+    </LinearLayout>
+
+    <!-- 搜索结果列表 -->
+    <LinearLayout
+        android:id="@+id/searchResults"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginEnd="@dimen/space_md"
+        android:background="@drawable/bg_card"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
+    <!-- 绘制提示（地图框上方、搜索框下方） -->
+    <TextView
+        android:id="@+id/drawHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginEnd="@dimen/space_md"
+        android:background="@drawable/bg_pill_secondary"
+        android:paddingStart="@dimen/space_md"
+        android:paddingTop="@dimen/space_xs"
+        android:paddingEnd="@dimen/space_md"
+        android:paddingBottom="@dimen/space_xs"
+        android:text="@string/route_draw_hint"
+        android:textSize="@dimen/text_caption" />
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="260dp"
         android:layout_marginStart="@dimen/space_md"
-        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
         android:layout_marginEnd="@dimen/space_md"
         android:background="@drawable/bg_card">
 
@@ -59,36 +117,20 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/text_body" />
         </LinearLayout>
-
-        <!-- draw hint -->
-        <TextView
-            android:id="@+id/drawHint"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|center_horizontal"
-            android:layout_marginTop="@dimen/space_md"
-            android:background="@drawable/bg_pill_secondary"
-            android:paddingStart="@dimen/space_md"
-            android:paddingTop="@dimen/space_xs"
-            android:paddingEnd="@dimen/space_md"
-            android:paddingBottom="@dimen/space_xs"
-            android:text="@string/route_draw_hint"
-            android:textSize="@dimen/text_caption" />
-
-        <!-- 当前位置按钮 -->
-        <Button
-            android:id="@+id/locateButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_margin="@dimen/space_md"
-            android:background="@drawable/bg_pill_secondary"
-            android:minWidth="0dp"
-            android:paddingStart="@dimen/space_md"
-            android:paddingEnd="@dimen/space_md"
-            android:text="@string/route_locate"
-            android:textSize="@dimen/text_caption" />
     </FrameLayout>
+
+    <!-- 当前位置按钮（地图显示下方） -->
+    <Button
+        android:id="@+id/locateButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginEnd="@dimen/space_md"
+        android:background="@drawable/bg_pill_secondary"
+        android:minWidth="0dp"
+        android:text="@string/route_locate"
+        android:textSize="@dimen/text_caption" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -102,10 +144,54 @@
             android:orientation="vertical"
             android:padding="@dimen/space_md">
 
+            <!-- 启用路线模拟开关（与单点虚拟定位互斥） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/route_switch_title"
+                        style="@style/Text.Headline" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/route_switch_desc"
+                        style="@style/Text.Caption" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/routeEnableSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <!-- 路线运行状态 -->
+            <TextView
+                android:id="@+id/routeStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/route_status_idle"
+                style="@style/Text.Caption" />
+
             <EditText
                 android:id="@+id/routeNameInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
                 android:hint="@string/route_name_hint"
                 style="@style/EditText.Field" />
 

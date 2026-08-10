@@ -1,6 +1,8 @@
 package io.github.fairyxh.VirtualEnv.app.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
@@ -57,10 +60,14 @@ class LocationSimFragment : Fragment() {
     private lateinit var mapContainer: android.widget.FrameLayout
     private lateinit var privacyPrompt: View
     private lateinit var locateButton: Button
+    private lateinit var searchInput: EditText
+    private lateinit var searchButton: Button
+    private lateinit var searchResults: LinearLayout
 
     private var mapView: MapView? = null
     private var amap: AMap? = null
     private var selectedMarker: Marker? = null
+    private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -82,6 +89,9 @@ class LocationSimFragment : Fragment() {
         mapContainer = root.findViewById(R.id.mapContainer)
         privacyPrompt = root.findViewById(R.id.privacyPrompt)
         locateButton = root.findViewById(R.id.locateButton)
+        searchInput = root.findViewById(R.id.searchInput)
+        searchButton = root.findViewById(R.id.searchButton)
+        searchResults = root.findViewById(R.id.searchResults)
 
         enableSwitch.setOnCheckedChangeListener { _, checked ->
             if (updatingFromBackend) return@setOnCheckedChangeListener
@@ -108,6 +118,7 @@ class LocationSimFragment : Fragment() {
 
         savePointButton.setOnClickListener { saveCurrentPoint() }
         locateButton.setOnClickListener { locateCurrentPosition() }
+        setupSearch()
 
         initMapSafely(savedInstanceState)
         refreshSavedPoints()
@@ -129,6 +140,12 @@ class LocationSimFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        try {
+            amapLocationClient?.stopLocation()
+            amapLocationClient?.onDestroy()
+        } catch (_: Throwable) {
+        }
+        amapLocationClient = null
         mapView?.onDestroy()
         mapView = null
         executor.shutdown()
@@ -367,21 +384,26 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /** 定位到当前位置并在地图上显示。 */
+    /** 定位到当前位置并在地图上显示（失败时回退最近已知位置）。 */
     private fun locateCurrentPosition() {
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
             Toast.makeText(context, R.string.route_privacy_prompt, Toast.LENGTH_LONG).show()
             return
         }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
-            val client = com.amap.api.location.AMapLocationClient(context)
+            val client = amapLocationClient
+                ?: com.amap.api.location.AMapLocationClient(context).also { amapLocationClient = it }
             client.setLocationListener { location ->
                 if (location == null || location.errorCode != 0) {
                     ZLog.w(TAG_SCOPE, "locate error=${location?.errorCode} ${location?.errorInfo}")
-                    requireActivity().runOnUiThread {
-                        Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
-                    }
+                    fallbackLastKnown()
                     return@setLocationListener
                 }
                 val latLng = LatLng(location.latitude, location.longitude)
@@ -401,7 +423,126 @@ class LocationSimFragment : Fragment() {
             Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "locate failed", t)
-            Toast.makeText(context, R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
+            fallbackLastKnown()
+        }
+    }
+
+    /** 高德定位失败时回退系统最近已知位置（网络/GPS）。 */
+    private fun fallbackLastKnown() {
+        try {
+            val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val loc = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            if (loc != null) {
+                ZLog.i(TAG_SCOPE, "fallback last known ${loc.latitude},${loc.longitude}")
+                requireActivity().runOnUiThread {
+                    val latLng = LatLng(loc.latitude, loc.longitude)
+                    selectOnMap(latLng)
+                    amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+                    Toast.makeText(requireContext(), R.string.location_locate_fallback, Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "fallback last known failed", t)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // ---------- 地址搜索 ----------
+
+    private fun setupSearch() {
+        searchButton.setOnClickListener { searchPoi() }
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                searchPoi()
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun searchPoi() {
+        val keyword = searchInput.text.toString().trim()
+        if (keyword.isEmpty()) return
+        val context = requireContext()
+        if (!AmapPrivacyManager.isAgreed(context)) {
+            Toast.makeText(context, R.string.route_privacy_prompt, Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val query = com.amap.api.services.poisearch.PoiSearch.Query(keyword, "", "")
+            query.pageSize = 5
+            query.pageNum = 0
+            val search = com.amap.api.services.poisearch.PoiSearch(context, query)
+            search.setOnPoiSearchListener(object : com.amap.api.services.poisearch.PoiSearch.OnPoiSearchListener {
+                override fun onPoiSearched(result: com.amap.api.services.poisearch.PoiResult?, rCode: Int) {
+                    requireActivity().runOnUiThread {
+                        if (rCode != 1000 || result == null) {
+                            Toast.makeText(requireContext(), R.string.location_search_failed, Toast.LENGTH_SHORT).show()
+                            return@runOnUiThread
+                        }
+                        renderSearchResults(result.pois ?: emptyList())
+                    }
+                }
+
+                override fun onPoiItemSearched(poiItem: com.amap.api.services.core.PoiItem?, rCode: Int) {
+                }
+            })
+            search.searchPOIAsyn()
+            hideKeyboard()
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "poi search failed", t)
+            Toast.makeText(context, R.string.location_search_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun renderSearchResults(pois: List<com.amap.api.services.core.PoiItem>) {
+        searchResults.removeAllViews()
+        if (pois.isEmpty()) {
+            searchResults.visibility = View.GONE
+            Toast.makeText(requireContext(), R.string.location_search_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        pois.forEach { poi ->
+            val row = TextView(requireContext())
+            row.text = "${poi.title} · ${poi.snippet}"
+            row.setTextColor(resources.getColor(R.color.text_primary, null))
+            row.setTextSize(13f)
+            row.setPadding(48, 40, 48, 40)
+            row.setOnClickListener { jumpToSearchResult(poi) }
+            searchResults.addView(row)
+            if (poi != pois.last()) {
+                val divider = View(requireContext())
+                divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                divider.setBackgroundColor(resources.getColor(R.color.separator, null))
+                searchResults.addView(divider)
+            }
+        }
+        searchResults.visibility = View.VISIBLE
+    }
+
+    private fun jumpToSearchResult(poi: com.amap.api.services.core.PoiItem) {
+        val point = poi.latLonPoint ?: return
+        val latLng = LatLng(point.latitude, point.longitude)
+        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        selectOnMap(latLng)
+        searchResults.visibility = View.GONE
+        hideKeyboard()
+    }
+
+    private fun hideKeyboard() {
+        try {
+            val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(searchInput.windowToken, 0)
+        } catch (_: Throwable) {
         }
     }
 }

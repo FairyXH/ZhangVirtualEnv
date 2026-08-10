@@ -187,6 +187,12 @@ object ApiClient {
 
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
+    /** 临时停用全部虚拟环境（采集真实环境前调用，可嵌套）。 */
+    fun suspendEnv(): ApiResult = post("/api/env/suspend", JSONObject())
+
+    /** 恢复被停用的虚拟环境。 */
+    fun resumeEnv(): ApiResult = post("/api/env/resume", JSONObject())
+
     /** 直接设置指定环境类型的虚拟数据（cell/wifi/bluetooth/sensor/gnss）。 */
     fun setEnvData(type: String, data: org.json.JSONObject): ApiResult {
         val body = JSONObject().apply { put("data", data) }
