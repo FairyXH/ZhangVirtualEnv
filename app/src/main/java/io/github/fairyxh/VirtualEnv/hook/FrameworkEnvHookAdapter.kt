@@ -39,10 +39,27 @@ class FrameworkEnvHookAdapter(
         hookBleStartScan(classLoader)
         hookWifiGetScanResults(classLoader)
         hookSensorRegister(classLoader)
+        hookGnssStatus(classLoader)
+        startRefreshLoop()
     }
 
     /** 步频模拟注入器（进程内单例）。 */
     private val stepInjector = StepSensorInjector(cache)
+
+    /** 周期刷新：配置就绪后补启动挂起的 sensor 注入（register 时配置未就绪的竞态）。 */
+    private val refreshExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-EnvRefresh").apply { isDaemon = true }
+    }
+
+    private fun startRefreshLoop() {
+        refreshExecutor.scheduleWithFixedDelay(
+            { runCatching { stepInjector.refresh() } },
+            500,
+            1000,
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
+        ZLog.i(TAG_SCOPE, "env refresh loop started")
+    }
 
     // ---------- 步频：SensorManager.registerListener ----------
 
@@ -105,7 +122,7 @@ class FrameworkEnvHookAdapter(
             val virtual = cache.currentCell()
             if (virtual != null) {
                 try {
-                    val list = buildCellInfoList(virtual)
+                    val list = VirtualCellFactory.buildCellInfoList(virtual)
                     // 启用即覆盖：即使空配置也返回空列表，绝不放行真实基站
                     ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
                     return@register list
@@ -118,145 +135,184 @@ class FrameworkEnvHookAdapter(
         if (ok) ZLog.i(TAG_SCOPE, "hooked TelephonyManager.getAllCellInfo")
     }
 
-    private fun buildCellInfoList(data: JSONObject): List<Any> {
-        // 兼容两种数据键：采集包用 cells[]，环境模拟配置页用 entries[]
-        val cells = data.optJSONArray("cells") ?: data.optJSONArray("entries") ?: return emptyList()
-        val result = mutableListOf<Any>()
-        for (i in 0 until cells.length()) {
-            val c = cells.optJSONObject(i) ?: continue
-            try {
-                when (c.optString("type", "").uppercase()) {
-                    "LTE" -> result.add(buildLteCell(c))
-                    "GSM" -> result.add(buildGsmCell(c))
-                    "NR" -> result.add(buildNrCell(c))
-                    "WCDMA" -> result.add(buildWcdmaCell(c))
+    // ---------- GNSS：LocationManager.registerGnssStatusCallback / getGnssStatus ----------
+
+    /** GNSS 虚拟注入调度器（进程内）。 */
+    private val gnssExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-GnssInject").apply { isDaemon = true }
+    }
+    private val gnssListeners = java.util.concurrent.ConcurrentHashMap<Any, java.util.concurrent.ScheduledFuture<*>>()
+
+    private fun hookGnssStatus(classLoader: ClassLoader) {
+        val clazz = HookSupport.findClass(classLoader, "android.location.LocationManager") ?: return
+        var hooked = 0
+        // 注册回调：总是启动周期投递（虚拟数据可用后自动覆盖真实回调）。
+        // 虚拟启用时**不 proceed**（彻底屏蔽真实 GNSS）；虚拟未启用时 proceed
+        // 保留真实注册，但周期投递会在配置恢复后立即接管，避免时序竞态。
+        HookSupport.findMethods(clazz, "registerGnssStatusCallback")
+            .filter { it.parameterTypes.any { p -> p.simpleName == "Callback" } }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    try {
+                        val callbackClass = method.parameterTypes.firstOrNull { it.simpleName == "Callback" }
+                        val callback = callbackClass?.let { findCallbackArg(chain, it) }
+                        if (callback != null) {
+                            startGnssInject(callback)
+                            if (cache.currentGnss() != null) {
+                                return@register true // registerGnssStatusCallback 返回 Boolean
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "gnss register intercept failed", t)
+                    }
+                    chain.proceed()
                 }
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "build cell[${c.optString("type")}] failed", t)
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked LocationManager.registerGnssStatusCallback(${method.parameterCount} params)")
+                }
             }
+        // unregister：清理周期任务（放行原始注销）
+        HookSupport.findMethods(clazz, "unregisterGnssStatusCallback")
+            .filter { it.parameterCount in 1..2 }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    try {
+                        val callback = chain.getArg(0)
+                        gnssListeners.remove(callback)?.cancel(false)
+                    } catch (_: Throwable) {
+                    }
+                    chain.proceed()
+                    null
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked LocationManager.unregisterGnssStatusCallback(${method.parameterCount} params)")
+                }
+            }
+        // getGnssStatus()：直接返回虚拟状态（API 30+）
+        HookSupport.findMethods(clazz, "getGnssStatus")
+            .firstOrNull { it.parameterCount == 0 }
+            ?.let { method ->
+                val ok = registrar.register(method) { chain ->
+                    val virtual = cache.currentGnss()
+                    if (virtual != null) {
+                        try {
+                            val status = buildVirtualGnssStatus(virtual)
+                            if (status != null) return@register status
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "gnss get virtual failed", t)
+                        }
+                    }
+                    chain.proceed()
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked LocationManager.getGnssStatus")
+                }
+            }
+        if (hooked == 0) ZLog.w(TAG_SCOPE, "GnssStatus candidates not found")
+    }
+
+    /** 立即投递一次虚拟状态并启动 1s 周期投递（虚拟关闭时自动停止）。 */
+    private fun startGnssInject(callback: Any) {
+        if (gnssListeners.containsKey(callback)) return
+        deliverVirtualGnss(callback)
+        val future = gnssExecutor.scheduleWithFixedDelay(
+            { deliverVirtualGnss(callback) },
+            1000,
+            1000,
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
+        gnssListeners[callback] = future
+        ZLog.i(TAG_SCOPE, "gnss injector started for $callback")
+    }
+
+    /** 投递虚拟卫星状态；虚拟关闭或无状态时静默跳过（保持周期任务，配置恢复后自动生效）。 */
+    private fun deliverVirtualGnss(callback: Any) {
+        try {
+            val virtual = cache.currentGnss() ?: return
+            val status = buildVirtualGnssStatus(virtual) ?: return
+            callback.javaClass
+                .getMethod("onSatelliteStatusChanged", Class.forName("android.location.GnssStatus"))
+                .invoke(callback, status)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "gnss virtual deliver failed", t)
         }
-        return result
     }
 
-    private fun buildLteCell(c: JSONObject): Any {
-        val infoClass = Class.forName("android.telephony.CellInfoLte")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-
-        val identityClass = Class.forName("android.telephony.CellIdentityLte")
-        val identity = identityClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
-        ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
-            c.optInt("tac", -1),
-            c.optInt("ci", -1),
-            c.optInt("pci", -1)
-        )
-        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
-
-        val signalClass = Class.forName("android.telephony.CellSignalStrengthLte")
-        val unknown = Int.MAX_VALUE
-        val signal = signalClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
-            Int::class.java, Int::class.java
-        ).newInstance(
-            unknown,
-            c.optInt("rsrp", -110),
-            unknown,
-            unknown,
-            unknown,
-            unknown
-        )
-        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
-        return info
+    /** 在调用参数里找到目标类型的对象。 */
+    private fun findCallbackArg(chain: Any, target: Class<*>): Any? {
+        try {
+            // libxposed Chain 没有 getArgCount；用 getArgs() 遍历（getArg(int) 也可用）
+            val args = chain.javaClass.getMethod("getArgs").invoke(chain) as? List<*> ?: return null
+            for (arg in args) {
+                if (arg != null && target.isInstance(arg)) return arg
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "findCallbackArg failed", t)
+        }
+        return null
     }
 
-    private fun buildGsmCell(c: JSONObject): Any {
-        val infoClass = Class.forName("android.telephony.CellInfoGsm")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-
-        val identityClass = Class.forName("android.telephony.CellIdentityGsm")
-        val identity = identityClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
-            String::class.java, String::class.java, String::class.java, String::class.java,
-            java.util.Collection::class.java
-        ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
-            c.optInt("lac", -1),
-            c.optInt("cid", -1),
-            "", "", "", "",
+    /** 用 GnssStatus.Builder 构造虚拟卫星状态（API 30+，反射避免编译期 API 门槛）。 */
+    private fun buildVirtualGnssStatus(data: org.json.JSONObject): Any? {
+        return try {
+            // 注意：嵌套类 Class.forName 必须用 $ 分隔，点号写法永远 ClassNotFoundException
+            val builderClass = Class.forName("android.location.GnssStatus\$Builder")
+            val builder = builderClass.getDeclaredConstructor().newInstance()
+            // Oplus 隐藏了 8 参 addSatellite，仅暴露 12 参版本（与 AOSP 相比
+            // hasBasebandCn0/basebandCn0 顺序交换）：
+            // (svid, constellation, cn0, elev, azim, hasEphemeris, hasAlmanac, usedInFix,
+            //  hasBasebandCn0, basebandCn0, isBasebandInFix, carrierFrequencyHz)
+            val addSatellite = builderClass.getMethod(
+                "addSatellite",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType
+            )
+            val total = data.optInt("satelliteCount", 24).coerceIn(0, 64)
+            val used = data.optInt("usedInFix", 0).coerceIn(0, total)
+            val constellations = intArrayOf(
+                android.location.GnssStatus.CONSTELLATION_GPS,
+                android.location.GnssStatus.CONSTELLATION_GLONASS,
+                android.location.GnssStatus.CONSTELLATION_BEIDOU,
+                android.location.GnssStatus.CONSTELLATION_GALILEO
+            )
+            for (i in 0 until total) {
+                val svid = i + 1
+                val cn0 = 18f + (i % 22)
+                val usedInFix = i < used
+                addSatellite.invoke(
+                    builder,
+                    svid,
+                    constellations[i % constellations.size],
+                    cn0,
+                    10f + i,
+                    90f + i * 7,
+                    true, // hasEphemeris
+                    true, // hasAlmanac
+                    usedInFix,
+                    false, // hasBasebandCn0
+                    cn0,  // basebandCn0（与 cn0 一致）
+                    false, // isBasebandInFix
+                    1575.42f // carrierFrequencyHz (L1)
+                )
+            }
+            builderClass.getMethod("build").invoke(builder)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "build virtual gnss status failed", t)
             null
-        )
-        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
-
-        val signalClass = Class.forName("android.telephony.CellSignalStrengthGsm")
-        val signal = signalClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java
-        ).newInstance(
-            c.optInt("rssi", -90),
-            -1,
-            -1
-        )
-        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
-        return info
-    }
-
-    private fun buildNrCell(c: JSONObject): Any {
-        val infoClass = Class.forName("android.telephony.CellInfoNr")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-
-        val identityClass = Class.forName("android.telephony.CellIdentityNr")
-        val mcc = c.optInt("mcc", 460)
-        val mnc = c.optInt("mnc", 0)
-        val identity = identityClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java, IntArray::class.java,
-            String::class.java, String::class.java, Long::class.java,
-            String::class.java, String::class.java, java.util.Collection::class.java
-        ).newInstance(
-            mcc,
-            mnc,
-            c.optInt("tac", -1),
-            intArrayOf(),
-            mcc.toString(),
-            String.format("%02d", mnc),
-            c.optLong("nci", -1L),
-            "", "",
-            null
-        )
-        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
-        return info
-    }
-
-    private fun buildWcdmaCell(c: JSONObject): Any {
-        val infoClass = Class.forName("android.telephony.CellInfoWcdma")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-
-        val identityClass = Class.forName("android.telephony.CellIdentityWcdma")
-        val identity = identityClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
-            String::class.java, String::class.java, String::class.java, String::class.java,
-            java.util.Collection::class.java
-        ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
-            c.optInt("lac", -1),
-            c.optInt("cid", -1),
-            "", "", "", "",
-            null
-        )
-        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
-
-        val signalClass = Class.forName("android.telephony.CellSignalStrengthWcdma")
-        val signal = signalClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java
-        ).newInstance(
-            c.optInt("rssi", -90),
-            -1,
-            -1
-        )
-        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
-        return info
+        }
     }
 
     // ---------- BLE：BluetoothLeScanner.startScan ----------

@@ -50,6 +50,7 @@ class StepSensorInjector(private val cache: EnvStateCache) {
 
     private val lock = Any()
     private val listeners = ConcurrentHashMap<Any, ListenerEntry>()
+    private val pending = ConcurrentHashMap<Any, Pair<Any, Int>>() // listener -> (sensor, type)
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-StepInjector").apply { isDaemon = true }
     }
@@ -57,7 +58,18 @@ class StepSensorInjector(private val cache: EnvStateCache) {
     /** 注册监听：传感器模拟开启且类型命中时启动注入；否则保持原生行为。 */
     fun onListenerRegistered(listener: Any, sensor: Any, type: Int) {
         if (listeners.containsKey(listener)) return
-        val period = resolvePeriod(type) ?: return
+        val period = resolvePeriod(type)
+        if (period == null) {
+            // 模拟尚未就绪（例如配置刚启用、缓存未刷新）：先挂起，等 refresh() 补启动
+            pending[listener] = sensor to type
+            ZLog.d(TAG_SCOPE, "sensor injector pending type=$type (config not ready)")
+            return
+        }
+        startInject(listener, sensor, type, period)
+    }
+
+    /** 启动注入（内部）。 */
+    private fun startInject(listener: Any, sensor: Any, type: Int, period: Long) {
         val future = scheduler.scheduleWithFixedDelay(
             { tick(listener, sensor, type) },
             period,
@@ -65,27 +77,45 @@ class StepSensorInjector(private val cache: EnvStateCache) {
             TimeUnit.MILLISECONDS
         )
         listeners[listener] = ListenerEntry(listener, sensor, type, future)
+        pending.remove(listener)
         ZLog.i(TAG_SCOPE, "sensor injector started type=$type period=${period}ms")
     }
 
     /** 取消该 listener 的注入（unregister 时调用）。 */
     fun onListenerUnregistered(listener: Any) {
+        pending.remove(listener)
         val entry = listeners.remove(listener) ?: return
         entry.future.cancel(false)
         ZLog.i(TAG_SCOPE, "sensor injector stopped type=${entry.type}")
     }
 
-    /** 状态变化时检查：模拟关闭则停止全部注入。 */
+    /** 状态变化时检查：模拟关闭则停止全部注入；配置就绪则补启动挂起的 listener。 */
     fun refresh() {
-        if (cache.isSensorStreamActive()) return
-        if (listeners.isEmpty()) return
-        val iter = listeners.entries.iterator()
-        while (iter.hasNext()) {
-            val entry = iter.next()
-            entry.value.future.cancel(false)
-            iter.remove()
+        if (!cache.isSensorStreamActive()) {
+            if (listeners.isEmpty()) return
+            val iter = listeners.entries.iterator()
+            while (iter.hasNext()) {
+                val entry = iter.next()
+                entry.value.future.cancel(false)
+                iter.remove()
+            }
+            ZLog.i(TAG_SCOPE, "sensor injector cleared (disabled)")
+            return
         }
-        ZLog.i(TAG_SCOPE, "sensor injector cleared (disabled)")
+        if (pending.isEmpty()) return
+        val iter = pending.entries.iterator()
+        while (iter.hasNext()) {
+            val (listener, pair) = iter.next()
+            val (sensor, type) = pair
+            if (listeners.containsKey(listener)) {
+                iter.remove()
+                continue
+            }
+            val period = resolvePeriod(type)
+            if (period != null) {
+                startInject(listener, sensor, type, period)
+            }
+        }
     }
 
     /** 计算该传感器类型的注入周期；未命中任何模拟模式时返回 null（不注入）。 */

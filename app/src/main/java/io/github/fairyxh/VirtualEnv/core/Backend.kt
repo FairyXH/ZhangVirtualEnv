@@ -11,6 +11,7 @@ import io.github.fairyxh.VirtualEnv.core.model.LocationState
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.io.File
+import java.util.concurrent.ThreadLocalRandom
 
 /**
  * Backend Core 门面。
@@ -91,6 +92,16 @@ class Backend private constructor(private val dataDir: File) {
     @Volatile
     var apiServer: ApiServer? = null
         private set
+
+    /** 环境实时测试最新报告（App 上报，供外部查看/自动化修正 Hook）。 */
+    @Volatile
+    private var testReport: org.json.JSONObject? = null
+
+    fun setTestReport(report: org.json.JSONObject) {
+        testReport = report
+    }
+
+    fun getTestReport(): org.json.JSONObject? = testReport
 
     private fun start() {
         configManager = ConfigManager(dataDir)
@@ -431,10 +442,10 @@ class Backend private constructor(private val dataDir: File) {
         if (status.optBoolean("enabled", false) && data != null) engine.update(data) else engine.clear()
     }
 
-    /** 启动 HTTP API 服务。 */
-    fun startApiServer(port: Int = ApiServer.DEFAULT_PORT): Boolean {
+    /** 启动 HTTP API 服务。token 为空时拒绝所有请求（fail-closed）。 */
+    fun startApiServer(port: Int = ApiServer.DEFAULT_PORT, token: String = ""): Boolean {
         if (apiServer != null) return true
-        val server = ApiServer(port, this)
+        val server = ApiServer(port, this, token)
         return if (server.start()) {
             apiServer = server
             true
@@ -695,6 +706,115 @@ class Backend private constructor(private val dataDir: File) {
         }
         status.put("activeSnapshotId", activeEnvSnapshotIds[type] ?: -1L)
         return status
+    }
+
+    /**
+     * 调试辅助：生成全套随机虚拟环境并全部启用。
+     *
+     * 供检测器/自动化脚本快速验证 Hook 全链路（位置+基站+WiFi+BLE+传感器+GNSS）。
+     * 返回生成的完整配置 JSON（检测器可据此判定 PASS/FAIL）。
+     */
+    fun generateRandomEnv(): org.json.JSONObject {
+        val rnd = ThreadLocalRandom.current()
+
+        // 单点位置：国内常见区域随机偏移
+        val baseLat = 24.6 + rnd.nextDouble(-0.5, 0.5)
+        val baseLon = 118.0 + rnd.nextDouble(-0.5, 0.5)
+        setLocationPoint(baseLat, baseLon, 0f, 0f)
+        setLocationEnabled(true)
+
+        // 基站：1~2 个 LTE + 1 个 NR
+        val cellEntries = org.json.JSONArray()
+        val cellCount = 1 + rnd.nextInt(2)
+        for (i in 0 until cellCount) {
+            cellEntries.put(org.json.JSONObject().apply {
+                put("type", "LTE")
+                put("mcc", 460)
+                put("mnc", 11)
+                // CellIdentityLte 字段范围：TAC 16 位 0~65535，CI 28 位 0~268435455，
+                // PCI 0~503；超出会被构造器归一化为 Integer.MAX_VALUE（读回全 MAX）。
+                put("tac", rnd.nextInt(0, 65536))
+                put("ci", rnd.nextInt(0, 1 shl 28))
+                put("pci", rnd.nextInt(0, 504))
+            })
+        }
+        cellEntries.put(org.json.JSONObject().apply {
+            put("type", "NR")
+            put("mcc", 460)
+            put("mnc", 11)
+            put("tac", rnd.nextInt(0, 65536))
+            put("nci", 140000000000L + rnd.nextInt(100000000))
+        })
+        setEnvData("cell", org.json.JSONObject().apply { put("entries", cellEntries) })
+        setEnvEnabled("cell", true)
+
+        // WiFi：3~5 个虚拟网络
+        val wifiNetworks = org.json.JSONArray()
+        val wifiCount = 3 + rnd.nextInt(3)
+        for (i in 0 until wifiCount) {
+            wifiNetworks.put(org.json.JSONObject().apply {
+                put("ssid", "ZVE-Rand-$i")
+                put("bssid", String.format(
+                    "AA:BB:CC:%02X:%02X:%02X",
+                    rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256)
+                ))
+                put("level", -40 - rnd.nextInt(50))
+                put("frequency", 2412 + rnd.nextInt(6) * 5)
+            })
+        }
+        setEnvData("wifi", org.json.JSONObject().apply { put("networks", wifiNetworks) })
+        setEnvEnabled("wifi", true)
+
+        // BLE：2~4 个虚拟设备
+        val bleDevices = org.json.JSONArray()
+        val bleCount = 2 + rnd.nextInt(3)
+        for (i in 0 until bleCount) {
+            bleDevices.put(org.json.JSONObject().apply {
+                put("name", "ZVE-Device-$i")
+                put("address", String.format(
+                    "AA:BB:CC:%02X:%02X:%02X",
+                    rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256)
+                ))
+                put("rssi", -50 - rnd.nextInt(40))
+            })
+        }
+        setEnvData("ble", org.json.JSONObject().apply { put("devices", bleDevices) })
+        setEnvEnabled("ble", true)
+
+        // 传感器：步频 90~150
+        val stepFrequency = 90 + rnd.nextInt(61)
+        setEnvData("sensor", org.json.JSONObject().apply {
+            put("stepFrequency", stepFrequency)
+            put("stepCounter", rnd.nextLong(0, 100000))
+        })
+        setEnvEnabled("sensor", true)
+
+        // GNSS：卫星 12~24，使用 4~10
+        val satelliteCount = 12 + rnd.nextInt(13)
+        val usedInFix = 4 + rnd.nextInt(7)
+        setEnvData("gnss", org.json.JSONObject().apply {
+            put("satelliteCount", satelliteCount)
+            put("usedInFix", usedInFix.coerceAtMost(satelliteCount))
+        })
+        setEnvEnabled("gnss", true)
+
+        val result = org.json.JSONObject().apply {
+            put("location", org.json.JSONObject().apply {
+                put("latitude", baseLat)
+                put("longitude", baseLon)
+                put("mode", "single")
+            })
+            put("cell", cellEntries)
+            put("wifi", wifiNetworks)
+            put("ble", bleDevices)
+            put("sensor", org.json.JSONObject().apply { put("stepFrequency", stepFrequency) })
+            put("gnss", org.json.JSONObject().apply {
+                put("satelliteCount", satelliteCount)
+                put("usedInFix", usedInFix)
+            })
+        }
+        ZLog.i(TAG_SCOPE, "random env generated lat=$baseLat lon=$baseLon cell=${cellEntries.length()} wifi=${wifiNetworks.length()} ble=${bleDevices.length()}")
+        return result
     }
 
     /** 清除指定类型的虚拟环境。 */

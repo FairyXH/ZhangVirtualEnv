@@ -97,6 +97,155 @@ object VirtualCellFactory {
         }
     }
 
+    // ---------- 按 cell 配置构建对应类型虚拟基站（LTE/GSM/NR/WCDMA，App 层与 phone 栈共用） ----------
+
+    /** 兼容两种数据键：采集包用 cells[]，环境模拟配置页用 entries[]。 */
+    fun buildCellInfoList(data: org.json.JSONObject): List<Any> {
+        val cells = data.optJSONArray("cells") ?: data.optJSONArray("entries") ?: return emptyList()
+        val result = mutableListOf<Any>()
+        for (i in 0 until cells.length()) {
+            val c = cells.optJSONObject(i) ?: continue
+            try {
+                when (c.optString("type", "").uppercase()) {
+                    "LTE" -> buildLteCell(c)?.let { result.add(it) }
+                    "GSM" -> buildGsmCell(c)?.let { result.add(it) }
+                    "NR" -> buildNrCell(c)?.let { result.add(it) }
+                    "WCDMA" -> buildWcdmaCell(c)?.let { result.add(it) }
+                    "" -> buildLteCell(c)?.let { result.add(it) } // 缺省按 LTE
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "build cell[${c.optString("type")}] failed", t)
+            }
+        }
+        return result
+    }
+
+    private fun buildLteCell(c: org.json.JSONObject): Any? {
+        val infoClass = Class.forName("android.telephony.CellInfoLte")
+        val info = infoClass.getDeclaredConstructor().newInstance()
+
+        val identityClass = Class.forName("android.telephony.CellIdentityLte")
+        val ci = c.optLong("ci", -1L).toInt()
+        val pci = c.optInt("pci", -1)
+        val tac = c.optLong("tac", -1L).toInt()
+        // AOSP/Oplus 5 参公开构造顺序：(mcc, mnc, ci, pci, tac)
+        val identity = identityClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
+        ).newInstance(
+            c.optInt("mcc", 460),
+            c.optInt("mnc", 0),
+            ci,
+            pci,
+            tac
+        )
+        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
+
+        val signalClass = Class.forName("android.telephony.CellSignalStrengthLte")
+        val unknown = Int.MAX_VALUE
+        val signal = signalClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
+            Int::class.java, Int::class.java
+        ).newInstance(
+            unknown,
+            c.optInt("rsrp", -110),
+            unknown,
+            unknown,
+            unknown,
+            unknown
+        )
+        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
+        return info
+    }
+
+    private fun buildGsmCell(c: org.json.JSONObject): Any? {
+        val infoClass = Class.forName("android.telephony.CellInfoGsm")
+        val info = infoClass.getDeclaredConstructor().newInstance()
+
+        val identityClass = Class.forName("android.telephony.CellIdentityGsm")
+        val identity = identityClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
+            String::class.java, String::class.java, String::class.java, String::class.java,
+            java.util.Collection::class.java
+        ).newInstance(
+            c.optInt("mcc", 460),
+            c.optInt("mnc", 0),
+            c.optLong("lac", -1L).toInt(),
+            c.optLong("cid", -1L).toInt(),
+            "", "", "", "",
+            java.util.Collections.emptyList<Any>()
+        )
+        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
+
+        val signalClass = Class.forName("android.telephony.CellSignalStrengthGsm")
+        val signal = signalClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java
+        ).newInstance(
+            c.optInt("rssi", -90),
+            -1,
+            -1
+        )
+        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
+        return info
+    }
+
+    private fun buildNrCell(c: org.json.JSONObject): Any? {
+        val infoClass = Class.forName("android.telephony.CellInfoNr")
+        val info = infoClass.getDeclaredConstructor().newInstance()
+
+        val identityClass = Class.forName("android.telephony.CellIdentityNr")
+        val mcc = c.optInt("mcc", 460)
+        val mnc = c.optInt("mnc", 0)
+        // additionalPlmns 不能为 null：构造器会调 Collection.size() 直接 NPE
+        val identity = identityClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, IntArray::class.java,
+            String::class.java, String::class.java, Long::class.java,
+            String::class.java, String::class.java, java.util.Collection::class.java
+        ).newInstance(
+            mcc,
+            mnc,
+            c.optLong("tac", -1L).toInt(),
+            intArrayOf(),
+            mcc.toString(),
+            String.format("%02d", mnc),
+            c.optLong("nci", -1L),
+            "", "",
+            java.util.Collections.emptyList<Any>()
+        )
+        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
+        return info
+    }
+
+    private fun buildWcdmaCell(c: org.json.JSONObject): Any? {
+        val infoClass = Class.forName("android.telephony.CellInfoWcdma")
+        val info = infoClass.getDeclaredConstructor().newInstance()
+
+        val identityClass = Class.forName("android.telephony.CellIdentityWcdma")
+        val identity = identityClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
+            String::class.java, String::class.java, String::class.java, String::class.java,
+            java.util.Collection::class.java
+        ).newInstance(
+            c.optInt("mcc", 460),
+            c.optInt("mnc", 0),
+            c.optLong("lac", -1L).toInt(),
+            c.optLong("cid", -1L).toInt(),
+            "", "", "", "",
+            java.util.Collections.emptyList<Any>()
+        )
+        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
+
+        val signalClass = Class.forName("android.telephony.CellSignalStrengthWcdma")
+        val signal = signalClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java
+        ).newInstance(
+            c.optInt("rssi", -90),
+            -1,
+            -1
+        )
+        infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
+        return info
+    }
+
     private fun call(target: Any, name: String, value: Any) {
         val m = findMethod(target.javaClass, name, 1) ?: return
         m.invoke(target, boxFor(m, value))
