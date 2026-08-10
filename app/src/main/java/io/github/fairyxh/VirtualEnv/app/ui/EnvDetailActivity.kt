@@ -121,6 +121,12 @@ class EnvDetailActivity : Activity() {
 
         addEntryButton.setOnClickListener { addEntry() }
         findViewById<Button>(R.id.saveButton).setOnClickListener { saveConfig() }
+        // 输入框默认值：配置名称默认时间
+        saveNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                detailTitle.text.toString()
+            )
+        )
 
         refreshSaved()
         refreshStatus()
@@ -279,7 +285,11 @@ class EnvDetailActivity : Activity() {
             runOnUiThread {
                 Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == ApiResult.CODE_OK) {
-                    saveNameInput.text.clear()
+                    saveNameInput.setText(
+                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                            detailTitle.text.toString()
+                        )
+                    )
                     saveRemarkInput.text.clear()
                     entries.clear()
                     if (type == TYPE_SENSOR) {

@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
@@ -67,6 +68,7 @@ class HomeFragment : Fragment() {
     private lateinit var statusDot: View
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
+    private lateinit var featureStatusList: LinearLayout
     private lateinit var collectButton: Button
     private lateinit var collectResult: TextView
     private lateinit var collectNameInput: android.widget.EditText
@@ -95,6 +97,7 @@ class HomeFragment : Fragment() {
     private lateinit var playbackStopButton: Button
     private lateinit var playbackSpeedInput: android.widget.EditText
     private lateinit var playbackSpeedButton: Button
+    private lateinit var playbackLoopCheck: android.widget.CheckBox
     private lateinit var playbackStatus: TextView
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -137,11 +140,30 @@ class HomeFragment : Fragment() {
         }
     }
 
+    /** 模块各功能实时状态轮询（位置/路线/摇杆/基站/WiFi/BLE/GNSS/传感器）。 */
+    private val featurePollHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val featurePoll = object : Runnable {
+        override fun run() {
+            if (!isAdded) return
+            executor.execute {
+                val loc = ApiClient.getLocationStatus()
+                val route = ApiClient.getRouteStatus()
+                val env = ApiClient.getEnvStatus()
+                val joystick = ApiClient.getJoystickStatus()
+                requireActivity().runOnUiThread {
+                    renderFeatureStatus(loc, route, env, joystick)
+                    if (isAdded) featurePollHandler.postDelayed(this, 2000L)
+                }
+            }
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val root = inflater.inflate(R.layout.fragment_home, container, false)
         statusDot = root.findViewById(R.id.statusDot)
         statusText = root.findViewById(R.id.statusText)
         statusDetail = root.findViewById(R.id.statusDetail)
+        featureStatusList = root.findViewById(R.id.featureStatusList)
         collectButton = root.findViewById(R.id.collectButton)
         collectResult = root.findViewById(R.id.collectResult)
         collectNameInput = root.findViewById(R.id.collectNameInput)
@@ -173,7 +195,22 @@ class HomeFragment : Fragment() {
         playbackStopButton = root.findViewById(R.id.playbackStopButton)
         playbackSpeedInput = root.findViewById(R.id.playbackSpeedInput)
         playbackSpeedButton = root.findViewById(R.id.playbackSpeedButton)
+        playbackLoopCheck = root.findViewById(R.id.playbackLoopCheck)
         playbackStatus = root.findViewById(R.id.playbackStatus)
+
+        root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
+        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
+            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
+        }
+
+        // 输入框默认值：录像名称默认时间，采集间隔默认 3 秒，快照名称默认时间
+        recordingNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
+        )
+        recordingIntervalInput.setText("3")
+        collectNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        )
 
         collectButton.setOnClickListener { startCollect() }
         saveCollectButton.setOnClickListener { saveCollect() }
@@ -205,7 +242,7 @@ class HomeFragment : Fragment() {
             if (sel?.kind == "recording") {
                 executor.execute {
                     ApiClient.stopRecordingPlayback()
-                    val result = ApiClient.playRecordings(listOf(sel.id), false)
+                    val result = ApiClient.playRecordings(listOf(sel.id), playbackLoopCheck.isChecked)
                     requireActivity().runOnUiThread {
                         Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                     }
@@ -236,6 +273,8 @@ class HomeFragment : Fragment() {
         refreshSavedItems()
         playbackPollHandler.removeCallbacks(playbackPoll)
         playbackPollHandler.post(playbackPoll)
+        featurePollHandler.removeCallbacks(featurePoll)
+        featurePollHandler.post(featurePoll)
     }
 
     override fun onDestroyView() {
@@ -249,6 +288,7 @@ class HomeFragment : Fragment() {
             executor.execute { ApiClient.stopRecording(id) }
         }
         playbackPollHandler.removeCallbacks(playbackPoll)
+        featurePollHandler.removeCallbacks(featurePoll)
         executor.shutdown()
         super.onDestroyView()
     }
@@ -293,6 +333,115 @@ class HomeFragment : Fragment() {
                 }
             }
         }
+    }
+
+    // ---------- 悬浮窗统一入口（主页） ----------
+
+    private fun openFloatWindow() {
+        val context = requireContext()
+        if (!android.provider.Settings.canDrawOverlays(context)) {
+            Toast.makeText(context, R.string.float_permission_required, Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:${context.packageName}")
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (t: Throwable) {
+                startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return
+        }
+        io.github.fairyxh.VirtualEnv.app.FloatControlService.start(context)
+        Toast.makeText(context, R.string.home_float_opened, Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- 功能实时状态 ----------
+
+    /** 主页模块状态卡下的功能实时状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器。 */
+    private fun renderFeatureStatus(
+        loc: ApiResult,
+        route: ApiResult,
+        env: ApiResult,
+        joystick: ApiResult
+    ) {
+        featureStatusList.removeAllViews()
+        if (loc.code != ApiResult.CODE_OK || env.code != ApiResult.CODE_OK) {
+            val row = featureStatusRow(getString(R.string.home_status_offline), "—")
+            featureStatusList.addView(row)
+            return
+        }
+        val locData = loc.data
+        val mode = locData?.optString("mode", "none") ?: "none"
+        val singleEnabled = locData?.optBoolean("singleEnabled", false) == true
+        val locText = when {
+            mode == "route" -> getString(R.string.route_status_running, route.data?.optInt("points", 0) ?: 0)
+            singleEnabled -> getString(R.string.location_enabled)
+            else -> getString(R.string.location_disabled)
+        }
+        featureStatusList.addView(featureStatusRow("位置", locText))
+
+        val routeData = route.data
+        val routeRunning = routeData?.optBoolean("running", false) == true
+        val routeText = if (routeRunning) {
+            if (routeData?.optBoolean("paused", false) == true) getString(R.string.float_route_paused)
+            else getString(R.string.route_status_running, routeData.optInt("points", 0))
+        } else {
+            getString(R.string.route_status_idle)
+        }
+        featureStatusList.addView(featureStatusRow(getString(R.string.route_title), routeText))
+
+        val joyData = joystick.data
+        val joyText = if (joyData?.optBoolean("enabled", false) == true) {
+            getString(R.string.location_enabled)
+        } else {
+            getString(R.string.location_disabled)
+        }
+        featureStatusList.addView(featureStatusRow(getString(R.string.float_mode_joystick), joyText))
+
+        val envData = env.data
+        listOf(
+            "cell" to getString(R.string.env_cell_title),
+            "wifi" to getString(R.string.env_wifi_title),
+            "ble" to getString(R.string.env_ble_title),
+            "gnss" to getString(R.string.env_gnss_title),
+            "sensor" to getString(R.string.env_sensor_title)
+        ).forEach { (key, label) ->
+            val enabled = envData?.optJSONObject(key)?.optBoolean("enabled", false) == true
+            featureStatusList.addView(
+                featureStatusRow(
+                    label,
+                    getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
+                )
+            )
+        }
+    }
+
+    /** 生成一行两列功能状态（名称 + 状态）。 */
+    private fun featureStatusRow(label: String, value: String): android.view.View {
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(3), 0, dp(3))
+        }
+        val name = TextView(requireContext()).apply {
+            text = label
+            setTextColor(resources.getColor(R.color.text_secondary, null))
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        row.addView(name)
+        val status = TextView(requireContext()).apply {
+            text = value
+            setTextColor(resources.getColor(R.color.text_primary, null))
+            textSize = 12f
+        }
+        row.addView(status)
+        return row
     }
 
     // ---------- 权限 ----------
@@ -377,8 +526,7 @@ class HomeFragment : Fragment() {
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), apiResult.message, Toast.LENGTH_SHORT).show()
                 if (apiResult.code == ApiResult.CODE_OK) {
-                    collectNameInput.text.clear()
-                    collectRemarkInput.text.clear()
+                    resetDefaultNames()
                     refreshSavedItems()
                 }
             }
@@ -514,7 +662,11 @@ class HomeFragment : Fragment() {
                     recordingId = result.data?.optLong("id", -1L) ?: -1L
                     recordingFrames = 0
                     recordingName = name
-                    recordingNameInput.text.clear()
+                    recordingNameInput.setText(
+                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                            getString(R.string.home_recording_title)
+                        )
+                    )
                     // 启动流式监听（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询）
                     streamSampler?.start()
                     // 连续传感器事件流（加速度/陀螺仪/计步）随录像启动
@@ -829,14 +981,20 @@ class HomeFragment : Fragment() {
             if (item.optLong("id", -1L) != id) continue
             val data = item.optJSONObject("data")
             return when (item.optString("type", "")) {
-                "collect" -> formatCollectDetail(data)
-                "cell" -> formatEnvDetail(data, "cell")
-                "wifi" -> formatEnvDetail(data, "wifi")
-                "gnss" -> formatEnvDetail(data, "gnss")
+                "collect" -> formatCollectDetail(data) + rawDataSuffix(data)
+                "cell" -> formatEnvDetail(data, "cell") + rawDataSuffix(data)
+                "wifi" -> formatEnvDetail(data, "wifi") + rawDataSuffix(data)
+                "gnss" -> formatEnvDetail(data, "gnss") + rawDataSuffix(data)
                 else -> getString(R.string.home_saved_detail_empty)
             }
         }
         return getString(R.string.home_saved_detail_empty)
+    }
+
+    /** 快照详情末尾追加原始 JSON（需求：已保存采集详情可看到原始数据）。 */
+    private fun rawDataSuffix(data: JSONObject?): String {
+        if (data == null) return ""
+        return "\n\n—— 原始数据 ——\n" + data.toString(2)
     }
 
     private fun formatCollectDetail(data: JSONObject?): String {
@@ -911,7 +1069,7 @@ class HomeFragment : Fragment() {
             val result = if (item.kind == "snapshot") {
                 ApiClient.useEnvSnapshot(item.id)
             } else {
-                ApiClient.playRecordings(listOf(item.id), false)
+                ApiClient.playRecordings(listOf(item.id), playbackLoopCheck.isChecked)
             }
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
@@ -957,14 +1115,26 @@ class HomeFragment : Fragment() {
         if (locationEnabled) syncParts.add("虚拟定位")
         if (envParts.isNotEmpty()) syncParts.add("环境:" + envParts.joinToString("/"))
         val syncText = if (syncParts.isEmpty()) "" else " · " + syncParts.joinToString(" ")
+        val loopText = if (data.optBoolean("loop", false)) " · 循环" else ""
         playbackStatus.text = if (paused) {
-            getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount) + syncText
+            getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount) + syncText + loopText
         } else {
-            getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, syncText)
+            getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, syncText) + loopText
         }
     }
 
     // ---------- 工具 ----------
+
+    /** 保存/录制成功后重置默认名称（时间命名）。 */
+    private fun resetDefaultNames() {
+        collectNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        )
+        collectRemarkInput.text.clear()
+        recordingNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
+        )
+    }
 
     private fun formatTime(millis: Long): String {
         if (millis <= 0) return ""

@@ -73,6 +73,74 @@
                 android:layout_marginTop="@dimen/space_sm"
                 android:text=""
                 style="@style/Text.Caption" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:text="@string/home_feature_status_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/home_feature_status_hint"
+                style="@style/Text.Caption" />
+
+            <LinearLayout
+                android:id="@+id/featureStatusList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- 悬浮窗（统一入口：主页最上方管理两种模式） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/home_float_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/home_float_desc"
+                style="@style/Text.Caption" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/floatWindowButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/float_open"
+                    style="@style/Button.Pill" />
+
+                <Button
+                    android:id="@+id/closeFloatButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:layout_weight="1"
+                    android:text="@string/float_close_window"
+                    style="@style/Button.Pill.Secondary" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 一键采集卡（快照/录像选项卡） -->
@@ -384,6 +452,17 @@
                     android:minWidth="0dp"
                     android:text="@string/home_playback_speed_set"
                     style="@style/Button.Pill.Secondary" />
+
+                <CheckBox
+                    android:id="@+id/playbackLoopCheck"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="0dp"
+                    android:checked="true"
+                    android:text="@string/home_playback_loop"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/text_caption" />
             </LinearLayout>
 
             <TextView
