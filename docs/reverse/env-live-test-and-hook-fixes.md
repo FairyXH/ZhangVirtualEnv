@@ -5,6 +5,37 @@
 模块：io.github.fairyxh.VirtualEnv
 检测器：io.github.fairyxh.VirEnvDetector（独立工程 `D:\Files\Develop\Android\ZhangVirtualProject\VirEnvDetector`）
 
+## 本轮修复的五个根因（第二轮：实时配置刷新）
+
+### 6. 检测器其他项缺少"配置就绪后接管"机制
+
+现象：random-env 切换后，cell/wifi 因为每次读取时判断缓存所以没问题，
+但 **BLE/GNSS 在 EnvStateCache 同步前就已注册/放行真实数据**（BLE 读到真实
+手环、GNSS 读到真实 47 颗卫星），导致瞬时误判。
+
+修复：
+- 模块 `EnvStateCache` 轮询间隔 2s → **500ms**（配置切换后 App 进程 Hook
+  更快拿到新配置）；
+- BLE `startScan`：虚拟 BLE 未就绪时**暂存 callback**，配置到达后由
+  refresh loop 自动补投递虚拟结果（与传感器 pending 机制一致）；未启用时
+  仍放行真实扫描；
+- GNSS 周期投递 1s → **300ms**（虚拟状态比真实卫星回调更快覆盖）；
+- 检测器：`trackConfigChange()` 检测期望配置指纹变化，切换后 **2s 宽限期**
+  内 FAIL 降级为 **SYNCING（同步中）**，避免瞬时误报；
+- 检测器 random-env 成功后**等待 900ms** 再注册监听，确保 EnvStateCache
+  已追平（避免 startScan/GNSS 注册发生在配置就绪前）。
+
+验证（连续 3 轮随机模拟）：
+```
+location: PASS | provider=gps
+cell:     PASS | LTE tac=24236 ci=240160428 pci=428
+ble:      PASS | ZVE-Device-0 AA:BB:CC:DB:29:C3
+wifi:     PASS | ZVE-Rand-0 ...
+sensor:   PASS | 计步器步数: 15801
+gnss:     PASS | 卫星总数: 16 使用: 5
+```
+切换窗口内无真实数据泄漏，首轮即 PASS。
+
 ## 最终结果
 
 随机模拟后检测器六项判定 **全部 PASS**：
