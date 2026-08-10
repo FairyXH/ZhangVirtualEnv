@@ -9,10 +9,8 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
-import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -24,12 +22,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 悬浮控制窗（摇杆 + 路线启停重置 + 速度/步频设置）。
+ * 悬浮控制窗（摇杆 + 路线启停 + 速度/步频设置）。
  *
  * 运行在控制端进程，通过 ApiClient 与 system_server Backend 通信：
  * - 摇杆拖动 → /api/joystick/set（节流 120ms）
- * - 路线开始/暂停/继续/重置/停止 → /api/route/start、pause、resume、reset、stop
- * - 速度/步频 → /api/route/config
+ * - 路线开始/暂停·继续/停止（停止即重置）→ /api/route/start、pause、resume、stop
+ * - 速度/步频 → /api/route/config（输入即生效，无“应用”按钮）
+ *
+ * 打开时默认悬浮球状态；面板与球透明度 60%；摇杆/路线面板等大；
+ * 摇杆与路线模式切换采用“选中变色、另一无色”的配色。
  */
 class FloatControlService : Service() {
 
@@ -38,6 +39,9 @@ class FloatControlService : Service() {
 
         /** 摇杆上报节流间隔（ms）。 */
         private const val JOYSTICK_THROTTLE_MS = 120L
+
+        /** 面板/悬浮球透明度（0~1）。 */
+        private const val PANEL_ALPHA = 0.6f
 
         fun start(context: android.content.Context) {
             try {
@@ -65,21 +69,24 @@ class FloatControlService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private lateinit var joystickView: JoystickView
-    private lateinit var speedSeek: SeekBar
-    private lateinit var speedValue: TextView
+    private lateinit var speedInput: EditText
     private lateinit var routePanel: View
+    private lateinit var joystickPanel: View
     private lateinit var routeSpinner: Spinner
-    private lateinit var speedStepValue: TextView
+    private lateinit var pauseResumeButton: TextView
+    private lateinit var startButton: TextView
+    private lateinit var modeJoystick: View
+    private lateinit var modeRoute: View
     private lateinit var freqStepValue: TextView
 
-    /** 悬浮窗路线速度/步频微调值（输入法不可用，改加减微调；精确输入在 App 内）。 */
-    private var routeSpeedKmh = 5.04
+    /** 悬浮窗路线速度/步频微调值（输入框 + 加减；输入即生效）。 */
+    private var routeSpeedKmh = 5.5
     private var routeStepFreq = 120
 
     private val executor = Executors.newSingleThreadExecutor()
     private val joystickActive = AtomicBoolean(false)
     private var lastJoystickPost = 0L
-    private var lastSpeedKmh = 5.0
+    private var lastSpeedKmh = 5.5
     private var selectedRouteId = -1L
     private val routeNames = mutableListOf<String>()
     private val routeIds = mutableListOf<Long>()
@@ -89,11 +96,12 @@ class FloatControlService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        showOverlay()
+        // 打开时默认悬浮球状态；点击悬浮球展开面板
+        showBall()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (overlayView == null) showOverlay()
+        if (overlayView == null && ballView == null) showBall()
         return START_STICKY
     }
 
@@ -114,24 +122,32 @@ class FloatControlService : Service() {
         super.onDestroy()
     }
 
+    // ---------- 面板 ----------
+
     private fun showOverlay() {
         if (overlayView != null) return
         val inflater = LayoutInflater.from(this)
         val view = inflater.inflate(R.layout.float_control_window, null) ?: return
         overlayView = view
         panelView = view
+        // 透明度 60%
+        view.alpha = PANEL_ALPHA
 
         joystickView = view.findViewById(R.id.joystickPad)
-        speedSeek = view.findViewById(R.id.speedSeek)
-        speedValue = view.findViewById(R.id.speedValue)
+        speedInput = view.findViewById(R.id.speedInput)
         routePanel = view.findViewById(R.id.routePanel)
+        joystickPanel = view.findViewById(R.id.joystickPanel)
         routeSpinner = view.findViewById(R.id.routeSpinner)
-        speedStepValue = view.findViewById(R.id.speedStepValue)
+        pauseResumeButton = view.findViewById(R.id.routePauseResumeButton)
+        startButton = view.findViewById(R.id.routeStartButton)
+        modeJoystick = view.findViewById(R.id.modeJoystick)
+        modeRoute = view.findViewById(R.id.modeRoute)
         freqStepValue = view.findViewById(R.id.freqStepValue)
 
         setupJoystick()
         setupHeaderDrag(view)
         setupSpeed()
+        setupModeSwitch(view)
         setupRouteControls(view)
 
         layoutParams = WindowManager.LayoutParams(
@@ -149,6 +165,7 @@ class FloatControlService : Service() {
         }
         try {
             windowManager.addView(view, layoutParams)
+            ZLog.d(TAG_SCOPE, "panel shown (alpha=${PANEL_ALPHA})")
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "add overlay failed", t)
             Toast.makeText(this, R.string.float_window_add_failed, Toast.LENGTH_LONG).show()
@@ -190,94 +207,184 @@ class FloatControlService : Service() {
         }
     }
 
-    // ---------- 速度 ----------
+    // ---------- 速度（输入框 + 快捷加减，设置后立即生效） ----------
 
     private fun setupSpeed() {
-        // SeekBar 0..200 → 0.5..20.5 km/h
-        speedSeek.max = 200
-        speedSeek.progress = 50
-        lastSpeedKmh = 5.5
-        speedValue.text = getString(R.string.float_speed_value, lastSpeedKmh)
-        speedSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                lastSpeedKmh = (progress / 10.0 + 0.5).toDouble()
-                speedValue.text = getString(R.string.float_speed_value, lastSpeedKmh)
+        speedInput.setText(String.format("%.1f", routeSpeedKmh))
+        speedInput.setOnFocusChangeListener { _, hasFocus ->
+            // 悬浮窗默认 NOT_FOCUSABLE 无法弹输入法；聚焦时临时移除，失焦恢复
+            val params = layoutParams ?: return@setOnFocusChangeListener
+            val flags = params.flags
+            if (hasFocus && (flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0) {
+                params.flags = flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                try {
+                    windowManager.updateViewLayout(overlayView, params)
+                } catch (_: Throwable) {
+                }
+            } else if (!hasFocus && (params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                try {
+                    windowManager.updateViewLayout(overlayView, params)
+                } catch (_: Throwable) {
+                }
             }
+        }
+        speedInput.setOnEditorActionListener { _, _, _ ->
+            applySpeedInput()
+            hideIme()
+            true
+        }
+        panelView?.findViewById<View>(R.id.speedMinus)?.setOnClickListener {
+            routeSpeedKmh = (routeSpeedKmh - 0.5).coerceAtLeast(1.0)
+            applySpeed()
+        }
+        panelView?.findViewById<View>(R.id.speedPlus)?.setOnClickListener {
+            routeSpeedKmh = (routeSpeedKmh + 0.5).coerceAtMost(60.0)
+            applySpeed()
+        }
+        applySpeed()
+    }
 
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
+    /** 从输入框读取速度并立即应用（摇杆与路线共用）。 */
+    private fun applySpeedInput() {
+        val v = speedInput.text.toString().toDoubleOrNull()
+        if (v != null) {
+            routeSpeedKmh = v.coerceIn(1.0, 60.0)
+        }
+        applySpeed()
+    }
+
+    /** 立即生效：更新摇杆速度；路线运行中同步 /api/route/config。 */
+    private fun applySpeed() {
+        lastSpeedKmh = routeSpeedKmh
+        speedInput.setText(String.format("%.1f", routeSpeedKmh))
+        // 设置后立即生效，无需“应用”按钮
+        executor.execute { ApiClient.configRoute(routeSpeedKmh, 0) }
+        refreshRouteUi()
+    }
+
+    private fun hideIme() {
+        try {
+            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(speedInput.windowToken, 0)
+        } catch (_: Throwable) {
+        }
+    }
+
+    // ---------- 模式切换（选中变色、另一无色） ----------
+
+    private fun setupModeSwitch(view: View) {
+        modeJoystick.setOnClickListener { setMode(true) }
+        modeRoute.setOnClickListener { setMode(false) }
+        setMode(true)
+    }
+
+    private fun setMode(joystick: Boolean) {
+        joystickPanel.visibility = if (joystick) View.VISIBLE else View.GONE
+        routePanel.visibility = if (joystick) View.GONE else View.VISIBLE
+        updateModeStyle(modeJoystick, joystick)
+        updateModeStyle(modeRoute, !joystick)
+        if (!joystick) {
+            loadRoutes()
+            refreshRouteUi()
+        }
+    }
+
+    private fun updateModeStyle(view: View, active: Boolean) {
+        if (active) {
+            view.setBackgroundResource(R.drawable.bg_pill)
+            (view as? TextView)?.setTextColor(resources.getColor(R.color.bg_secondary, null))
+        } else {
+            view.setBackgroundResource(android.R.color.transparent)
+            (view as? TextView)?.setTextColor(resources.getColor(R.color.text_secondary, null))
+        }
     }
 
     // ---------- 路线控制 ----------
 
     private fun setupRouteControls(view: View) {
-        view.findViewById<View>(R.id.modeJoystick).setOnClickListener {
-            routePanel.visibility = View.GONE
-            joystickView.visibility = View.VISIBLE
-        }
-        view.findViewById<View>(R.id.modeRoute).setOnClickListener {
-            routePanel.visibility = View.VISIBLE
-            joystickView.visibility = View.GONE
-            loadRoutes()
-        }
         view.findViewById<View>(R.id.collapseButton).setOnClickListener { collapseToBall() }
 
-        view.findViewById<View>(R.id.routeStartButton).setOnClickListener {
+        startButton.setOnClickListener {
             if (selectedRouteId <= 0) {
                 toast(R.string.float_route_select_first)
                 return@setOnClickListener
             }
-            val speed = routeSpeedKmh
+            applySpeedInput()
             executor.execute {
-                val result = ApiClient.startRoute(selectedRouteId, speed)
+                // 停止即重置：重新开始前先停止，保证从头播放
+                ApiClient.stopRoute()
+                val result = ApiClient.startRoute(selectedRouteId, routeSpeedKmh)
                 toastResult(result, R.string.float_route_started)
+                refreshRouteUi()
             }
         }
-        view.findViewById<View>(R.id.routePauseButton).setOnClickListener {
-            executor.execute { toastResult(ApiClient.pauseRoute(), R.string.float_route_paused) }
-        }
-        view.findViewById<View>(R.id.routeResumeButton).setOnClickListener {
-            executor.execute { toastResult(ApiClient.resumeRoute(), R.string.float_route_resumed) }
-        }
-        view.findViewById<View>(R.id.routeResetButton).setOnClickListener {
-            executor.execute { toastResult(ApiClient.resetRoute(), R.string.float_route_reset_done) }
-        }
+        pauseResumeButton.setOnClickListener { togglePauseResume() }
         view.findViewById<View>(R.id.routeStopButton).setOnClickListener {
-            executor.execute { toastResult(ApiClient.stopRoute(), R.string.float_route_stopped) }
+            executor.execute {
+                val result = ApiClient.stopRoute()
+                toastResult(result, R.string.float_route_stopped)
+                refreshRouteUi()
+            }
         }
-        view.findViewById<View>(R.id.routeConfigButton).setOnClickListener {
-            val speed = routeSpeedKmh
-            val step = routeStepFreq
-            executor.execute { toastResult(ApiClient.configRoute(speed, step), R.string.float_route_configured) }
-        }
-        setupRouteSteppers(view)
+        setupFreqSteppers(view)
         view.findViewById<View>(R.id.routeRefreshButton).setOnClickListener { loadRoutes() }
     }
 
-    /** 速度/步频加减微调（悬浮窗输入法不可用，精确输入在 App 内）。 */
-    private fun setupRouteSteppers(view: View) {
+    /** 暂停与继续合并：运行中 → 暂停；已暂停 → 继续。 */
+    private fun togglePauseResume() {
+        executor.execute {
+            val data = ApiClient.getRouteStatus().data
+            val running = data?.optBoolean("running", false) == true
+            val enabled = data?.optBoolean("enabled", false) == true
+            if (!running && !enabled) {
+                toast(R.string.float_route_select_first)
+                return@execute
+            }
+            val result = if (running) {
+                ApiClient.pauseRoute()
+            } else {
+                ApiClient.resumeRoute()
+            }
+            toastResult(result, if (running) R.string.float_route_paused else R.string.float_route_resumed)
+            refreshRouteUi()
+        }
+    }
+
+    /** 步频加减微调（悬浮窗输入法不可用，精确输入在 App 内）；立即生效。 */
+    private fun setupFreqSteppers(view: View) {
         fun render() {
-            speedStepValue.text = String.format("%.1f", routeSpeedKmh)
             freqStepValue.text = routeStepFreq.toString()
-        }
-        view.findViewById<View>(R.id.speedStepMinus).setOnClickListener {
-            routeSpeedKmh = (routeSpeedKmh - 0.5).coerceAtLeast(1.0)
-            render()
-        }
-        view.findViewById<View>(R.id.speedStepPlus).setOnClickListener {
-            routeSpeedKmh = (routeSpeedKmh + 0.5).coerceAtMost(60.0)
-            render()
         }
         view.findViewById<View>(R.id.freqStepMinus).setOnClickListener {
             routeStepFreq = (routeStepFreq - 10).coerceAtLeast(40)
             render()
+            executor.execute { ApiClient.configRoute(0.0, routeStepFreq) }
         }
         view.findViewById<View>(R.id.freqStepPlus).setOnClickListener {
             routeStepFreq = (routeStepFreq + 10).coerceAtMost(300)
             render()
+            executor.execute { ApiClient.configRoute(0.0, routeStepFreq) }
         }
         render()
+    }
+
+    /** 刷新路线按钮文本（开始/暂停/继续）与运行状态。 */
+    private fun refreshRouteUi() {
+        executor.execute {
+            val data = ApiClient.getRouteStatus().data
+            runOnUi {
+                val running = data?.optBoolean("running", false) == true
+                val enabled = data?.optBoolean("enabled", false) == true
+                pauseResumeButton.text = getString(
+                    if (running) R.string.float_route_pause else R.string.float_route_resume
+                )
+                startButton.text = getString(
+                    if (running || enabled) R.string.float_route_restart else R.string.float_route_start
+                )
+            }
+        }
     }
 
     private fun loadRoutes() {
@@ -346,6 +453,38 @@ class FloatControlService : Service() {
         }
     }
 
+    /** 直接显示悬浮球（打开时的默认状态；透明度 60%）。 */
+    private fun showBall() {
+        if (ballView != null) return
+        val baseX = layoutParams?.x ?: 60
+        val baseY = layoutParams?.y ?: 120
+        val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
+        ballView = ball
+        ball.alpha = PANEL_ALPHA
+        // 40dp 悬浮球（较旧版 51.2dp 再缩小 20%）
+        val px = (40f * resources.displayMetrics.density).toInt()
+        val params = WindowManager.LayoutParams(
+            px, px,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = baseX
+            y = baseY
+        }
+        ballParams = params
+        setupBallDrag(ball, params)
+        try {
+            windowManager.addView(ball, params)
+            ZLog.d(TAG_SCOPE, "ball shown at ${params.x},${params.y} size=${px}px alpha=$PANEL_ALPHA")
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "add ball failed, fallback to panel", t)
+            ballView = null
+            showOverlay()
+        }
+    }
+
     /** 收起面板为悬浮球（无关闭按钮；再次点击悬浮球展开）。 */
     private fun collapseToBall() {
         stopJoystick()
@@ -358,8 +497,8 @@ class FloatControlService : Service() {
         }
         val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
         ballView = ball
-        // 当前 64dp 的 80%：51.2dp，黑色半透明球
-        val px = (64 * 0.8f * resources.displayMetrics.density).toInt()
+        ball.alpha = PANEL_ALPHA
+        val px = (40f * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(
             px, px,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -388,7 +527,21 @@ class FloatControlService : Service() {
     /** 点击悬浮球展开面板。 */
     private fun expandFromBall() {
         val ball = ballView ?: return
-        val base = layoutParams ?: return
+        val base = layoutParams ?: run {
+            // 首次展开：面板尚未创建，先创建并保持球位置
+            val savedX = ballParams?.x ?: 60
+            val savedY = ballParams?.y ?: 120
+            try {
+                windowManager.removeView(ball)
+            } catch (_: Throwable) {
+            }
+            ballView = null
+            ballParams = null
+            showOverlay()
+            layoutParams?.x = savedX
+            layoutParams?.y = savedY
+            return
+        }
         try {
             windowManager.removeView(ball)
         } catch (_: Throwable) {
