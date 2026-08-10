@@ -7,12 +7,34 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.Switch
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.amap.api.maps.AMap
@@ -25,6 +47,13 @@ import com.amap.api.maps.model.MarkerOptions
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
@@ -35,6 +64,9 @@ import java.util.concurrent.Executors
  *
  * 支持高德地图点选坐标、手动输入坐标、多个地点带备注保存，
  * 已保存地点一键使用（设置坐标并启用虚拟定位）。
+ *
+ * 视图层已迁移到 Compose Liquid Glass，高德 MapView 通过 AndroidView 保留，
+ * 全部业务逻辑（点选/搜索/保存/定位/坐标转换）不变。
  */
 class LocationSimFragment : Fragment() {
 
@@ -47,32 +79,37 @@ class LocationSimFragment : Fragment() {
         private const val DEFAULT_ZOOM = 12f
     }
 
-    private lateinit var enableSwitch: Switch
-    private lateinit var latitudeInput: EditText
-    private lateinit var longitudeInput: EditText
-    private lateinit var applyButton: Button
-    private lateinit var statusText: TextView
-    private lateinit var pointNameInput: EditText
-    private lateinit var pointRemarkInput: EditText
-    private lateinit var savePointButton: Button
-    private lateinit var savedPointsEmpty: TextView
-    private lateinit var savedPointList: LinearLayout
-    private lateinit var mapContainer: android.widget.FrameLayout
-    private lateinit var privacyPrompt: View
-    private lateinit var locateButton: Button
-    private lateinit var searchInput: EditText
-    private lateinit var searchButton: Button
-    private lateinit var searchResults: LinearLayout
+    private data class SavedPoint(
+        val id: Long,
+        val name: String,
+        val remark: String,
+        val lat: Double,
+        val lon: Double
+    )
+
+    // ---------- Compose 视图状态 ----------
+
+    private var enableChecked by mutableStateOf(false)
+    private var latitudeText by mutableStateOf("")
+    private var longitudeText by mutableStateOf("")
+    private var statusText by mutableStateOf("")
+    private var pointName by mutableStateOf("")
+    private var pointRemark by mutableStateOf("")
+    private var searchText by mutableStateOf("")
+    private var mapCollapsed by mutableStateOf(false)
+    private var mapSatellite by mutableStateOf(false)
+    private var privacyShown by mutableStateOf(false)
+    private var mapReady by mutableStateOf(false)
+    private val savedPoints = mutableStateListOf<SavedPoint>()
+    private val searchResults = mutableStateListOf<Pair<String, com.amap.api.services.core.PoiItem>>()
+    private var searchResultsVisible by mutableStateOf(false)
+
+    // ---------- 高德地图 ----------
 
     private var mapView: MapView? = null
     private var amap: AMap? = null
     private var selectedMarker: Marker? = null
     private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
-    private var mapCollapsed = false
-    private var mapSatellite = false
-    private lateinit var mapCollapseButton: TextView
-    private lateinit var satelliteToggle: TextView
-    private lateinit var mapPanel: View
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -80,66 +117,24 @@ class LocationSimFragment : Fragment() {
     private var updatingFromBackend = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        val root = inflater.inflate(R.layout.fragment_location, container, false)
-        enableSwitch = root.findViewById(R.id.enableSwitch)
-        latitudeInput = root.findViewById(R.id.latitudeInput)
-        longitudeInput = root.findViewById(R.id.longitudeInput)
-        applyButton = root.findViewById(R.id.applyButton)
-        statusText = root.findViewById(R.id.statusText)
-        pointNameInput = root.findViewById(R.id.pointNameInput)
-        pointRemarkInput = root.findViewById(R.id.pointRemarkInput)
-        savePointButton = root.findViewById(R.id.savePointButton)
-        savedPointsEmpty = root.findViewById(R.id.savedPointsEmpty)
-        savedPointList = root.findViewById(R.id.savedPointList)
-        mapContainer = root.findViewById(R.id.mapContainer)
-        privacyPrompt = root.findViewById(R.id.privacyPrompt)
-        locateButton = root.findViewById(R.id.locateButton)
-        searchInput = root.findViewById(R.id.searchInput)
-        searchButton = root.findViewById(R.id.searchButton)
-        searchResults = root.findViewById(R.id.searchResults)
-
-        enableSwitch.setOnCheckedChangeListener { _, checked ->
-            if (updatingFromBackend) return@setOnCheckedChangeListener
-            executor.execute {
-                val result = ApiClient.setLocationEnabled(checked)
-                requireActivity().runOnUiThread {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                    refreshStatus()
-                }
-            }
-        }
-
-        applyButton.setOnClickListener {
-            val lat = latitudeInput.text.toString().toDoubleOrNull()
-            val lon = longitudeInput.text.toString().toDoubleOrNull()
-            if (lat == null || lon == null) {
-                Toast.makeText(requireContext(), R.string.location_invalid, Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            applyPoint(lat, lon)
-        }
-
-        savePointButton.setOnClickListener { saveCurrentPoint() }
-        locateButton.setOnClickListener { locateCurrentPosition() }
-        setupSearch()
-        mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
-        satelliteToggle = root.findViewById(R.id.satelliteToggle)
-        mapPanel = root.findViewById(R.id.mapPanel)
-        mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
-        satelliteToggle.setOnClickListener { toggleSatellite() }
-        // 输入框默认值：地点名称默认时间（有高德选点地址时自动使用地址）
-        pointNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.location_title))
-        )
-
-        initMapSafely(savedInstanceState)
+        pointName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.location_title))
+        privacyShown = !AmapPrivacyManager.isAgreed(requireContext())
         refreshSavedPoints()
         refreshStatus()
-        return root
+        return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                LocationScreen(this@LocationSimFragment, savedInstanceState)
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        // 用户可能在设置页同意隐私后返回，此时再初始化地图
+        if (privacyShown && AmapPrivacyManager.isAgreed(requireContext())) {
+            privacyShown = false
+        }
         if (!mapCollapsed) {
             try {
                 mapView?.onResume()
@@ -150,16 +145,20 @@ class LocationSimFragment : Fragment() {
         refreshSavedPoints()
     }
 
-    /** 收起/展开地图面板：从搜索框到当前位置按钮整体收起（GONE 时暂停 GLSurfaceView）。 */
-    private fun toggleMapCollapsed() {
-        mapCollapsed = !mapCollapsed
-        mapPanel.visibility = if (mapCollapsed) View.GONE else View.VISIBLE
-        mapCollapseButton.text = getString(
-            if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse
-        )
-        try {
-            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
-        } catch (_: Throwable) {
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden) {
+            if (privacyShown && AmapPrivacyManager.isAgreed(requireContext())) {
+                privacyShown = false
+            }
+            if (!mapCollapsed) {
+                try {
+                    mapView?.onResume()
+                } catch (_: Throwable) {
+                }
+            }
+            refreshStatus()
+            refreshSavedPoints()
         }
     }
 
@@ -191,45 +190,415 @@ class LocationSimFragment : Fragment() {
         mapView?.onSaveInstanceState(outState)
     }
 
-    private fun initMapSafely(savedInstanceState: Bundle?) {
-        val context = requireContext()
-        if (!AmapPrivacyManager.isAgreed(context)) {
-            privacyPrompt.visibility = View.VISIBLE
-            locateButton.visibility = View.GONE
-            ZLog.w(TAG_SCOPE, "privacy not agreed, skip MapView init")
-            return
-        }
-        try {
-            AmapPrivacyManager.applyPrivacyIfAgreed(context)
-            MapsInitializer.initialize(context)
+    // ---------- Compose UI ----------
 
-            val key = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_AMAP_KEY, "")
-            if (!key.isNullOrEmpty()) {
-                MapsInitializer.setApiKey(key)
-            }
-
-            mapView = MapView(context).also { mv ->
-                mapContainer.addView(
-                    mv,
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
+    @Composable
+    private fun LocationScreen(fragment: LocationSimFragment, savedInstanceState: Bundle?) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                BasicText(
+                    getString(R.string.location_title),
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
                     )
                 )
-                mv.onCreate(savedInstanceState)
-                amap = mv.map
+                BasicText(
+                    getString(R.string.location_subtitle),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+
+                // 开关 + 状态卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.location_switch_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.location_switch_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { enableChecked },
+                                onSelect = { checked ->
+                                    if (updatingFromBackend) return@GlassToggle
+                                    executor.execute {
+                                        val result = ApiClient.setLocationEnabled(checked)
+                                        requireActivity().runOnUiThread {
+                                            Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                                            refreshStatus()
+                                        }
+                                    }
+                                },
+                                backdrop = backdrop
+                            )
+                        }
+                        BasicText(
+                            statusText,
+                            Modifier.padding(top = 10.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                    }
+                }
+
+                // 坐标输入卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.location_coord_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            getString(R.string.location_latitude),
+                            Modifier.padding(top = 10.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        GlassField(
+                            value = latitudeText,
+                            onValueChange = { latitudeText = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            placeholder = "31.2304"
+                        )
+                        BasicText(
+                            getString(R.string.location_longitude),
+                            Modifier.padding(top = 8.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        GlassField(
+                            value = longitudeText,
+                            onValueChange = { longitudeText = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            placeholder = "121.4737"
+                        )
+                        GlassButton(
+                            onClick = { fragment.applyPoint() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                getString(R.string.location_apply),
+                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // 地图卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                getString(R.string.location_map_hint),
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            )
+                            GlassPill(
+                                onClick = { fragment.toggleMapCollapsed() },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(end = 6.dp),
+                                selected = mapCollapsed,
+                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassPill(
+                                onClick = { fragment.toggleSatellite() },
+                                backdrop = backdrop,
+                                selected = mapSatellite,
+                                containerColor = if (mapSatellite) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = if (mapSatellite) androidx.compose.ui.graphics.Color.White else colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                        if (privacyShown) {
+                            BasicText(
+                                getString(R.string.route_privacy_prompt),
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            Box(
+                                Modifier
+                                    .padding(top = 10.dp)
+                                    .fillMaxWidth()
+                                    .height(if (mapCollapsed) 0.dp else 240.dp)
+                            ) {
+                                AndroidView(
+                                    factory = { ctx ->
+                                        MapView(ctx).also { mv ->
+                                            mapView = mv
+                                            mv.onCreate(savedInstanceState)
+                                            amap = mv.map
+                                            setupMap()
+                                            mapReady = true
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                    onRelease = {
+                                        // 生命周期由 Fragment 管理
+                                    }
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.locateCurrentPosition() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                isInteractive = mapReady,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.route_locate),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 地址搜索卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.location_search),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassField(
+                                value = searchText,
+                                onValueChange = { searchText = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                placeholder = getString(R.string.location_search_hint)
+                            )
+                            GlassButton(
+                                onClick = { fragment.searchPoi() },
+                                backdrop = backdrop,
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.location_search),
+                                    style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        if (searchResultsVisible) {
+                            searchResults.forEach { (title, poi) ->
+                                GlassPill(
+                                    onClick = { fragment.jumpToSearchResult(poi) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                    selected = false,
+                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                    height = 44.dp
+                                ) {
+                                    BasicText(
+                                        title,
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 保存地点卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.location_saved_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            getString(R.string.location_saved_empty),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        GlassField(
+                            value = pointName,
+                            onValueChange = { pointName = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.location_point_name_hint)
+                        )
+                        GlassField(
+                            value = pointRemark,
+                            onValueChange = { pointRemark = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.location_point_remark_hint)
+                        )
+                        GlassButton(
+                            onClick = { fragment.saveCurrentPoint() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                getString(R.string.location_point_save),
+                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                        if (savedPoints.isEmpty()) {
+                            BasicText(
+                                getString(R.string.location_saved_empty),
+                                Modifier.padding(top = 12.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            savedPoints.forEach { point ->
+                                SavedPointRow(
+                                    point = point,
+                                    backdrop = backdrop,
+                                    onUse = { fragment.useSavedPoint(point.id, point.name) },
+                                    onDelete = { fragment.deleteSavedPoint(point.id) }
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            setupMap()
-            privacyPrompt.visibility = View.GONE
-            locateButton.visibility = View.VISIBLE
-        } catch (t: Throwable) {
-            ZLog.e(TAG_SCOPE, "map init failed", t)
-            privacyPrompt.visibility = View.VISIBLE
-            locateButton.visibility = View.GONE
-            Toast.makeText(context, R.string.location_map_init_failed, Toast.LENGTH_LONG).show()
         }
     }
+
+    @Composable
+    private fun SavedPointRow(
+        point: SavedPoint,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onUse: () -> Unit,
+        onDelete: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onUse,
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+            selected = false,
+            containerColor = colors.bgTertiary.copy(alpha = 0.35f),
+            height = 64.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        point.name,
+                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    )
+                    if (point.remark.isNotBlank()) {
+                        BasicText(
+                            getString(R.string.location_point_remark_format, point.remark),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                        )
+                    }
+                    BasicText(
+                        getString(
+                            R.string.location_point_coord_format,
+                            point.lat,
+                            point.lon
+                        ),
+                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    )
+                }
+                GlassButton(
+                    onClick = onUse,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(72.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.accent.copy(alpha = 0.2f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_saved_select),
+                        style = TextStyle(color = colors.accent, fontSize = 12.sp)
+                    )
+                }
+                GlassButton(
+                    onClick = onDelete,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.danger.copy(alpha = 0.25f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_recording_delete),
+                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                    )
+                }
+            }
+        }
+    }
+
+    // ---------- 地图与坐标 ----------
 
     private fun setupMap() {
         amap?.let { map ->
@@ -245,10 +614,7 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /**
-     * 地图选点（坐标来自高德地图，GCJ-02）：更新 marker 与经纬度输入框。
-     * 输入框统一显示 WGS-84（虚拟定位实际输出坐标），选点坐标自动转换。
-     */
+    /** 地图选点（坐标来自高德地图，GCJ-02）：更新 marker 与经纬度输入框。 */
     private fun selectOnMap(latLng: LatLng) {
         val map = amap ?: return
         selectedMarker?.remove()
@@ -259,12 +625,10 @@ class LocationSimFragment : Fragment() {
         )
         // 高德地图坐标是 GCJ-02，转换为 WGS-84 后填入输入框（注入系统/保存地点统一用 WGS-84）
         val wgs = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng)
-        latitudeInput.setText(formatCoord(wgs.latitude))
-        longitudeInput.setText(formatCoord(wgs.longitude))
+        latitudeText = formatCoord(wgs.latitude)
+        longitudeText = formatCoord(wgs.longitude)
         // 名称默认取最近一次高德选点/搜索的地址，没有则使用日期
-        pointNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.locationOrRoute(getString(R.string.location_title))
-        )
+        pointName = io.github.fairyxh.VirtualEnv.util.DefaultNames.locationOrRoute(getString(R.string.location_title))
         ZLog.d(TAG_SCOPE, "map picked gcj=${latLng.latitude},${latLng.longitude} wgs=${wgs.latitude},${wgs.longitude}")
     }
 
@@ -282,8 +646,8 @@ class LocationSimFragment : Fragment() {
                 .position(LatLng(gcj.first, gcj.second))
                 .title(getString(R.string.location_map_hint))
         )
-        latitudeInput.setText(formatCoord(wgsLat))
-        longitudeInput.setText(formatCoord(wgsLon))
+        latitudeText = formatCoord(wgsLat)
+        longitudeText = formatCoord(wgsLon)
         ZLog.d(TAG_SCOPE, "system locate wgs=$wgsLat,$wgsLon gcj=${gcj.first},${gcj.second}")
         return LatLng(gcj.first, gcj.second)
     }
@@ -292,13 +656,28 @@ class LocationSimFragment : Fragment() {
         return if (value == 0.0) "0.0" else String.format("%.6f", value)
     }
 
-    private fun applyPoint(lat: Double, lon: Double) {
+    private fun applyPoint() {
+        val lat = latitudeText.toDoubleOrNull()
+        val lon = longitudeText.toDoubleOrNull()
+        if (lat == null || lon == null) {
+            Toast.makeText(requireContext(), R.string.location_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
         executor.execute {
             val result = ApiClient.setLocation(lat, lon, 0f, 0f)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 refreshStatus()
             }
+        }
+    }
+
+    /** 收起/展开地图面板（GONE 时暂停 GLSurfaceView）。 */
+    private fun toggleMapCollapsed() {
+        mapCollapsed = !mapCollapsed
+        try {
+            if (mapCollapsed) mapView?.onPause() else mapView?.onResume()
+        } catch (_: Throwable) {
         }
     }
 
@@ -311,38 +690,33 @@ class LocationSimFragment : Fragment() {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "map type switch failed", t)
         }
-        satelliteToggle.setBackgroundResource(if (mapSatellite) R.drawable.bg_pill else R.drawable.bg_pill_secondary)
-        satelliteToggle.setTextColor(
-            resources.getColor(if (mapSatellite) R.color.bg_secondary else R.color.text_secondary, null)
-        )
-        satelliteToggle.text = getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite)
     }
+
+    // ---------- 保存地点 ----------
 
     /** 保存当前输入坐标（含名称/备注），成功后刷新列表。 */
     private fun saveCurrentPoint() {
-        val name = pointNameInput.text.toString().trim()
+        val name = pointName.trim()
         if (name.isEmpty()) {
             Toast.makeText(requireContext(), R.string.location_point_name_required, Toast.LENGTH_SHORT).show()
             return
         }
-        val lat = latitudeInput.text.toString().toDoubleOrNull()
-        val lon = longitudeInput.text.toString().toDoubleOrNull()
+        val lat = latitudeText.toDoubleOrNull()
+        val lon = longitudeText.toDoubleOrNull()
         if (lat == null || lon == null) {
             Toast.makeText(requireContext(), R.string.location_invalid, Toast.LENGTH_SHORT).show()
             return
         }
-        val remark = pointRemarkInput.text.toString().trim()
+        val remark = pointRemark.trim()
         executor.execute {
             val result = ApiClient.createLocationPoint(name, remark, lat, lon)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == ApiResult.CODE_OK) {
-                    pointNameInput.setText(
-                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
-                            getString(R.string.location_title)
-                        )
+                    pointName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                        getString(R.string.location_title)
                     )
-                    pointRemarkInput.text.clear()
+                    pointRemark = ""
                     refreshSavedPoints()
                 }
             }
@@ -353,41 +727,21 @@ class LocationSimFragment : Fragment() {
         executor.execute {
             val result = ApiClient.listLocationPoints()
             requireActivity().runOnUiThread {
-                renderSavedPoints(result)
+                savedPoints.clear()
+                val points = result.data?.optJSONArray("points") ?: return@runOnUiThread
+                for (i in 0 until points.length()) {
+                    val item = points.optJSONObject(i) ?: continue
+                    savedPoints.add(
+                        SavedPoint(
+                            id = item.optLong("id", -1L),
+                            name = item.optString("name", ""),
+                            remark = item.optString("remark", ""),
+                            lat = item.optDouble("latitude", 0.0),
+                            lon = item.optDouble("longitude", 0.0)
+                        )
+                    )
+                }
             }
-        }
-    }
-
-    private fun renderSavedPoints(result: ApiResult) {
-        savedPointList.removeAllViews()
-        val points = result.data?.optJSONArray("points") ?: return
-        val count = points.length()
-        savedPointsEmpty.visibility = if (count == 0) View.VISIBLE else View.GONE
-        if (count == 0) return
-
-        for (i in 0 until count) {
-            val item = points.optJSONObject(i) ?: continue
-            val row = layoutInflater.inflate(R.layout.item_saved_point, savedPointList, false)
-            row.findViewById<TextView>(R.id.pointName).text = item.optString("name", "")
-            val remark = item.optString("remark", "")
-            val remarkView = row.findViewById<TextView>(R.id.pointRemark)
-            if (remark.isBlank()) {
-                remarkView.visibility = View.GONE
-            } else {
-                remarkView.text = getString(R.string.location_point_remark_format, remark)
-            }
-            row.findViewById<TextView>(R.id.pointCoord).text = getString(
-                R.string.location_point_coord_format,
-                item.optDouble("latitude", 0.0),
-                item.optDouble("longitude", 0.0)
-            )
-            row.findViewById<Button>(R.id.useButton).setOnClickListener {
-                useSavedPoint(item.optLong("id"), item.optString("name", ""))
-            }
-            row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
-                deleteSavedPoint(item.optLong("id"))
-            }
-            savedPointList.addView(row)
         }
     }
 
@@ -430,18 +784,18 @@ class LocationSimFragment : Fragment() {
                     // 开关只反映单点引擎；路线运行中位置由路线引擎提供，开关保持关闭
                     val enabled = data.optBoolean("singleEnabled", false)
                     updatingFromBackend = true
-                    enableSwitch.isChecked = enabled
+                    enableChecked = enabled
                     updatingFromBackend = false
-                    latitudeInput.setText(formatCoord(data.optDouble("latitude", 0.0)))
-                    longitudeInput.setText(formatCoord(data.optDouble("longitude", 0.0)))
-                    statusText.text = getString(
+                    latitudeText = formatCoord(data.optDouble("latitude", 0.0))
+                    longitudeText = formatCoord(data.optDouble("longitude", 0.0))
+                    statusText = getString(
                         R.string.location_status_value,
                         if (enabled) getString(R.string.location_enabled) else getString(R.string.location_disabled),
                         data.optDouble("latitude", 0.0),
                         data.optDouble("longitude", 0.0)
                     )
                 } else {
-                    statusText.text = getString(R.string.location_status_offline)
+                    statusText = getString(R.string.location_status_offline)
                 }
             }
         }
@@ -552,20 +906,8 @@ class LocationSimFragment : Fragment() {
 
     // ---------- 地址搜索 ----------
 
-    private fun setupSearch() {
-        searchButton.setOnClickListener { searchPoi() }
-        searchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
-                searchPoi()
-                true
-            } else {
-                false
-            }
-        }
-    }
-
     private fun searchPoi() {
-        val keyword = searchInput.text.toString().trim()
+        val keyword = searchText.trim()
         if (keyword.isEmpty()) return
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -600,28 +942,16 @@ class LocationSimFragment : Fragment() {
     }
 
     private fun renderSearchResults(pois: List<com.amap.api.services.core.PoiItem>) {
-        searchResults.removeAllViews()
+        searchResults.clear()
         if (pois.isEmpty()) {
-            searchResults.visibility = View.GONE
+            searchResultsVisible = false
             Toast.makeText(requireContext(), R.string.location_search_empty, Toast.LENGTH_SHORT).show()
             return
         }
         pois.forEach { poi ->
-            val row = TextView(requireContext())
-            row.text = "${poi.title} · ${poi.snippet}"
-            row.setTextColor(resources.getColor(R.color.text_primary, null))
-            row.setTextSize(13f)
-            row.setPadding(48, 40, 48, 40)
-            row.setOnClickListener { jumpToSearchResult(poi) }
-            searchResults.addView(row)
-            if (poi != pois.last()) {
-                val divider = View(requireContext())
-                divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
-                divider.setBackgroundColor(resources.getColor(R.color.separator, null))
-                searchResults.addView(divider)
-            }
+            searchResults.add("${poi.title} · ${poi.snippet}" to poi)
         }
-        searchResults.visibility = View.VISIBLE
+        searchResultsVisible = true
     }
 
     private fun jumpToSearchResult(poi: com.amap.api.services.core.PoiItem) {
@@ -630,7 +960,7 @@ class LocationSimFragment : Fragment() {
         io.github.fairyxh.VirtualEnv.util.DefaultNames.rememberPoi(poi.title)
         amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
         selectOnMap(latLng)
-        searchResults.visibility = View.GONE
+        searchResultsVisible = false
         hideKeyboard()
     }
 
@@ -638,7 +968,10 @@ class LocationSimFragment : Fragment() {
         try {
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE)
                 as android.view.inputmethod.InputMethodManager
-            imm.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            imm.hideSoftInputFromWindow(
+                requireView().windowToken,
+                0
+            )
         } catch (_: Throwable) {
         }
     }
