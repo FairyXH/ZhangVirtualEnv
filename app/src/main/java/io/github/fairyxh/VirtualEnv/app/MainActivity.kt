@@ -1,12 +1,18 @@
 package io.github.fairyxh.VirtualEnv.app
 
+import android.graphics.Color as AndroidColor
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -90,10 +96,23 @@ class MainActivity : FragmentActivity() {
 
         // Fragment 容器必须在视图树中立即可用（FragmentManager onStart 时按 id 查找），
         // 因此不放进 Compose AndroidView，底栏单独用 ComposeView 叠加。
-        val root = FrameLayout(this)
+        val root = SwipeAwareFrameLayout(this)
         root.setBackgroundColor(
             ContextCompat.getColor(this, R.color.bg_primary)
         )
+        // 触屏横向滑动切换页面：只在快速 fling 时切换（dispatch 阶段观察，不消费事件，
+        // 因此不影响页面纵向滚动与地图拖拽）
+        root.onSwipe = { dx, dy, vx ->
+            if (kotlin.math.abs(dx) > 120 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f &&
+                kotlin.math.abs(vx) > 600f
+            ) {
+                if (dx < 0 && currentTab < 4) {
+                    switchTab(currentTab + 1, true)
+                } else if (dx > 0 && currentTab > 0) {
+                    switchTab(currentTab - 1, true)
+                }
+            }
+        }
         val container = FragmentContainerView(this).apply {
             id = R.id.fragmentContainer
         }
@@ -106,6 +125,21 @@ class MainActivity : FragmentActivity() {
         )
         val bottomBar = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            // 液态玻璃：Android 12+ 的 View#setBackgroundBlurRadius 会对 View 背景后的真实
+            // 内容（Fragment 页面）做系统级模糊，底栏因此悬浮在页面之上、能看见并模糊下方内容。
+            // 该方法未在编译期 framework stub 暴露，运行时通过反射调用（API 31+ 存在）。
+            background = ColorDrawable(AndroidColor.TRANSPARENT)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    val radiusPx = (28 * resources.displayMetrics.density).toInt()
+                    val method = android.view.View::class.java.getMethod(
+                        "setBackgroundBlurRadius", Int::class.java
+                    )
+                    method.invoke(this, radiusPx)
+                } catch (t: Throwable) {
+                    ZLog.w("UI", "background blur unavailable", t)
+                }
+            }
             setContent {
                 LiquidBottomBar(
                     selectedTabIndex = { currentTab },
@@ -124,14 +158,7 @@ class MainActivity : FragmentActivity() {
             )
         )
         setContentView(root)
-
-        // 页面底部留白：避免底栏遮挡最下方卡片（底栏高度 + 导航条）
-        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
-            val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-            val bottomReserve = (96 * resources.displayMetrics.density).toInt() + navBar
-            container.setPadding(0, 0, 0, bottomReserve)
-            insets
-        }
+        // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
 
         if (savedInstanceState == null) {
             // switchTab 会因 currentTab == index 提前返回；先把索引置 -1，
@@ -149,10 +176,26 @@ class MainActivity : FragmentActivity() {
     private fun switchTab(index: Int, animate: Boolean) {
         if (currentTab == index) return
         val fm = supportFragmentManager
-        val ft = fm.beginTransaction().setCustomAnimations(
-            R.anim.fade_in, R.anim.fade_out,
-            R.anim.fade_in, R.anim.fade_out
-        )
+        val ft = fm.beginTransaction()
+        if (animate) {
+            // 前进：新页从右滑入、旧页向左滑出；后退方向相反
+            if (index > currentTab) {
+                ft.setCustomAnimations(
+                    R.anim.slide_in_right, R.anim.slide_out_left,
+                    R.anim.slide_in_left, R.anim.slide_out_right
+                )
+            } else {
+                ft.setCustomAnimations(
+                    R.anim.slide_in_left, R.anim.slide_out_right,
+                    R.anim.slide_in_right, R.anim.slide_out_left
+                )
+            }
+        } else {
+            ft.setCustomAnimations(
+                R.anim.fade_in, R.anim.fade_out,
+                R.anim.fade_in, R.anim.fade_out
+            )
+        }
         // 隐藏当前页（保留其视图与状态，切回时不重建）
         if (currentTab in 0..4) {
             fm.findFragmentByTag("tab$currentTab")?.let { ft.hide(it) }
@@ -189,16 +232,20 @@ private fun LiquidBottomBar(
     val density = LocalDensity.current
 
     Box(Modifier.fillMaxWidth()) {
-        // 极淡玻璃采样层：只提供 Backdrop blur 可模糊的内容，视觉上接近全透明
+        // 玻璃采样层：只覆盖底栏胶囊区域（不延伸为全宽衬底），
+        // 为 GlassBottomTabs 的 blur/lens 提供可模糊的极淡内容，视觉上是磨砂玻璃面
         Box(
             Modifier
-                .matchParentSize()
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+                .height(64.dp)
                 .layerBackdrop(backdrop)
                 .drawBehind {
                     drawRect(
                         Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.04f),
-                            1f to Color.White.copy(alpha = 0.02f)
+                            0f to Color.White.copy(alpha = 0.06f),
+                            1f to Color.White.copy(alpha = 0.03f)
                         )
                     )
                 }
@@ -249,4 +296,35 @@ private fun TabIcon(
         text = androidx.compose.ui.res.stringResource(label),
         style = TextStyle(color = tint, fontSize = 10.sp)
     )
+}
+
+/**
+ * 在 dispatch 阶段观察触摸事件的根布局：横向快速滑动时触发页面切换回调。
+ * 不消费任何事件，因此不影响 Fragment 内容滚动与地图拖拽。
+ */
+private class SwipeAwareFrameLayout(context: android.content.Context) : FrameLayout(context) {
+
+    var onSwipe: ((dx: Float, dy: Float, velocityX: Float) -> Unit)? = null
+
+    private var downX = 0f
+    private var downY = 0f
+    private var downTime = 0L
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                downTime = SystemClock.uptimeMillis()
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                val dt = (SystemClock.uptimeMillis() - downTime).coerceAtLeast(1L)
+                val vx = dx / (dt / 1000f)
+                onSwipe?.invoke(dx, dy, vx)
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 }

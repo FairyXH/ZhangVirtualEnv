@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
+import androidx.compose.ui.zIndex
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
@@ -83,7 +84,8 @@ fun GlassBottomTabs(
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
-    // App Store 风格：底栏本身接近全透明，仅靠 blur + 边缘高光表达玻璃质感
+    // 底栏不要背景：全透明玻璃，仅保留 blur/lens 与滑块高光。
+    // （用户明确：全透明即可，衬底样式会与页面内容混在一起）
     val containerColor =
         if (isLightTheme) Color(0xFFFAFAFA).copy(0.05f)
         else Color(0xFF121212).copy(0.08f)
@@ -245,6 +247,8 @@ fun GlassBottomTabs(
 
         Box(
             Modifier
+                .align(Alignment.CenterStart)
+                .zIndex(2f)
                 .padding(horizontal = 4f.dp)
                 .graphicsLayer {
                     translationX =
@@ -298,6 +302,12 @@ fun GlassBottomTabs(
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
+                        // 常态画一层完整胶囊底色：Oplus 上 blur 采样可能只覆盖下半部分，
+                        // 这层底色保证玻璃滑块上半部分也完整可见（液态高光由 highlight 提供）
+                        drawRect(
+                            if (isLightTheme) Color.White.copy(alpha = 0.22f)
+                            else Color.Black.copy(alpha = 0.25f)
+                        )
                         val progress = dampedDragAnimation.pressProgress
                         drawRect(
                             if (isLightTheme) Color.Black.copy(0.1f)

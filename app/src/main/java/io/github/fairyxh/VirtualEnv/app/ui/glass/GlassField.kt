@@ -44,13 +44,13 @@ fun GlassField(
         refractionHeight = 12f,
         refractionAmount = 12f,
         containerColor = colors.bgSecondary.copy(alpha = 0.45f),
-        contentPadding = 16.dp
+        // 紧凑输入框：左右 12dp、上下仅 2dp（比字体略高的极窄玻璃条）
+        contentPadding = 12.dp
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .sizeIn(minHeight = 48.dp)
-                .padding(vertical = 12.dp),
+                .padding(vertical = 2.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             BasicTextField(

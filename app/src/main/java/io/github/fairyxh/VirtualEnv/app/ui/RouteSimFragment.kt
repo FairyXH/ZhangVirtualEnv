@@ -231,7 +231,139 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                 )
 
-                // 开关 + 状态卡
+                // 卡片1：搜索 + 地图 + 当前位置 + 收起展开/卫星图（同一卡片；地图收起时整卡收起）
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                getString(R.string.location_search),
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            )
+                            GlassPill(
+                                onClick = { fragment.toggleMapCollapsed() },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(end = 6.dp),
+                                selected = mapCollapsed,
+                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassPill(
+                                onClick = { fragment.toggleSatellite() },
+                                backdrop = backdrop,
+                                selected = mapSatellite,
+                                containerColor = if (mapSatellite) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = if (mapSatellite) androidx.compose.ui.graphics.Color.White else colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                        if (!mapCollapsed) {
+                            Row(
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassField(
+                                    value = searchText,
+                                    onValueChange = { searchText = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    placeholder = getString(R.string.location_search_hint)
+                                )
+                                GlassButton(
+                                    onClick = { fragment.searchPoi() },
+                                    backdrop = backdrop,
+                                    tint = colors.accent
+                                ) {
+                                    BasicText(
+                                        getString(R.string.location_search),
+                                        style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            if (searchResultsVisible) {
+                                searchResults.forEach { (title, poi) ->
+                                    GlassPill(
+                                        onClick = { fragment.jumpToSearchResult(poi) },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                        height = 44.dp
+                                    ) {
+                                        BasicText(
+                                            title,
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp),
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                        )
+                                    }
+                                }
+                            }
+                            if (privacyShown) {
+                                BasicText(
+                                    getString(R.string.route_privacy_prompt),
+                                    Modifier.padding(top = 10.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                            } else {
+                                Box(
+                                    Modifier
+                                        .padding(top = 10.dp)
+                                        .fillMaxWidth()
+                                        .height(240.dp)
+                                ) {
+                                    AndroidView(
+                                        factory = { ctx ->
+                                            initMapView(ctx, savedInstanceState)
+                                        },
+                                        modifier = Modifier.fillMaxSize(),
+                                        onRelease = {
+                                            // 生命周期由 Fragment 管理
+                                        }
+                                    )
+                                }
+                            }
+                            Row(
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassButton(
+                                    onClick = { fragment.locateCurrentPosition() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = mapReady,
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.route_locate),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 卡片2：启用路线模拟开关
                 GlassCard(
                     backdrop = backdrop,
                     modifier = Modifier.fillMaxWidth(),
@@ -270,109 +402,23 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                     }
                 }
 
-                // 路线绘制卡
+                // 卡片3：路线参数输入框和按钮
                 GlassCard(
                     backdrop = backdrop,
                     modifier = Modifier.fillMaxWidth(),
                     containerColor = colors.bgSecondary.copy(alpha = 0.45f)
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText(
-                                getString(R.string.route_config_title),
-                                Modifier.weight(1f),
-                                style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                            )
-                            GlassPill(
-                                onClick = { fragment.toggleMapCollapsed() },
-                                backdrop = backdrop,
-                                modifier = Modifier.padding(end = 6.dp),
-                                selected = mapCollapsed,
-                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
-                                height = 34.dp
-                            ) {
-                                BasicText(
-                                    getString(if (mapCollapsed) R.string.map_panel_expand else R.string.map_panel_collapse),
-                                    Modifier.padding(horizontal = 14.dp),
-                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
-                                )
-                            }
-                            GlassPill(
-                                onClick = { fragment.toggleSatellite() },
-                                backdrop = backdrop,
-                                selected = mapSatellite,
-                                containerColor = if (mapSatellite) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
-                                height = 34.dp
-                            ) {
-                                BasicText(
-                                    getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite),
-                                    Modifier.padding(horizontal = 14.dp),
-                                    style = TextStyle(color = if (mapSatellite) androidx.compose.ui.graphics.Color.White else colors.textPrimary, fontSize = 12.sp)
-                                )
-                            }
-                        }
+                        BasicText(
+                            getString(R.string.route_config_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
                         BasicText(
                             drawHint,
                             Modifier.padding(top = 8.dp),
                             style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                         )
-                        if (privacyShown) {
-                            BasicText(
-                                getString(R.string.route_privacy_prompt),
-                                Modifier.padding(top = 10.dp),
-                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
-                            )
-                        } else {
-                            Box(
-                                Modifier
-                                    .padding(top = 10.dp)
-                                    .fillMaxWidth()
-                                    .height(if (mapCollapsed) 0.dp else 240.dp)
-                            ) {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        initMapView(ctx, savedInstanceState)
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
-                                    onRelease = {
-                                        // 生命周期由 Fragment 管理
-                                    }
-                                )
-                            }
-                        }
-                        Row(
-                            Modifier.padding(top = 10.dp).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            GlassButton(
-                                onClick = { fragment.locateCurrentPosition() },
-                                backdrop = backdrop,
-                                modifier = Modifier.weight(1f),
-                                isInteractive = mapReady,
-                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
-                            ) {
-                                BasicText(
-                                    getString(R.string.route_locate),
-                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                )
-                            }
-                            GlassButton(
-                                onClick = { fragment.clearRoute() },
-                                backdrop = backdrop,
-                                modifier = Modifier.weight(1f),
-                                isInteractive = mapReady,
-                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
-                            ) {
-                                BasicText(
-                                    getString(R.string.route_clear),
-                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                        // 预设
+                        // 预设：步行/跑步/自行车/驾车文字横向排布
                         Row(
                             Modifier.padding(top = 8.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -401,13 +447,14 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                             90 -> getString(R.string.route_preset_bike)
                                             else -> getString(R.string.route_preset_drive)
                                         },
-                                        Modifier.padding(horizontal = 8.dp),
+                                        Modifier.padding(horizontal = 4.dp),
+                                        maxLines = 1,
                                         style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
                                     )
                                 }
                             }
                         }
-                        // 速度/步频输入 + 保存
+                        // 速度/步频输入 + 名称 + 备注
                         Row(
                             Modifier.padding(top = 10.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -441,77 +488,38 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                             modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
                             placeholder = getString(R.string.route_remark_hint)
                         )
-                        GlassButton(
-                            onClick = { fragment.saveRoute() },
-                            backdrop = backdrop,
-                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
-                            tint = colors.accent
-                        ) {
-                            BasicText(
-                                getString(R.string.route_save),
-                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            )
-                        }
-                    }
-                }
-
-                // 地址搜索卡
-                GlassCard(
-                    backdrop = backdrop,
-                    modifier = Modifier.fillMaxWidth(),
-                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        BasicText(
-                            getString(R.string.location_search),
-                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                        )
                         Row(
                             Modifier.padding(top = 10.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            GlassField(
-                                value = searchText,
-                                onValueChange = { searchText = it },
+                            GlassButton(
+                                onClick = { fragment.clearRoute() },
                                 backdrop = backdrop,
                                 modifier = Modifier.weight(1f),
-                                placeholder = getString(R.string.location_search_hint)
-                            )
+                                isInteractive = mapReady,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.route_clear),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
                             GlassButton(
-                                onClick = { fragment.searchPoi() },
+                                onClick = { fragment.saveRoute() },
                                 backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
                                 tint = colors.accent
                             ) {
                                 BasicText(
-                                    getString(R.string.location_search),
+                                    getString(R.string.route_save),
                                     style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 )
-                            }
-                        }
-                        if (searchResultsVisible) {
-                            searchResults.forEach { (title, poi) ->
-                                GlassPill(
-                                    onClick = { fragment.jumpToSearchResult(poi) },
-                                    backdrop = backdrop,
-                                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
-                                    selected = false,
-                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
-                                    height = 44.dp
-                                ) {
-                                    BasicText(
-                                        title,
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp),
-                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
-                                    )
-                                }
                             }
                         }
                     }
                 }
 
-                // 已保存路线卡
+                // 卡片4：已保存路线列表
                 GlassCard(
                     backdrop = backdrop,
                     modifier = Modifier.fillMaxWidth(),
@@ -525,7 +533,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                         if (savedRoutes.isEmpty()) {
                             BasicText(
                                 getString(R.string.route_saved_empty),
-                                Modifier.padding(top = 8.dp),
+                                Modifier.padding(top = 4.dp),
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
                         } else {

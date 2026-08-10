@@ -1,5 +1,6 @@
 package io.github.fairyxh.VirtualEnv.app.ui.glass
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -119,7 +120,14 @@ fun GlassToggle(
     val trackBackdrop = rememberLayerBackdrop()
 
     Box(
-        modifier,
+        modifier
+            // 消费 tap：开关只切换状态，不把点击冒泡给外层卡片（详情）
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                role = Role.Switch,
+                onClick = {}
+            ),
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
