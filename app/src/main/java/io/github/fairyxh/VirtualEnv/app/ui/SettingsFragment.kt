@@ -34,16 +34,42 @@ import android.telephony.TelephonyManager
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCheckbox
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.security.MessageDigest
 import java.util.concurrent.Executors
@@ -52,10 +78,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意。
+ * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意 +
+ * 桌面图标隐藏 + 环境实时测试（普通 App 视角，不 Suspend）。
  *
- * 底部「环境实时测试（普通 App 视角）」：不 Suspend，用标准系统 API 持续读取
- * 位置 / 基站 / 蓝牙 / WiFi / 传感器 / GNSS，实时分栏刷新，点击结束停止。
+ * 视图层已迁移到 Compose Liquid Glass，业务逻辑保持不变。
  */
 class SettingsFragment : Fragment() {
 
@@ -72,27 +98,31 @@ class SettingsFragment : Fragment() {
         private const val AMAP_PRIVACY_URL = "https://lbs.amap.com/api/android-sdk/guide/create-project/dev-attention"
     }
 
-    private lateinit var packageValue: TextView
-    private lateinit var sha1Value: TextView
-    private lateinit var amapKeyInput: EditText
-    private lateinit var amapSecurityInput: EditText
-    private lateinit var privacyAgreeCheck: CheckBox
-    private lateinit var launcherHideCheck: CheckBox
+    private enum class Verdict { PASS, FAIL, NOT_ENABLED }
 
-    private lateinit var envTestStartButton: Button
-    private lateinit var envTestStopButton: Button
-    private lateinit var envTestLocationValue: TextView
-    private lateinit var envTestLocationStatus: TextView
-    private lateinit var envTestCellValue: TextView
-    private lateinit var envTestCellStatus: TextView
-    private lateinit var envTestBleValue: TextView
-    private lateinit var envTestBleStatus: TextView
-    private lateinit var envTestWifiValue: TextView
-    private lateinit var envTestWifiStatus: TextView
-    private lateinit var envTestSensorValue: TextView
-    private lateinit var envTestSensorStatus: TextView
-    private lateinit var envTestGnssValue: TextView
-    private lateinit var envTestGnssStatus: TextView
+    private data class EnvTestField(
+        val title: String,
+        val status: String = "",
+        val statusColor: Color = Color.Unspecified,
+        val value: String = ""
+    )
+
+    // ---------- Compose 视图状态 ----------
+
+    private var packageValue by mutableStateOf("")
+    private var sha1Value by mutableStateOf("")
+    private var amapKey by mutableStateOf("")
+    private var amapSecurity by mutableStateOf("")
+    private var privacyAgreed by mutableStateOf(false)
+    private var launcherHidden by mutableStateOf(false)
+
+    private var envTestRunningState by mutableStateOf(false)
+    private var envTestFields by mutableStateOf(
+        listOf(
+            EnvTestField("位置"), EnvTestField("基站"), EnvTestField("蓝牙"),
+            EnvTestField("WiFi"), EnvTestField("传感器"), EnvTestField("GNSS")
+        )
+    )
 
     // ---- 环境实时测试状态 ----
     private val envTestRunning = AtomicBoolean(false)
@@ -188,74 +218,337 @@ class SettingsFragment : Fragment() {
         if (result.values.all { it }) {
             startEnvTest()
         } else {
-            envTestStartButton.isEnabled = true
+            envTestRunningState = false
             Toast.makeText(requireContext(), R.string.settings_env_test_perm, Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        val root = inflater.inflate(R.layout.fragment_settings, container, false)
-        packageValue = root.findViewById(R.id.packageValue)
-        sha1Value = root.findViewById(R.id.sha1Value)
-        amapKeyInput = root.findViewById(R.id.amapKeyInput)
-        amapSecurityInput = root.findViewById(R.id.amapSecurityInput)
-        privacyAgreeCheck = root.findViewById(R.id.privacyAgreeCheck)
-        launcherHideCheck = root.findViewById(R.id.launcherHideCheck)
-
-        envTestStartButton = root.findViewById(R.id.envTestStartButton)
-        envTestStopButton = root.findViewById(R.id.envTestStopButton)
-        envTestLocationValue = root.findViewById(R.id.envTestLocationValue)
-        envTestLocationStatus = root.findViewById(R.id.envTestLocationStatus)
-        envTestCellValue = root.findViewById(R.id.envTestCellValue)
-        envTestCellStatus = root.findViewById(R.id.envTestCellStatus)
-        envTestBleValue = root.findViewById(R.id.envTestBleValue)
-        envTestBleStatus = root.findViewById(R.id.envTestBleStatus)
-        envTestWifiValue = root.findViewById(R.id.envTestWifiValue)
-        envTestWifiStatus = root.findViewById(R.id.envTestWifiStatus)
-        envTestSensorValue = root.findViewById(R.id.envTestSensorValue)
-        envTestSensorStatus = root.findViewById(R.id.envTestSensorStatus)
-        envTestGnssValue = root.findViewById(R.id.envTestGnssValue)
-        envTestGnssStatus = root.findViewById(R.id.envTestGnssStatus)
-
         val context = requireContext()
-        packageValue.text = context.packageName
-        sha1Value.text = signingSha1(context) ?: getString(R.string.settings_sha1_unknown)
-
-        root.findViewById<Button>(R.id.copyPackageButton).setOnClickListener {
-            copyText(context.packageName)
-        }
-        root.findViewById<Button>(R.id.copySha1Button).setOnClickListener {
-            sha1Value.text?.toString()?.let { copyText(it) }
-        }
-        privacyAgreeCheck.setOnCheckedChangeListener { _, checked ->
-            AmapPrivacyManager.setAgreed(requireContext(), checked)
-        }
-        root.findViewById<TextView>(R.id.privacyPolicyLink).setOnClickListener {
-            try {
-                val intent = android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(AMAP_PRIVACY_URL)
-                )
-                startActivity(intent)
-            } catch (t: Throwable) {
-                Toast.makeText(requireContext(), R.string.settings_no_browser, Toast.LENGTH_SHORT).show()
-            }
-        }
-        root.findViewById<Button>(R.id.saveAmapButton).setOnClickListener { saveAmapConfig() }
-
-        // 桌面图标隐藏：切换时禁用/启用 Launcher activity-alias，主 Activity 保持可用（LSPosed 入口）
+        packageValue = context.packageName
+        sha1Value = signingSha1(context) ?: getString(R.string.settings_sha1_unknown)
+        val idle = getString(R.string.settings_env_test_idle)
+        envTestFields = listOf(
+            EnvTestField("位置", idle, value = idle),
+            EnvTestField("基站", idle, value = idle),
+            EnvTestField("蓝牙", idle, value = idle),
+            EnvTestField("WiFi", idle, value = idle),
+            EnvTestField("传感器", idle, value = idle),
+            EnvTestField("GNSS", idle, value = idle)
+        )
+        loadAmapConfig()
         initLauncherHideToggle()
 
-        envTestStartButton.setOnClickListener { onEnvTestStart() }
-        envTestStopButton.setOnClickListener { stopEnvTest() }
-
-        loadAmapConfig()
-        return root
+        return androidx.compose.ui.platform.ComposeView(context).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                SettingsScreen(this@SettingsFragment)
+            }
+        }
     }
 
     override fun onDestroyView() {
         stopEnvTest()
         super.onDestroyView()
+    }
+
+    // ---------- Compose UI ----------
+
+    @Composable
+    private fun SettingsScreen(fragment: SettingsFragment) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                BasicText(
+                    getString(R.string.settings_title),
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                )
+                BasicText(
+                    getString(R.string.settings_subtitle),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+
+                // 应用标识卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_identity_title))
+                        SectionDesc(getString(R.string.settings_identity_desc))
+                        SectionLabel(getString(R.string.settings_package_label))
+                        Row(
+                            Modifier
+                                .padding(top = 4.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                packageValue,
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                            )
+                            GlassButton(
+                                onClick = { fragment.copyText(packageValue) },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(start = 8.dp),
+                                isInteractive = false,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_copy),
+                                    style = TextStyle(color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        SectionLabel(getString(R.string.settings_sha1_label))
+                        Row(
+                            Modifier
+                                .padding(top = 4.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                sha1Value,
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                            )
+                            GlassButton(
+                                onClick = { fragment.copyText(sha1Value) },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(start = 8.dp),
+                                isInteractive = false,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_copy),
+                                    style = TextStyle(color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 高德地图 Key 卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_amap_title))
+                        SectionDesc(getString(R.string.settings_amap_desc))
+                        SectionLabel(getString(R.string.settings_amap_key_label))
+                        GlassField(
+                            value = amapKey,
+                            onValueChange = { amapKey = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.settings_amap_key_hint)
+                        )
+                        SectionLabel(getString(R.string.settings_amap_security_label))
+                        GlassField(
+                            value = amapSecurity,
+                            onValueChange = { amapSecurity = it },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            placeholder = getString(R.string.settings_amap_security_hint)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 10.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlassCheckbox(
+                                checked = privacyAgreed,
+                                onCheckedChange = { checked ->
+                                    privacyAgreed = checked
+                                    AmapPrivacyManager.setAgreed(requireContext(), checked)
+                                }
+                            )
+                            BasicText(
+                                getString(R.string.settings_amap_privacy),
+                                Modifier
+                                    .padding(start = 8.dp)
+                                    .weight(1f),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 15.sp)
+                            )
+                        }
+                        BasicText(
+                            getString(R.string.settings_amap_privacy_link),
+                            Modifier
+                                .padding(start = 30.dp, top = 2.dp)
+                                .fillMaxWidth(),
+                            style = TextStyle(color = colors.accent, fontSize = 13.sp)
+                        )
+                        GlassButton(
+                            onClick = { fragment.saveAmapConfig() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                getString(R.string.settings_amap_save),
+                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // 桌面图标卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_launcher_title))
+                        SectionDesc(getString(R.string.settings_launcher_desc))
+                        Row(
+                            Modifier
+                                .padding(top = 10.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlassCheckbox(
+                                checked = launcherHidden,
+                                onCheckedChange = { checked ->
+                                    launcherHidden = checked
+                                    fragment.applyLauncherAlias(checked, silent = false)
+                                }
+                            )
+                            BasicText(
+                                getString(R.string.settings_launcher_hide),
+                                Modifier
+                                    .padding(start = 8.dp)
+                                    .weight(1f),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 15.sp)
+                            )
+                        }
+                    }
+                }
+
+                // 环境实时测试卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_env_test_title))
+                        SectionDesc(getString(R.string.settings_env_test_desc))
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.onEnvTestStart() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_env_test_start),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { fragment.stopEnvTest() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                isInteractive = envTestRunningState,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_env_test_stop),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        envTestFields.forEach { field ->
+                            Column(
+                                Modifier.padding(top = 12.dp).fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    BasicText(
+                                        field.title,
+                                        Modifier.weight(1f),
+                                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                    )
+                                    BasicText(
+                                        field.status,
+                                        style = TextStyle(
+                                            color = if (field.statusColor.isSpecified) field.statusColor else colors.textTertiary,
+                                            fontSize = 13.sp
+                                        )
+                                    )
+                                }
+                                BasicText(
+                                    field.value,
+                                    Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                    style = TextStyle(
+                                        color = colors.textSecondary,
+                                        fontSize = 13.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SectionTitle(text: String) {
+        val colors = glassColors()
+        BasicText(
+            text,
+            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        )
+    }
+
+    @Composable
+    private fun SectionDesc(text: String) {
+        val colors = glassColors()
+        BasicText(
+            text,
+            Modifier.padding(top = 4.dp),
+            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+        )
+    }
+
+    @Composable
+    private fun SectionLabel(text: String) {
+        val colors = glassColors()
+        BasicText(
+            text,
+            Modifier.padding(top = 12.dp),
+            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+        )
     }
 
     // ---------- 环境实时测试（普通 App 视角，不 Suspend） ----------
@@ -304,14 +597,9 @@ class SettingsFragment : Fragment() {
         bleScanner = adapter?.bluetoothLeScanner
 
         envTestRunning.set(true)
-        envTestStartButton.isEnabled = false
-        envTestStopButton.isEnabled = true
-        envTestLocationValue.text = getString(R.string.settings_env_test_running)
-        envTestCellValue.text = getString(R.string.settings_env_test_running)
-        envTestBleValue.text = getString(R.string.settings_env_test_running)
-        envTestWifiValue.text = getString(R.string.settings_env_test_running)
-        envTestSensorValue.text = getString(R.string.settings_env_test_running)
-        envTestGnssValue.text = getString(R.string.settings_env_test_running)
+        envTestRunningState = true
+        val running = getString(R.string.settings_env_test_running)
+        envTestFields = envTestFields.map { it.copy(value = running) }
         synchronized(bleFound) { bleFound.clear() }
         lastStepCount = -1L
         lastStepTickMs = 0L
@@ -407,6 +695,8 @@ class SettingsFragment : Fragment() {
         } catch (_: Throwable) {
         }
 
+        val updates = mutableMapOf<String, Pair<String, Verdict?>>()
+
         try {
             val loc = readLastLocation()
             lastLocation = loc
@@ -416,10 +706,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", locationText)
             })
-            requireActivity().runOnUiThread {
-                envTestLocationValue.text = locationText
-                renderVerdict(envTestLocationStatus, v)
-            }
+            updates["位置"] = locationText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test location read failed", t)
         }
@@ -431,10 +718,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", cellText)
             })
-            requireActivity().runOnUiThread {
-                envTestCellValue.text = cellText
-                renderVerdict(envTestCellStatus, v)
-            }
+            updates["基站"] = cellText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test cell read failed", t)
         }
@@ -445,10 +729,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", bleText)
             })
-            requireActivity().runOnUiThread {
-                envTestBleValue.text = bleText
-                renderVerdict(envTestBleStatus, v)
-            }
+            updates["蓝牙"] = bleText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test ble read failed", t)
         }
@@ -460,10 +741,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", wifiText)
             })
-            requireActivity().runOnUiThread {
-                envTestWifiValue.text = wifiText
-                renderVerdict(envTestWifiStatus, v)
-            }
+            updates["WiFi"] = wifiText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test wifi read failed", t)
         }
@@ -474,10 +752,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", sensorText)
             })
-            requireActivity().runOnUiThread {
-                envTestSensorValue.text = sensorText
-                renderVerdict(envTestSensorStatus, v)
-            }
+            updates["传感器"] = sensorText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test sensor read failed", t)
         }
@@ -488,10 +763,7 @@ class SettingsFragment : Fragment() {
                 put("verdict", v.name)
                 put("data", gnssText)
             })
-            requireActivity().runOnUiThread {
-                envTestGnssValue.text = gnssText
-                renderVerdict(envTestGnssStatus, v)
-            }
+            updates["GNSS"] = gnssText to v
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test gnss read failed", t)
         }
@@ -500,27 +772,33 @@ class SettingsFragment : Fragment() {
             io.github.fairyxh.VirtualEnv.app.ApiClient.postTestReport(report)
         } catch (_: Throwable) {
         }
+
+        requireActivity().runOnUiThread {
+            if (updates.isNotEmpty() && isAdded) {
+                envTestFields = envTestFields.map { field ->
+                    updates[field.title]?.let { (value, v) ->
+                        field.copy(
+                            value = value,
+                            status = when (v) {
+                                Verdict.PASS -> getString(R.string.settings_env_test_pass)
+                                Verdict.FAIL -> getString(R.string.settings_env_test_fail)
+                                Verdict.NOT_ENABLED -> getString(R.string.settings_env_test_not_enabled)
+                                null -> field.status
+                            },
+                            statusColor = when (v) {
+                                Verdict.PASS -> Color(0xFF34C759)
+                                Verdict.FAIL -> Color(0xFFFF3B30)
+                                Verdict.NOT_ENABLED -> Color.Unspecified
+                                null -> field.statusColor
+                            }
+                        )
+                    } ?: field
+                }
+            }
+        }
     }
 
     // ---------- 判定 ----------
-
-    private enum class Verdict { PASS, FAIL, NOT_ENABLED }
-
-    private fun renderVerdict(view: TextView, v: Verdict?) {
-        if (v == null) return
-        val color = when (v) {
-            Verdict.PASS -> ContextCompat.getColor(requireContext(), R.color.success)
-            Verdict.FAIL -> ContextCompat.getColor(requireContext(), R.color.danger)
-            Verdict.NOT_ENABLED -> ContextCompat.getColor(requireContext(), R.color.text_tertiary)
-        }
-        val text = when (v) {
-            Verdict.PASS -> getString(R.string.settings_env_test_pass)
-            Verdict.FAIL -> getString(R.string.settings_env_test_fail)
-            Verdict.NOT_ENABLED -> getString(R.string.settings_env_test_not_enabled)
-        }
-        view.text = text
-        view.setTextColor(color)
-    }
 
     private fun envEnabled(type: String): Boolean {
         val env = expectEnv ?: return false
@@ -859,32 +1137,26 @@ class SettingsFragment : Fragment() {
             }
         } catch (_: Throwable) {
         }
-        if (isAdded) {
-            envTestStartButton.isEnabled = true
-            envTestStopButton.isEnabled = false
-        }
+        envTestRunningState = false
         ZLog.i(TAG_SCOPE, "env test stopped")
     }
 
     private fun loadAmapConfig() {
         val prefs = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        amapKeyInput.setText(prefs.getString(KEY_AMAP_KEY, ""))
-        amapSecurityInput.setText(prefs.getString(KEY_AMAP_SECURITY, ""))
-        privacyAgreeCheck.isChecked = AmapPrivacyManager.isAgreed(requireContext())
+        amapKey = prefs.getString(KEY_AMAP_KEY, "") ?: ""
+        amapSecurity = prefs.getString(KEY_AMAP_SECURITY, "") ?: ""
+        privacyAgreed = AmapPrivacyManager.isAgreed(requireContext())
     }
 
     // ---------- 桌面图标隐藏 ----------
 
-    /** 初始化“隐藏桌面图标”开关：按持久化状态同步 alias 并使控件绑定切换动作。 */
+    /** 初始化“隐藏桌面图标”开关：按持久化状态同步 alias。 */
     private fun initLauncherHideToggle() {
         val prefs = requireContext().getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
         val hidden = prefs.getBoolean(KEY_LAUNCHER_HIDDEN, false)
-        launcherHideCheck.isChecked = hidden
+        launcherHidden = hidden
         // 确保 alias 与持久化状态一致（升级/异常后自愈）
         applyLauncherAlias(hidden, silent = true)
-        launcherHideCheck.setOnCheckedChangeListener { _, checked ->
-            applyLauncherAlias(checked, silent = false)
-        }
     }
 
     private fun applyLauncherAlias(hidden: Boolean, silent: Boolean) {
@@ -918,19 +1190,19 @@ class SettingsFragment : Fragment() {
     }
 
     private fun saveAmapConfig() {
-        val key = amapKeyInput.text.toString().trim()
+        val key = amapKey.trim()
         if (key.isEmpty()) {
             Toast.makeText(requireContext(), R.string.settings_amap_key_empty, Toast.LENGTH_SHORT).show()
             return
         }
-        if (!privacyAgreeCheck.isChecked) {
+        if (!privacyAgreed) {
             Toast.makeText(requireContext(), R.string.settings_amap_privacy_required, Toast.LENGTH_LONG).show()
             return
         }
         val prefs = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(KEY_AMAP_KEY, key)
-            .putString(KEY_AMAP_SECURITY, amapSecurityInput.text.toString().trim())
+            .putString(KEY_AMAP_SECURITY, amapSecurity.trim())
             .apply()
         ZLog.i(TAG_SCOPE, "amap config saved")
         Toast.makeText(requireContext(), R.string.settings_amap_saved, Toast.LENGTH_SHORT).show()
