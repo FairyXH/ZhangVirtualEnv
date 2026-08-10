@@ -1,16 +1,39 @@
 package io.github.fairyxh.VirtualEnv.app.ui
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.Gravity
-import android.view.View
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -20,8 +43,10 @@ import java.util.concurrent.Executors
  * 点击任意帧切换查看该帧保存的全部原始数据（各信息 JSON），带返回按钮。
  *
  * 满足需求：已保存采集详情可查看具体哪个帧保存了哪些信息的原始数据/详细信息。
+ *
+ * 视图层已迁移到 Compose Liquid Glass，业务逻辑不变。
  */
-class RecordingDetailActivity : Activity() {
+class RecordingDetailActivity : ComponentActivity() {
 
     companion object {
         private const val TAG_SCOPE = "UI"
@@ -39,45 +64,33 @@ class RecordingDetailActivity : Activity() {
 
     private val executor = Executors.newSingleThreadExecutor()
 
-    private lateinit var detailTitle: TextView
-    private lateinit var detailStatus: TextView
-    private lateinit var listScroll: ScrollView
-    private lateinit var listContainer: LinearLayout
-    private lateinit var frameDetailContainer: LinearLayout
-    private lateinit var frameTitle: TextView
-    private lateinit var frameRawText: TextView
+    private var detailTitle by mutableStateOf("")
+    private var detailStatus by mutableStateOf("")
+    private var frames = mutableStateListOf<JSONObject>()
+    private var firstTs = 0L
+    private var showingFrame by mutableStateOf<JSONObject?>(null)
 
     private var recordingId = -1L
     private var recordingName = ""
-    private var frames: List<JSONObject> = emptyList()
-    private var firstTs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_recording_detail)
 
         recordingId = intent.getLongExtra(EXTRA_ID, -1L)
         recordingName = intent.getStringExtra(EXTRA_NAME) ?: ""
 
-        detailTitle = findViewById(R.id.detailTitle)
-        detailStatus = findViewById(R.id.detailStatus)
-        listScroll = findViewById(R.id.listScroll)
-        listContainer = findViewById(R.id.listContainer)
-        frameDetailContainer = findViewById(R.id.frameDetailContainer)
-        frameTitle = findViewById(R.id.frameTitle)
-        frameRawText = findViewById(R.id.frameRawText)
-
-        detailTitle.text = getString(R.string.recording_detail_title) +
+        detailTitle = getString(R.string.recording_detail_title) +
             (if (recordingName.isBlank()) "" else " · $recordingName")
 
-        findViewById<TextView>(R.id.backButton).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.frameBackButton).setOnClickListener { showList() }
-
         if (recordingId <= 0) {
-            detailStatus.text = getString(R.string.recording_detail_empty)
-            return
+            detailStatus = getString(R.string.recording_detail_empty)
+        } else {
+            loadFrames()
         }
-        loadFrames()
+
+        setContent {
+            DetailScreen(this)
+        }
     }
 
     override fun onDestroy() {
@@ -85,8 +98,198 @@ class RecordingDetailActivity : Activity() {
         super.onDestroy()
     }
 
+    // ---------- Compose UI ----------
+
+    @Composable
+    private fun DetailScreen(activity: RecordingDetailActivity) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlassPill(
+                        onClick = {
+                            if (showingFrame != null) {
+                                showingFrame = null
+                            } else {
+                                activity.finish()
+                            }
+                        },
+                        backdrop = backdrop,
+                        selected = false,
+                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                        height = 36.dp
+                    ) {
+                        BasicText(
+                            getString(if (showingFrame != null) R.string.recording_detail_back_to_list else R.string.env_detail_back),
+                            Modifier.padding(horizontal = 16.dp),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                        )
+                    }
+                    BasicText(
+                        detailTitle,
+                        Modifier.padding(start = 12.dp).weight(1f),
+                        style = TextStyle(
+                            color = colors.textPrimary,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
+                        )
+                    )
+                }
+
+                val frame = showingFrame
+                if (frame == null) {
+                    // 列表视图
+                    GlassCard(
+                        backdrop = backdrop,
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            BasicText(
+                                detailStatus,
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                            if (frames.isEmpty()) {
+                                BasicText(
+                                    getString(R.string.recording_detail_empty),
+                                    Modifier
+                                        .padding(top = 16.dp, bottom = 16.dp)
+                                        .fillMaxWidth(),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
+                                )
+                            } else {
+                                BasicText(
+                                    getString(R.string.recording_detail_click_hint),
+                                    Modifier.padding(top = 10.dp),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                                )
+                                frames.forEachIndexed { index, item ->
+                                    FrameCard(
+                                        frame = item,
+                                        index = index,
+                                        firstTs = firstTs,
+                                        backdrop = backdrop,
+                                        onClick = { showingFrame = item }
+                                    )
+                                    if (index < frames.size - 1) {
+                                        Row(
+                                            Modifier
+                                                .padding(horizontal = 8.dp)
+                                                .fillMaxWidth(),
+                                        ) {
+                                            BasicText(
+                                                "",
+                                                Modifier
+                                                    .weight(1f)
+                                                    .padding(top = 0.dp),
+                                                style = TextStyle(fontSize = 1.sp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 单帧详情视图
+                    GlassCard(
+                        backdrop = backdrop,
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            val seq = frame.optInt("seq", 0)
+                            val ts = frame.optLong("timestampMs", 0L)
+                            val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
+                            BasicText(
+                                getString(
+                                    R.string.recording_detail_frame,
+                                    seq,
+                                    String.format("%06.1fs", offsetSec)
+                                ),
+                                style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                            val data = frame.optJSONObject("data")
+                            BasicText(
+                                if (data != null) data.toString(2) else getString(R.string.recording_detail_empty),
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                style = TextStyle(
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun FrameCard(
+        frame: JSONObject,
+        index: Int,
+        firstTs: Long,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onClick: () -> Unit
+    ) {
+        val colors = glassColors()
+        val ts = frame.optLong("timestampMs", 0L)
+        val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
+        val seq = frame.optInt("seq", index + 1)
+
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
+            containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+            cornerRadius = 14.dp,
+            contentPadding = 12.dp
+        ) {
+            Column {
+                BasicText(
+                    String.format(
+                        "#%d  [+%06.1fs]  %s",
+                        seq,
+                        offsetSec,
+                        formatTime(ts)
+                    ),
+                    style = TextStyle(color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                )
+                val data = frame.optJSONObject("data")
+                val summary = buildFrameSummary(data ?: JSONObject())
+                if (summary.isNotEmpty()) {
+                    BasicText(
+                        summary,
+                        Modifier.padding(top = 4.dp),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                    )
+                }
+            }
+        }
+    }
+
+    // ---------- 数据 ----------
+
     private fun loadFrames() {
-        detailStatus.text = getString(R.string.recording_detail_loading)
+        detailStatus = getString(R.string.recording_detail_loading)
         executor.execute {
             val result = ApiClient.getRecordingFrames(recordingId)
             val arr = result.data?.optJSONArray("frames")
@@ -97,98 +300,17 @@ class RecordingDetailActivity : Activity() {
                 }
             }
             runOnUiThread {
-                frames = loaded
+                frames.clear()
+                frames.addAll(loaded)
                 firstTs = loaded.firstOrNull()?.optLong("timestampMs", 0L) ?: 0L
                 val lastTs = loaded.lastOrNull()?.optLong("timestampMs", 0L) ?: firstTs
-                detailStatus.text = getString(
+                detailStatus = getString(
                     R.string.home_saved_meta_recording,
                     formatDuration(((lastTs - firstTs).coerceAtLeast(0L)) / 1000L),
                     loaded.size
                 )
-                renderList()
             }
         }
-    }
-
-    private fun renderList() {
-        listContainer.removeAllViews()
-        if (frames.isEmpty()) {
-            val empty = TextView(this).apply {
-                text = getString(R.string.recording_detail_empty)
-                setTextColor(getColor(R.color.text_tertiary))
-                textSize = 13f
-                setPadding(0, dp(24), 0, dp(24))
-                gravity = Gravity.CENTER
-            }
-            listContainer.addView(empty)
-            return
-        }
-        // 帧间分隔符提示
-        val hint = TextView(this).apply {
-            text = getString(R.string.recording_detail_click_hint)
-            setTextColor(getColor(R.color.text_tertiary))
-            textSize = 12f
-            setPadding(0, 0, 0, dp(8))
-        }
-        listContainer.addView(hint)
-
-        frames.forEachIndexed { index, frame ->
-            // 帧卡片：点击查看该帧原始数据
-            val card = buildFrameCard(frame, index)
-            listContainer.addView(card)
-            // 帧与帧之间分隔符
-            if (index < frames.size - 1) {
-                val divider = View(this).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        1
-                    )
-                    setBackgroundColor(getColor(R.color.separator))
-                }
-                listContainer.addView(divider)
-            }
-        }
-    }
-
-    /** 构建单帧卡片：帧号 / 时间偏移 / 时间 + 各信息摘要。 */
-    private fun buildFrameCard(frame: JSONObject, index: Int): LinearLayout {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = getDrawable(R.drawable.bg_field)
-            isClickable = true
-            isFocusable = true
-        }
-        val ts = frame.optLong("timestampMs", 0L)
-        val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
-        val seq = frame.optInt("seq", index + 1)
-
-        val head = TextView(this).apply {
-            text = String.format(
-                "#%d  [+%06.1fs]  %s",
-                seq,
-                offsetSec,
-                formatTime(ts)
-            )
-            setTextColor(getColor(R.color.accent))
-            textSize = 12f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }
-        card.addView(head)
-
-        val data = frame.optJSONObject("data")
-        val summary = buildFrameSummary(data ?: JSONObject())
-        if (summary.isNotEmpty()) {
-            val body = TextView(this).apply {
-                text = summary
-                setTextColor(getColor(R.color.text_secondary))
-                textSize = 12f
-                setPadding(0, dp(4), 0, 0)
-            }
-            card.addView(body)
-        }
-        card.setOnClickListener { showFrameDetail(frame) }
-        return card
     }
 
     /** 帧摘要：位置 / 基站 / WiFi / 蓝牙 / GNSS / 传感器 数量与要点。 */
@@ -234,29 +356,6 @@ class RecordingDetailActivity : Activity() {
         }
         return sb.toString().trimEnd('\n')
     }
-
-    /** 切换显示单帧完整原始数据（各信息 JSON）。 */
-    private fun showFrameDetail(frame: JSONObject) {
-        val seq = frame.optInt("seq", 0)
-        val ts = frame.optLong("timestampMs", 0L)
-        val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
-        frameTitle.text = String.format(
-            getString(R.string.recording_detail_frame),
-            seq,
-            String.format("%06.1fs", offsetSec)
-        )
-        val data = frame.optJSONObject("data")
-        frameRawText.text = if (data != null) data.toString(2) else getString(R.string.recording_detail_empty)
-        listScroll.visibility = View.GONE
-        frameDetailContainer.visibility = View.VISIBLE
-    }
-
-    private fun showList() {
-        frameDetailContainer.visibility = View.GONE
-        listScroll.visibility = View.VISIBLE
-    }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun formatTime(millis: Long): String {
         if (millis <= 0) return ""
