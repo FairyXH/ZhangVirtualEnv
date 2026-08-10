@@ -64,6 +64,8 @@ class SettingsFragment : Fragment() {
         private const val PREFS = "amap_config"
         private const val KEY_AMAP_KEY = "amap_key"
         private const val KEY_AMAP_SECURITY = "amap_security_key"
+        private const val PREFS_UI = "zve_ui"
+        private const val KEY_LAUNCHER_HIDDEN = "launcher_hidden"
         private const val REFRESH_MS = 1000L
         private const val BLE_RESULTS_LIMIT = 20
 
@@ -75,6 +77,7 @@ class SettingsFragment : Fragment() {
     private lateinit var amapKeyInput: EditText
     private lateinit var amapSecurityInput: EditText
     private lateinit var privacyAgreeCheck: CheckBox
+    private lateinit var launcherHideCheck: CheckBox
 
     private lateinit var envTestStartButton: Button
     private lateinit var envTestStopButton: Button
@@ -197,6 +200,7 @@ class SettingsFragment : Fragment() {
         amapKeyInput = root.findViewById(R.id.amapKeyInput)
         amapSecurityInput = root.findViewById(R.id.amapSecurityInput)
         privacyAgreeCheck = root.findViewById(R.id.privacyAgreeCheck)
+        launcherHideCheck = root.findViewById(R.id.launcherHideCheck)
 
         envTestStartButton = root.findViewById(R.id.envTestStartButton)
         envTestStopButton = root.findViewById(R.id.envTestStopButton)
@@ -238,6 +242,9 @@ class SettingsFragment : Fragment() {
             }
         }
         root.findViewById<Button>(R.id.saveAmapButton).setOnClickListener { saveAmapConfig() }
+
+        // 桌面图标隐藏：切换时禁用/启用 Launcher activity-alias，主 Activity 保持可用（LSPosed 入口）
+        initLauncherHideToggle()
 
         envTestStartButton.setOnClickListener { onEnvTestStart() }
         envTestStopButton.setOnClickListener { stopEnvTest() }
@@ -864,6 +871,50 @@ class SettingsFragment : Fragment() {
         amapKeyInput.setText(prefs.getString(KEY_AMAP_KEY, ""))
         amapSecurityInput.setText(prefs.getString(KEY_AMAP_SECURITY, ""))
         privacyAgreeCheck.isChecked = AmapPrivacyManager.isAgreed(requireContext())
+    }
+
+    // ---------- 桌面图标隐藏 ----------
+
+    /** 初始化“隐藏桌面图标”开关：按持久化状态同步 alias 并使控件绑定切换动作。 */
+    private fun initLauncherHideToggle() {
+        val prefs = requireContext().getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        val hidden = prefs.getBoolean(KEY_LAUNCHER_HIDDEN, false)
+        launcherHideCheck.isChecked = hidden
+        // 确保 alias 与持久化状态一致（升级/异常后自愈）
+        applyLauncherAlias(hidden, silent = true)
+        launcherHideCheck.setOnCheckedChangeListener { _, checked ->
+            applyLauncherAlias(checked, silent = false)
+        }
+    }
+
+    private fun applyLauncherAlias(hidden: Boolean, silent: Boolean) {
+        val context = requireContext()
+        val alias = android.content.ComponentName(context.packageName, "${context.packageName}.Launcher")
+        try {
+            context.packageManager.setComponentEnabledSetting(
+                alias,
+                if (hidden) {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                },
+                PackageManager.DONT_KILL_APP
+            )
+            context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_LAUNCHER_HIDDEN, hidden)
+                .apply()
+            ZLog.i(TAG_SCOPE, "launcher alias ${if (hidden) "hidden" else "shown"}")
+            if (!silent && isAdded) {
+                Toast.makeText(
+                    context,
+                    if (hidden) R.string.settings_launcher_toast else R.string.settings_launcher_show_toast,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "launcher alias set failed", t)
+        }
     }
 
     private fun saveAmapConfig() {

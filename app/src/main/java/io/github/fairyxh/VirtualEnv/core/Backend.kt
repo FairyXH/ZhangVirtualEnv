@@ -112,6 +112,17 @@ class Backend private constructor(private val dataDir: File) {
         profileManager = ProfileManager(dataDir)
         recordingEngine = RecordingEngine(databaseManager, this)
 
+        // 启动兜底：system_server 重启/崩溃后，把未正常结束的录像按实际帧数据收尾，
+        // 保留已录制内容（时长/帧数修正并标记中断）。
+        try {
+            val recovered = recordingEngine.recoverInterruptedRecordings()
+            if (recovered > 0) {
+                ZLog.w(TAG_SCOPE, "interrupted recording recovery done: $recovered")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "interrupted recording recovery failed", t)
+        }
+
         // 恢复上次持久化的单点位置与开关
         if (configManager.isLocationEnabled()) {
             val cfg = configManager.load()
@@ -925,6 +936,11 @@ class Backend private constructor(private val dataDir: File) {
 
     fun setRecordingPlaybackSpeed(speed: Float) {
         recordingEngine.setPlaybackSpeed(speed)
+    }
+
+    /** 回放帧间平滑过渡开关（插值+抖动）。 */
+    fun setRecordingPlaybackSmooth(enabled: Boolean) {
+        recordingEngine.setSmoothLocation(enabled)
     }
 
     fun recordingStatusJson(): org.json.JSONObject {

@@ -86,6 +86,17 @@
     <string name="home_playback_paused_toast">回放已暂停</string>
     <string name="home_playback_resumed_toast">回放已继续</string>
 
+    <!-- 录像帧详情 -->
+    <string name="recording_detail_title">录像帧详情</string>
+    <string name="recording_detail_back">返回</string>
+    <string name="recording_detail_back_to_list">返回帧列表</string>
+    <string name="recording_detail_loading">加载中…</string>
+    <string name="recording_detail_empty">暂无帧数据</string>
+    <string name="recording_detail_frame">第 %1$d 帧 · +%2$s</string>
+    <string name="recording_detail_raw">该帧保存的各信息原始数据（展开 JSON）</string>
+    <string name="recording_detail_click_hint">点击帧查看该帧各信息的原始数据</string>
+    <string name="recording_detail_interrupted_badge">[中断恢复]</string>
+
     <!-- Location -->
     <string name="location_title">位置模拟</string>
     <string name="location_subtitle">单点虚拟定位 · 经 Backend 统一管理</string>
@@ -144,6 +155,13 @@
     <string name="settings_amap_security_hint">可选：Key 的后半段安全码</string>
     <string name="settings_amap_save">保存 Key</string>
     <string name="settings_amap_saved">已保存，重启应用后生效</string>
+
+    <!-- 桌面图标隐藏 -->
+    <string name="settings_launcher_title">桌面图标</string>
+    <string name="settings_launcher_desc">启用后隐藏启动器图标，仅可从 LSPosed 模块界面打开本应用</string>
+    <string name="settings_launcher_hide">隐藏桌面图标</string>
+    <string name="settings_launcher_toast">桌面图标已隐藏，可通过 LSPosed 模块界面重新打开设置</string>
+    <string name="settings_launcher_show_toast">桌面图标已恢复显示</string>
     <string name="settings_amap_key_empty">请输入 API Key</string>
     <string name="settings_env_test_title">环境实时测试</string>
     <string name="settings_env_test_desc">不 Suspend：以普通安卓 App 的 API 持续读取位置、基站、蓝牙、WiFi、传感器、GNSS，结合虚拟配置判定是否符合预期，点击结束停止</string>

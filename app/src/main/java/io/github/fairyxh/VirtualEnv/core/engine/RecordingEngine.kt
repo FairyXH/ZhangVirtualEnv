@@ -70,6 +70,14 @@ class RecordingEngine(
     private var lastAppliedIdx = -1
     private val tickerRunning = AtomicBoolean(false)
 
+    /** 回放帧间平滑过渡：位置按时间插值生成中间段并叠加小随机抖动。 */
+    @Volatile
+    private var smoothLocation = true
+
+    /** 每帧的时间偏移（相对首帧）与位置项（provider 结构第一个有效坐标）；loadRecording 时重建。 */
+    private var frameOffsets: List<Long> = emptyList()
+    private var frameLocations: List<JSONObject?> = emptyList()
+
     private val tickerThread = HandlerThread("ZVE-Replay").apply { start() }
     private val handler = Handler(tickerThread.looper)
 
@@ -153,6 +161,45 @@ class RecordingEngine(
 
     fun isRecording(): Boolean = activeRecordingId > 0
 
+    /**
+     * 启动兜底：system_server 重启/崩溃后，把未正常 finalize 的录像按实际帧数据收尾
+     * （计算时长与帧数并标记录像为中断），保证已录制内容可被查看/回放/删除。
+     * 由 Backend.start() 在模块加载时调用一次。
+     */
+    fun recoverInterruptedRecordings(): Int {
+        val ids = databaseManager.queryUnfinalizedRecordingIds()
+        if (ids.isEmpty()) return 0
+        var recovered = 0
+        for (id in ids) {
+            try {
+                val range = databaseManager.recordingFrameRange(id)
+                val count = range?.optInt("count", 0) ?: 0
+                val duration = if (range != null) {
+                    (range.optLong("lastTs") - range.optLong("firstTs")).coerceAtLeast(0L)
+                } else 0L
+                databaseManager.updateRecordingMeta(id, duration, count)
+                databaseManager.markRecordingInterrupted(id)
+                recovered++
+                ZLog.w(
+                    TAG_SCOPE,
+                    "recording recovered (interrupted) id=$id frames=$count duration=$duration"
+                )
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "recover recording id=$id failed", t)
+            }
+        }
+        ZLog.i(TAG_SCOPE, "recovered $recovered interrupted recording(s)")
+        return recovered
+    }
+
+    /** 回放帧间平滑过渡开关（默认开）。 */
+    fun setSmoothLocation(enabled: Boolean) {
+        smoothLocation = enabled
+        ZLog.i(TAG_SCOPE, "playback smoothLocation=$enabled")
+    }
+
+    fun isSmoothLocation(): Boolean = smoothLocation
+
     // ---------- 录像查询 ----------
 
     fun listRecordings(): List<JSONObject> = databaseManager.queryRecordings()
@@ -231,6 +278,8 @@ class RecordingEngine(
         playlist = emptyList()
         frames = emptyList()
         lastAppliedIdx = -1
+        frameOffsets = emptyList()
+        frameLocations = emptyList()
     }
 
     private fun loadRecording(id: Long): Boolean {
@@ -243,11 +292,27 @@ class RecordingEngine(
             playStartWall = SystemClock.elapsedRealtime()
             pausedElapsed = 0L
             lastAppliedIdx = -1
+            // 预解析每帧位置项（平滑插值用，避免每 tick 重复解析 JSON）
+            frameOffsets = loaded.map { (it.optLong("timestampMs", 0L) - firstFrameTs).coerceAtLeast(0L) }
+            frameLocations = loaded.map { frame ->
+                frame.optJSONObject("data")?.optJSONObject("location")?.let { loc ->
+                    val keys = loc.keys()
+                    while (keys.hasNext()) {
+                        val item = loc.optJSONObject(keys.next()) ?: continue
+                        if (!item.optDouble("latitude", Double.NaN).isNaN() &&
+                            !item.optDouble("longitude", Double.NaN).isNaN()
+                        ) {
+                            return@map item
+                        }
+                    }
+                    null
+                }
+            }
         }
         // 立即应用第一帧，使回放开始即有环境
         applyFrame(loaded.first().optJSONObject("data") ?: JSONObject())
         lastAppliedIdx = 0
-        ZLog.i(TAG_SCOPE, "playback load recording id=$id frames=${loaded.size} durationMs=$durationMs")
+        ZLog.i(TAG_SCOPE, "playback load recording id=$id frames=${loaded.size} durationMs=$durationMs smooth=$smoothLocation")
         return true
     }
 
@@ -319,6 +384,47 @@ class RecordingEngine(
             applyFrame(frame.optJSONObject("data") ?: JSONObject())
             lastAppliedIdx = idx
         }
+        // 帧间平滑过渡：当前帧已应用且未到最后一帧时，按时间比例插值位置并叠加随机抖动，
+        // 使定位不跳变（生成中间段）。仅当当前帧与下一帧都有有效坐标时生效。
+        if (smoothLocation && !paused && idx == lastAppliedIdx && idx < frames.size - 1) {
+            interpolateLocation(elapsed, idx)
+        }
+    }
+
+    /** 在当前帧与下一帧之间按时间比例插值位置，附加确定性小随机抖动（约 1~2 米）。 */
+    private fun interpolateLocation(elapsed: Long, idx: Int) {
+        val cur = frameLocations.getOrNull(idx) ?: return
+        val nxt = frameLocations.getOrNull(idx + 1) ?: return
+        val t0 = frameOffsets.getOrNull(idx)?.toDouble() ?: return
+        val t1 = frameOffsets.getOrNull(idx + 1)?.toDouble() ?: return
+        if (t1 <= t0) return
+        val t = ((elapsed - t0) / (t1 - t0)).coerceIn(0.0, 1.0)
+        // 缓动：先快后慢，接近帧点时收敛到帧值，避免帧切换瞬间跳变
+        val eased = t * t * (3.0 - 2.0 * t)
+        val lat0 = cur.optDouble("latitude", Double.NaN)
+        val lon0 = cur.optDouble("longitude", Double.NaN)
+        val lat1 = nxt.optDouble("latitude", Double.NaN)
+        val lon1 = nxt.optDouble("longitude", Double.NaN)
+        if (lat0.isNaN() || lon0.isNaN() || lat1.isNaN() || lon1.isNaN()) return
+        // 确定性伪随机抖动：基于 elapsed 相位，连续 tick 间平滑（幅度约 ±1.3e-5 度 ≈ ±1.5m）
+        val jitter = jitterAt(elapsed)
+        val lat = lat0 + (lat1 - lat0) * eased + jitter
+        val lon = lon0 + (lon1 - lon0) * eased + jitter * 0.9
+        val speed = cur.optDouble("speed", 0.0) + (nxt.optDouble("speed", 0.0) - cur.optDouble("speed", 0.0)) * eased
+        try {
+            backend.setLocationPoint(lat, lon, speed.toFloat(), 0f)
+            backend.setLocationEnabled(true)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "interpolate location failed", t)
+        }
+    }
+
+    /** 确定性平滑抖动：同一 elapsed 相位返回同一值，随相位缓变，避免每 tick 突变。 */
+    private fun jitterAt(elapsed: Long): Double {
+        val phase = elapsed / 200.0
+        // 两个不同频率正弦叠加，幅度约 ±1.3e-5 度
+        val a = Math.sin(phase * 0.73) * 0.5 + Math.sin(phase * 1.31) * 0.5
+        return a * 1.3e-5
     }
 
     private fun findFrameIndex(elapsed: Long): Int {
@@ -418,6 +524,7 @@ class RecordingEngine(
                 put("durationMs", durationMs)
                 put("recording", isRecording())
                 put("recordingId", activeRecordingId)
+                put("smoothLocation", smoothLocation)
                 // 回放同步状态：路线/位置/环境开关与配置（App 展示用）
                 put("routeRunning", backend.routeEngine.isRunning())
                 put("routeEnabled", backend.routeEngine.isEnabled())

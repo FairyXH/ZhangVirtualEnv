@@ -669,13 +669,18 @@ class HomeFragment : Fragment() {
                         val item = arr.optJSONObject(i) ?: continue
                         val id = item.optLong("id", -1L)
                         val durationSec = item.optLong("durationMs", 0L) / 1000L
+                        val interrupted = item.optBoolean("interrupted", false)
                         savedItems.add(
                             SavedItem(
                                 kind = "recording",
                                 id = id,
                                 name = item.optString("name", ""),
                                 remark = "",
-                                meta = getString(
+                                meta = (if (interrupted) {
+                                    getString(R.string.recording_detail_interrupted_badge) + " "
+                                } else {
+                                    ""
+                                }) + getString(
                                     R.string.home_saved_meta_recording,
                                     formatDuration(durationSec),
                                     item.optInt("frameCount", 0)
@@ -774,14 +779,14 @@ class HomeFragment : Fragment() {
 
     // ---------- 采集详情 ----------
 
-    /** 已保存采集详情弹窗：快照显示采集内容摘要，录像按时间轴显示所有帧。 */
+    /** 已保存采集详情：快照弹窗显示采集内容摘要；录像跳转帧详情页（帧列表+原始数据+返回）。 */
     private fun showSavedDetail(item: SavedItem) {
+        if (item.kind == "recording") {
+            RecordingDetailActivity.start(requireContext(), item.id, item.name)
+            return
+        }
         executor.execute {
-            val text = if (item.kind == "snapshot") {
-                buildSnapshotDetail(item.id)
-            } else {
-                buildRecordingDetail(item.id)
-            }
+            val text = buildSnapshotDetail(item.id)
             requireActivity().runOnUiThread {
                 showScrollableDialog(
                     getString(R.string.home_saved_detail_title) + " · " + item.name,
@@ -887,79 +892,6 @@ class HomeFragment : Fragment() {
             }
             else -> sb.append(data.toString(2))
         }
-        return sb.toString()
-    }
-
-    /** 录像详情：按时间轴逐帧展示（seq、时间偏移、位置/基站/WiFi/蓝牙/GNSS/传感器摘要）。 */
-    private fun buildRecordingDetail(id: Long): String {
-        val result = ApiClient.getRecordingFrames(id)
-        val frames = result.data?.optJSONArray("frames")
-            ?: return getString(R.string.home_saved_detail_empty)
-        val sb = StringBuilder()
-        sb.append("帧数：").append(frames.length()).append("\n")
-        val firstTs = frames.optJSONObject(0)?.optLong("timestampMs", 0L) ?: 0L
-        var firstLoc = ""
-        var lastLoc = ""
-        for (i in 0 until frames.length()) {
-            val frame = frames.optJSONObject(i) ?: continue
-            val ts = frame.optLong("timestampMs", 0L)
-            val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
-            val data = frame.optJSONObject("data") ?: continue
-
-            var locText = ""
-            data.optJSONObject("location")?.let { loc ->
-                val keys = loc.keys()
-                while (keys.hasNext()) {
-                    val item = loc.optJSONObject(keys.next()) ?: continue
-                    val lat = item.optDouble("latitude", Double.NaN)
-                    val lon = item.optDouble("longitude", Double.NaN)
-                    if (!lat.isNaN() && !lon.isNaN()) {
-                        val text = String.format("%.6f, %.6f", lat, lon)
-                        if (firstLoc.isEmpty()) firstLoc = text
-                        lastLoc = text
-                        locText = text
-                        break
-                    }
-                }
-            }
-            val cellN = data.optJSONObject("cell")?.optJSONArray("cells")?.length() ?: 0
-            val wifiN = data.optJSONObject("wifi")?.optJSONArray("networks")?.length() ?: 0
-            val btN = (data.optJSONObject("bluetooth")?.optJSONArray("devices")?.length() ?: 0) +
-                (data.optJSONObject("bluetooth")?.optJSONArray("bonded")?.length() ?: 0)
-            val gnssN = data.optJSONObject("gnss")?.optInt("satelliteCount", 0) ?: 0
-            val sensor = data.optJSONObject("sensor")
-            var sensorText = ""
-            if (sensor != null) {
-                val parts = mutableListOf<String>()
-                sensor.optJSONArray("accelerometer")?.let { arr ->
-                    if (arr.length() >= 3) {
-                        parts.add(String.format("acc=%.2f,%.2f,%.2f", arr.optDouble(0), arr.optDouble(1), arr.optDouble(2)))
-                    }
-                }
-                sensor.optJSONArray("gyroscope")?.let { arr ->
-                    if (arr.length() >= 3) {
-                        parts.add(String.format("gyr=%.3f,%.3f,%.3f", arr.optDouble(0), arr.optDouble(1), arr.optDouble(2)))
-                    }
-                }
-                if (sensor.has("stepCounter")) parts.add("步=" + sensor.optLong("stepCounter", 0L))
-                sensorText = if (parts.isEmpty()) "" else parts.joinToString(" ")
-            }
-
-            sb.append(String.format("#%d [+%06.1fs] ", frame.optInt("seq", i + 1), offsetSec))
-            if (locText.isNotEmpty()) sb.append("位置:").append(locText).append(" ")
-            if (cellN > 0) sb.append("基站:").append(cellN).append(" ")
-            if (wifiN > 0) sb.append("WiFi:").append(wifiN).append(" ")
-            if (btN > 0) sb.append("蓝牙:").append(btN).append(" ")
-            if (gnssN > 0) sb.append("GNSS:").append(gnssN).append(" ")
-            if (sensorText.isNotEmpty()) sb.append("传感器[").append(sensorText).append("]")
-            val content = sb.toString()
-            if (content.endsWith("] ") || content.endsWith(" ")) {
-                sb.setLength(sb.length - 1)
-            }
-            sb.append("\n")
-        }
-        if (firstLoc.isNotEmpty()) sb.append("起点：").append(firstLoc).append("\n")
-        if (lastLoc.isNotEmpty()) sb.append("终点：").append(lastLoc).append("\n")
         return sb.toString()
     }
 

@@ -17,7 +17,7 @@ class DatabaseManager(private val dbFile: File) {
 
     companion object {
         private const val TAG_SCOPE = "Core"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         const val TABLE_ROUTE = "route"
         const val TABLE_LOCATION_POINT = "location_point"
@@ -43,6 +43,7 @@ class DatabaseManager(private val dbFile: File) {
         const val COL_RECORDING_ID = "recording_id"
         const val COL_SEQ = "seq"
         const val COL_TIMESTAMP_MS = "timestamp_ms"
+        const val COL_INTERRUPTED = "interrupted"
 
         private const val SQL_CREATE_ROUTE =
             "CREATE TABLE IF NOT EXISTS $TABLE_ROUTE (" +
@@ -82,6 +83,7 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_REMARK TEXT DEFAULT ''," +
                 "$COL_DURATION_MS INTEGER NOT NULL DEFAULT 0," +
                 "$COL_FRAME_COUNT INTEGER NOT NULL DEFAULT 0," +
+                "$COL_INTERRUPTED INTEGER NOT NULL DEFAULT 0," +
                 "$COL_CREATE_TIME INTEGER NOT NULL" +
                 ")"
 
@@ -125,20 +127,33 @@ class DatabaseManager(private val dbFile: File) {
         }
     }
 
-    /** 老库升级：route 表补充 remark 列。 */
+    /** 老库升级：route 表补充 remark 列；recording 表补充 interrupted 列（录像中断兜底标记）。 */
     private fun migrate(database: SQLiteDatabase) {
         try {
-            val columns = mutableSetOf<String>()
+            val routeColumns = mutableSetOf<String>()
             database.rawQuery("PRAGMA table_info($TABLE_ROUTE)", null).use { c ->
                 val nameIdx = c.getColumnIndexOrThrow("name")
-                while (c.moveToNext()) columns.add(c.getString(nameIdx))
+                while (c.moveToNext()) routeColumns.add(c.getString(nameIdx))
             }
-            if (!columns.contains(COL_REMARK)) {
+            if (!routeColumns.contains(COL_REMARK)) {
                 database.execSQL("ALTER TABLE $TABLE_ROUTE ADD COLUMN $COL_REMARK TEXT DEFAULT ''")
                 ZLog.i(TAG_SCOPE, "migrated: route add remark column")
             }
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "migrate failed", t)
+            ZLog.w(TAG_SCOPE, "migrate route failed", t)
+        }
+        try {
+            val recordingColumns = mutableSetOf<String>()
+            database.rawQuery("PRAGMA table_info($TABLE_RECORDING)", null).use { c ->
+                val nameIdx = c.getColumnIndexOrThrow("name")
+                while (c.moveToNext()) recordingColumns.add(c.getString(nameIdx))
+            }
+            if (!recordingColumns.contains(COL_INTERRUPTED)) {
+                database.execSQL("ALTER TABLE $TABLE_RECORDING ADD COLUMN $COL_INTERRUPTED INTEGER NOT NULL DEFAULT 0")
+                ZLog.i(TAG_SCOPE, "migrated: recording add interrupted column")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "migrate recording failed", t)
         }
     }
 
@@ -418,6 +433,7 @@ class DatabaseManager(private val dbFile: File) {
             val durationIdx = it.getColumnIndexOrThrow(COL_DURATION_MS)
             val countIdx = it.getColumnIndexOrThrow(COL_FRAME_COUNT)
             val createIdx = it.getColumnIndexOrThrow(COL_CREATE_TIME)
+            val interruptedIdx = it.getColumnIndex(COL_INTERRUPTED)
             while (it.moveToNext()) {
                 val obj = org.json.JSONObject()
                 obj.put("id", it.getLong(idIdx))
@@ -426,10 +442,62 @@ class DatabaseManager(private val dbFile: File) {
                 obj.put("durationMs", it.getLong(durationIdx))
                 obj.put("frameCount", it.getInt(countIdx))
                 obj.put("createTime", it.getLong(createIdx))
+                obj.put("interrupted", interruptedIdx >= 0 && it.getInt(interruptedIdx) > 0)
                 result.add(obj)
             }
         }
         return result
+    }
+
+    /** 标记录像为中断（录制未正常停止，如进程崩溃/重启）。 */
+    fun markRecordingInterrupted(id: Long) {
+        val values = android.content.ContentValues().apply {
+            put(COL_INTERRUPTED, 1)
+        }
+        open().update(TABLE_RECORDING, values, "$COL_ID=?", arrayOf(id.toString()))
+    }
+
+    /** 查询所有尚未 finalize（frame_count=0）且 interrupted=0 的录像 id。 */
+    fun queryUnfinalizedRecordingIds(): List<Long> {
+        val result = mutableListOf<Long>()
+        val cursor = open().query(
+            TABLE_RECORDING,
+            arrayOf(COL_ID),
+            "$COL_FRAME_COUNT=? AND $COL_INTERRUPTED=?",
+            arrayOf("0", "0"),
+            null,
+            null,
+            "$COL_CREATE_TIME ASC"
+        )
+        cursor?.use {
+            val idIdx = it.getColumnIndexOrThrow(COL_ID)
+            while (it.moveToNext()) result.add(it.getLong(idIdx))
+        }
+        return result
+    }
+
+    /** 统计某录像的帧范围（首帧/末帧时间戳与帧数），无帧返回 null。 */
+    fun recordingFrameRange(recordingId: Long): org.json.JSONObject? {
+        val cursor = open().rawQuery(
+            "SELECT MIN($COL_TIMESTAMP_MS) AS mn, MAX($COL_TIMESTAMP_MS) AS mx, COUNT(*) AS cnt " +
+                "FROM $TABLE_RECORDING_FRAME WHERE $COL_RECORDING_ID=?",
+            arrayOf(recordingId.toString())
+        )
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val mn = it.getLong(it.getColumnIndexOrThrow("mn"))
+                val mx = it.getLong(it.getColumnIndexOrThrow("mx"))
+                val cnt = it.getInt(it.getColumnIndexOrThrow("cnt"))
+                if (cnt > 0) {
+                    return org.json.JSONObject().apply {
+                        put("firstTs", mn)
+                        put("lastTs", mx)
+                        put("count", cnt)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     /** 查询录像帧（按 seq 升序）。 */

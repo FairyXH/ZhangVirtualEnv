@@ -207,6 +207,7 @@ class ApiServer(
                 path == "/api/recording/stop-play" && method == "POST" -> recordingStopPlay()
                 path == "/api/recording/status" && method == "GET" -> recordingStatus()
                 path == "/api/recording/speed" && method == "POST" -> recordingSpeed(body)
+                path == "/api/recording/smooth" && method == "POST" -> recordingSmooth(body)
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -582,6 +583,12 @@ class ApiServer(
         val speed = JSONObject(body).optDouble("speed", 1.0).toFloat()
         backend.setRecordingPlaybackSpeed(speed)
         return ApiResult.ok("ok")
+    }
+
+    private fun recordingSmooth(body: String): ApiResult {
+        val enabled = JSONObject(body).optBoolean("enabled", true)
+        backend.setRecordingPlaybackSmooth(enabled)
+        return ApiResult.ok("ok", backend.recordingStatusJson())
     }
 
     private fun recordingStatus(): ApiResult {

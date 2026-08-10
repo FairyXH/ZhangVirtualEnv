@@ -42,14 +42,33 @@
             android:name=".app.MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
+            <!-- 模块设置入口：LSPosed 通过 MODULE_SETTINGS 打开；桌面图标由 Launcher 别名控制 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
+
+        <!-- 桌面图标别名：默认显示；设置页开启“隐藏桌面图标”后禁用此别名即可隐藏，
+             主 Activity 本身保持可用，仍可从 LSPosed 模块界面打开 -->
+        <activity-alias
+            android:name=".Launcher"
+            android:targetActivity=".app.MainActivity"
+            android:exported="true"
+            android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <activity
             android:name=".app.ui.EnvDetailActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".app.ui.RecordingDetailActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
