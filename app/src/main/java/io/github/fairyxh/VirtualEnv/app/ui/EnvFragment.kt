@@ -26,6 +26,10 @@ class EnvFragment : Fragment() {
     private lateinit var cellStatus: TextView
     private lateinit var wifiStatus: TextView
     private lateinit var gnssStatus: TextView
+    private lateinit var cellSwitch: android.widget.Switch
+    private lateinit var wifiSwitch: android.widget.Switch
+    private lateinit var gnssSwitch: android.widget.Switch
+    private var updatingSwitch = false
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -34,6 +38,9 @@ class EnvFragment : Fragment() {
         cellStatus = root.findViewById(R.id.cellStatus)
         wifiStatus = root.findViewById(R.id.wifiStatus)
         gnssStatus = root.findViewById(R.id.gnssStatus)
+        cellSwitch = root.findViewById(R.id.cellSwitch)
+        wifiSwitch = root.findViewById(R.id.wifiSwitch)
+        gnssSwitch = root.findViewById(R.id.gnssSwitch)
 
         root.findViewById<View>(R.id.cellCard).setOnClickListener {
             EnvDetailActivity.start(requireContext(), TYPE_CELL)
@@ -44,6 +51,10 @@ class EnvFragment : Fragment() {
         root.findViewById<View>(R.id.gnssCard).setOnClickListener {
             EnvDetailActivity.start(requireContext(), TYPE_GNSS)
         }
+
+        cellSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_CELL, checked) }
+        wifiSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_WIFI, checked) }
+        gnssSwitch.setOnCheckedChangeListener { _, checked -> toggleEnv(TYPE_GNSS, checked) }
 
         refreshStatuses()
         return root
@@ -59,16 +70,38 @@ class EnvFragment : Fragment() {
         super.onDestroyView()
     }
 
+    /** 快捷开关：关闭时 Hook 放行真实数据（数据保留），开启时恢复。 */
+    private fun toggleEnv(type: String, enabled: Boolean) {
+        if (updatingSwitch) return
+        executor.execute {
+            val result = ApiClient.setEnvEnabled(type, enabled)
+            requireActivity().runOnUiThread {
+                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    android.widget.Toast.makeText(requireContext(), result.message, android.widget.Toast.LENGTH_SHORT).show()
+                    refreshStatuses()
+                }
+            }
+        }
+    }
+
     private fun refreshStatuses() {
-        listOf(TYPE_CELL to cellStatus, TYPE_WIFI to wifiStatus, TYPE_GNSS to gnssStatus).forEach { (type, view) ->
+        listOf(
+            TYPE_CELL to (cellStatus to cellSwitch),
+            TYPE_WIFI to (wifiStatus to wifiSwitch),
+            TYPE_GNSS to (gnssStatus to gnssSwitch)
+        ).forEach { (type, pair) ->
+            val (statusView, switchView) = pair
             executor.execute {
                 val result = ApiClient.getEnvStatus(type)
                 requireActivity().runOnUiThread {
                     val data = result.data
                     val enabled = data != null && data.optBoolean("enabled", false)
-                    view.text = getString(
+                    statusView.text = getString(
                         if (enabled) R.string.env_status_active else R.string.env_status_inactive
                     )
+                    updatingSwitch = true
+                    switchView.isChecked = enabled
+                    updatingSwitch = false
                 }
             }
         }

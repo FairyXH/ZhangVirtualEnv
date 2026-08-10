@@ -52,14 +52,28 @@
     <string name="home_recording_meta">%1$s · %2$d 帧</string>
 
     <!-- Playback -->
-    <string name="home_playback_title">录像回放</string>
-    <string name="home_playback_desc">勾选多个录像顺序播放；勾选循环则末尾回到第一段</string>
-    <string name="home_playback_loop">循环</string>
-    <string name="home_playback_play">播放</string>
+    <string name="home_collect_tab_snapshot">快照</string>
+    <string name="home_collect_tab_recording">录像</string>
+    <string name="home_saved_kind_snapshot">[快照]</string>
+    <string name="home_saved_kind_recording">[录像]</string>
+    <string name="home_saved_select">选择</string>
+    <string name="home_saved_meta_snapshot">快照 · %1$s</string>
+    <string name="home_saved_meta_recording">录像 · 时长 %1$s · %2$d 帧</string>
+    <string name="home_playback_title">采集回放</string>
+    <string name="home_playback_desc">选择下方已保存采集后自动区分快照/录像：快照一次性启用，录像支持开始/暂停/重新开始/倍速</string>
+    <string name="home_playback_none">未选择已保存采集</string>
+    <string name="home_playback_selected">已选择：%1$s %2$s</string>
+    <string name="home_playback_enable">启用采集回放</string>
+    <string name="home_playback_start_video">开始录像回放</string>
     <string name="home_playback_pause">暂停</string>
     <string name="home_playback_resume">继续</string>
+    <string name="home_playback_restart">重新开始</string>
     <string name="home_playback_stop">停止</string>
-    <string name="home_playback_none_selected">请先勾选至少一个录像</string>
+    <string name="home_playback_speed">倍速</string>
+    <string name="home_playback_speed_hint">如 1.0 / 2.0</string>
+    <string name="home_playback_speed_set">应用</string>
+    <string name="home_playback_none_selected">请先选择已保存采集</string>
+    <string name="home_playback_play">播放</string>
     <string name="home_playback_playing">回放中：第 %1$d/%2$d 段 · 帧 %3$d/%4$d%5$s</string>
     <string name="home_playback_paused">回放已暂停：第 %1$d/%2$d 段 · 帧 %3$d/%4$d</string>
     <string name="home_playback_idle">未在回放</string>

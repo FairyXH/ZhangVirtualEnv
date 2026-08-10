@@ -162,6 +162,7 @@ class ApiServer(
                 path == "/api/env-snapshot/delete" && method == "POST" -> envSnapshotDelete(body)
                 path == "/api/env/use" && method == "POST" -> envUse(body)
                 path == "/api/env/clear" && method == "POST" -> envClear(body)
+                path == "/api/env/enable" && method == "POST" -> envEnable(body)
                 path == "/api/env/suspend" && method == "POST" -> envSuspend()
                 path == "/api/env/resume" && method == "POST" -> envResume()
                 path == "/api/env/status" && method == "GET" -> envStatus()
@@ -187,6 +188,7 @@ class ApiServer(
                 path == "/api/recording/resume" && method == "POST" -> recordingResume()
                 path == "/api/recording/stop-play" && method == "POST" -> recordingStopPlay()
                 path == "/api/recording/status" && method == "GET" -> recordingStatus()
+                path == "/api/recording/speed" && method == "POST" -> recordingSpeed(body)
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -398,6 +400,15 @@ class ApiServer(
         return ApiResult.ok("cleared")
     }
 
+    private fun envEnable(body: String): ApiResult {
+        val json = JSONObject(body)
+        val type = json.optString("type", "")
+        val enabled = json.optBoolean("enabled", false)
+        if (type.isBlank()) return ApiResult.error("type required")
+        if (!backend.setEnvEnabled(type, enabled)) return ApiResult.error("unsupported env type: $type", 404)
+        return ApiResult.ok("ok", backend.envStatus(type))
+    }
+
     private fun envStatus(): ApiResult {
         return ApiResult.ok("ok", backend.envStatusJson())
     }
@@ -524,6 +535,12 @@ class ApiServer(
     private fun recordingStopPlay(): ApiResult {
         backend.stopRecordingPlayback()
         return ApiResult.ok("stopped")
+    }
+
+    private fun recordingSpeed(body: String): ApiResult {
+        val speed = JSONObject(body).optDouble("speed", 1.0).toFloat()
+        backend.setRecordingPlaybackSpeed(speed)
+        return ApiResult.ok("ok")
     }
 
     private fun recordingStatus(): ApiResult {

@@ -59,6 +59,7 @@ class RecordingEngine(
     private var playbackEnabled = false
     private var playbackPaused = false
     private var playbackLoop = false
+    private var playbackSpeed = 1.0f
     private var playlist: List<Long> = emptyList()
     private var playIndex = 0
     private var frames: List<JSONObject> = emptyList()
@@ -194,6 +195,14 @@ class RecordingEngine(
         ZLog.i(TAG_SCOPE, "playback stopped")
     }
 
+    /** 设置回放倍速（0.5x~8x）。 */
+    fun setPlaybackSpeed(speed: Float) {
+        synchronized(playbackLock) {
+            playbackSpeed = speed.coerceIn(0.5f, 8f)
+        }
+        ZLog.i(TAG_SCOPE, "playback speed=${playbackSpeed}")
+    }
+
     private fun stopPlaybackLocked() {
         playbackEnabled = false
         playbackPaused = false
@@ -251,7 +260,12 @@ class RecordingEngine(
         synchronized(playbackLock) {
             enabled = playbackEnabled
             paused = playbackPaused
-            elapsed = if (paused) pausedElapsed else SystemClock.elapsedRealtime() - playStartWall
+            elapsed = if (paused) {
+                pausedElapsed
+            } else {
+                // 倍速：仅作用于推进速度（0.5x~8x）
+                ((SystemClock.elapsedRealtime() - playStartWall).toDouble() * playbackSpeed).toLong()
+            }
             dur = durationMs
             loop = playbackLoop
         }

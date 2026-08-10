@@ -186,6 +186,15 @@ object ApiClient {
         return post("/api/env/clear", body)
     }
 
+    /** 单类型开关：关闭时 Hook 放行真实数据（数据保留），开启时恢复。 */
+    fun setEnvEnabled(type: String, enabled: Boolean): ApiResult {
+        val body = JSONObject().apply {
+            put("type", type)
+            put("enabled", enabled)
+        }
+        return post("/api/env/enable", body)
+    }
+
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
     /** 临时停用全部虚拟环境（采集真实环境前调用，可嵌套）。 */
@@ -263,6 +272,11 @@ object ApiClient {
     fun resumeRecordingPlayback(): ApiResult = post("/api/recording/resume", JSONObject())
 
     fun stopRecordingPlayback(): ApiResult = post("/api/recording/stop-play", JSONObject())
+
+    fun setRecordingSpeed(speed: Float): ApiResult {
+        val body = JSONObject().apply { put("speed", speed.toDouble()) }
+        return post("/api/recording/speed", body)
+    }
 
     fun getRecordingStatus(): ApiResult = get("/api/recording/status")
 

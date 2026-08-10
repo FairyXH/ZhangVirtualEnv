@@ -58,9 +58,16 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
         try {
             val data = rawGet("/api/env/status") ?: return
             synchronized(lock) {
-                wifi = data.optJSONObject("wifi")?.optJSONObject("data")
-                cell = data.optJSONObject("cell")?.optJSONObject("data")
-                ble = data.optJSONObject("ble")?.optJSONObject("data")
+                // 单类型开关：enabled=false 时 Hook 放行真实数据（数据保留在引擎内）
+                wifi = data.optJSONObject("wifi")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
+                cell = data.optJSONObject("cell")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
+                ble = data.optJSONObject("ble")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh env cache failed: ${t.message}")

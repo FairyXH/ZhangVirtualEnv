@@ -412,6 +412,8 @@ class Backend private constructor(private val dataDir: File) {
                 // 轨道化回放：同名+来源标记的轨道快照存在则用轨道数据覆盖，
                 // 不存在（被单独删除）则清空该轨道 = 留空轨（真实信息）
                 applyTrackOverrides(snapshot.optString("name", ""))
+                // 自动启用该采集保存的位置轨道（已保存地点）
+                enableCollectLocation(snapshot.optString("name", ""))
             }
             else -> return null
         }
@@ -428,11 +430,7 @@ class Backend private constructor(private val dataDir: File) {
         data.optJSONObject("sensor")?.let { sensorEngine.update(it) }
     }
 
-    /**
-     * 轨道化回放：按采集名查找拆分轨道（type=cell/wifi/gnss 且 remark 含来源标记）。
-     *
-     * 轨道存在 → 加载轨道数据；不存在（用户单独删除）→ clear 该引擎 = 留空轨（真实信息）。
-     */
+    /** 轨道化回放：按采集名查找拆分轨道（type=cell/wifi/gnss 且 remark 含来源标记）。 */
     private fun applyTrackOverrides(collectName: String) {
         val tracks = databaseManager.queryEnvSnapshots()
             .filter { it.optString("remark", "").contains(TRACK_SOURCE_TAG) }
@@ -443,6 +441,21 @@ class Backend private constructor(private val dataDir: File) {
         findTrack("wifi")?.optJSONObject("data")?.let { wifiEngine.update(it) } ?: wifiEngine.clear()
         findTrack("gnss")?.optJSONObject("data")?.let { gnssEngine.update(it) } ?: gnssEngine.clear()
         ZLog.i(TAG_SCOPE, "collect track overrides applied for name=$collectName")
+    }
+
+    /** 采集回放时自动启用同名位置轨道（来自采集的已保存地点）。 */
+    private fun enableCollectLocation(collectName: String) {
+        val point = databaseManager.queryLocationPoints()
+            .firstOrNull {
+                it.optString("name", "") == collectName &&
+                    it.optString("remark", "").contains(TRACK_SOURCE_TAG)
+            }
+            ?: return
+        val id = point.optLong("id", -1L)
+        if (id > 0) {
+            useLocationPoint(id)
+            ZLog.i(TAG_SCOPE, "collect location track enabled id=$id name=$collectName")
+        }
     }
 
     /** 直接设置指定类型的虚拟环境数据（经 ApiServer 调用，/api/<type>/set）。 */
@@ -456,6 +469,20 @@ class Backend private constructor(private val dataDir: File) {
             else -> return false
         }
         ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
+        return true
+    }
+
+    /** 单类型开关：关闭时 Hook 放行真实数据，数据保留；开启时恢复。 */
+    fun setEnvEnabled(type: String, enabled: Boolean): Boolean {
+        when (type) {
+            "wifi" -> wifiEngine.setEnabled(enabled)
+            "cell" -> cellEngine.setEnabled(enabled)
+            "ble" -> bleEngine.setEnabled(enabled)
+            "gnss" -> gnssEngine.setEnabled(enabled)
+            "sensor" -> sensorEngine.setEnabled(enabled)
+            else -> return false
+        }
+        ZLog.i(TAG_SCOPE, "env type=$type enabled=$enabled")
         return true
     }
 
@@ -557,6 +584,10 @@ class Backend private constructor(private val dataDir: File) {
 
     fun stopRecordingPlayback() {
         recordingEngine.stopPlayback()
+    }
+
+    fun setRecordingPlaybackSpeed(speed: Float) {
+        recordingEngine.setPlaybackSpeed(speed)
     }
 
     fun recordingStatusJson(): org.json.JSONObject {

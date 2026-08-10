@@ -52,11 +52,17 @@
 
             <TextView
                 android:id="@+id/cellStatus"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
+                android:layout_weight="1"
                 android:text="@string/env_pending"
                 style="@style/Text.Caption" />
+
+            <Switch
+                android:id="@+id/cellSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
         </LinearLayout>
 
         <LinearLayout
@@ -85,11 +91,17 @@
 
             <TextView
                 android:id="@+id/wifiStatus"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
+                android:layout_weight="1"
                 android:text="@string/env_pending"
                 style="@style/Text.Caption" />
+
+            <Switch
+                android:id="@+id/wifiSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
         </LinearLayout>
 
         <LinearLayout
@@ -118,11 +130,17 @@
 
             <TextView
                 android:id="@+id/gnssStatus"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
+                android:layout_weight="1"
                 android:text="@string/env_pending"
                 style="@style/Text.Caption" />
+
+            <Switch
+                android:id="@+id/gnssSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

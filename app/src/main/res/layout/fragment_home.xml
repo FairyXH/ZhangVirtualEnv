@@ -75,7 +75,7 @@
                 style="@style/Text.Caption" />
         </LinearLayout>
 
-        <!-- Collect card -->
+        <!-- 一键采集卡（快照/录像选项卡） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -90,142 +90,175 @@
                 android:text="@string/home_collect_title"
                 style="@style/Text.Headline" />
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/home_collect_desc"
-                style="@style/Text.Caption" />
-
-            <Button
-                android:id="@+id/collectButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
-                android:text="@string/home_collect_button"
-                style="@style/Button.Pill" />
-
-            <TextView
-                android:id="@+id/collectResult"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
-                android:text=""
-                android:fontFamily="monospace"
-                android:textSize="@dimen/text_tiny"
-                android:textColor="@color/text_secondary"
-                android:visibility="gone"
-                tools:text="采集结果" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="@dimen/space_md"
-                android:layout_marginBottom="@dimen/space_md"
-                android:background="@color/separator" />
-
-            <EditText
-                android:id="@+id/collectNameInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/home_collect_name_hint"
-                style="@style/EditText.Field" />
-
-            <EditText
-                android:id="@+id/collectRemarkInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
-                android:hint="@string/home_collect_remark_hint"
-                style="@style/EditText.Field" />
-
-            <Button
-                android:id="@+id/saveCollectButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
-                android:text="@string/home_collect_save"
-                style="@style/Button.Pill.Secondary" />
-        </LinearLayout>
-
-        <!-- Recording card（持续记录） -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical"
-            android:padding="@dimen/space_md">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/home_recording_title"
-                style="@style/Text.Headline" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/home_recording_desc"
-                style="@style/Text.Caption" />
-
-            <EditText
-                android:id="@+id/recordingNameInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
-                android:hint="@string/home_recording_name_hint"
-                style="@style/EditText.Field" />
-
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
-                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <EditText
-                    android:id="@+id/recordingIntervalInput"
+                <TextView
+                    android:id="@+id/collectTabSnapshot"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:hint="@string/home_recording_interval_hint"
-                    android:inputType="number"
-                    android:maxLines="1"
+                    android:background="@drawable/bg_pill"
+                    android:gravity="center"
+                    android:paddingTop="@dimen/space_sm"
+                    android:paddingBottom="@dimen/space_sm"
+                    android:text="@string/home_collect_tab_snapshot"
+                    android:textSize="@dimen/text_caption" />
+
+                <TextView
+                    android:id="@+id/collectTabRecording"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_secondary"
+                    android:gravity="center"
+                    android:paddingTop="@dimen/space_sm"
+                    android:paddingBottom="@dimen/space_sm"
+                    android:text="@string/home_collect_tab_recording"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <!-- 快照模式 -->
+            <LinearLayout
+                android:id="@+id/snapshotPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/home_collect_desc"
+                    style="@style/Text.Caption" />
+
+                <Button
+                    android:id="@+id/collectButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:text="@string/home_collect_button"
+                    style="@style/Button.Pill" />
+
+                <TextView
+                    android:id="@+id/collectResult"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:text=""
+                    android:fontFamily="monospace"
+                    android:textSize="@dimen/text_tiny"
+                    android:textColor="@color/text_secondary"
+                    android:visibility="gone"
+                    tools:text="采集结果" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:layout_marginBottom="@dimen/space_md"
+                    android:background="@color/separator" />
+
+                <EditText
+                    android:id="@+id/collectNameInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/home_collect_name_hint"
+                    style="@style/EditText.Field" />
+
+                <EditText
+                    android:id="@+id/collectRemarkInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:hint="@string/home_collect_remark_hint"
                     style="@style/EditText.Field" />
 
                 <Button
-                    android:id="@+id/recordingStartButton"
-                    android:layout_width="0dp"
+                    android:id="@+id/saveCollectButton"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_recording_start"
-                    style="@style/Button.Pill" />
-
-                <Button
-                    android:id="@+id/recordingStopButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_recording_stop"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/home_collect_save"
                     style="@style/Button.Pill.Secondary" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/recordingStatus"
+            <!-- 录像模式 -->
+            <LinearLayout
+                android:id="@+id/recordingPanel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_sm"
-                android:text=""
-                style="@style/Text.Caption" />
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/home_recording_desc"
+                    style="@style/Text.Caption" />
+
+                <EditText
+                    android:id="@+id/recordingNameInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:hint="@string/home_recording_name_hint"
+                    style="@style/EditText.Field" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/recordingIntervalInput"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="@string/home_recording_interval_hint"
+                        android:inputType="number"
+                        android:maxLines="1"
+                        style="@style/EditText.Field" />
+
+                    <Button
+                        android:id="@+id/recordingStartButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_recording_start"
+                        style="@style/Button.Pill" />
+
+                    <Button
+                        android:id="@+id/recordingStopButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:layout_weight="1"
+                        android:minWidth="0dp"
+                        android:text="@string/home_recording_stop"
+                        style="@style/Button.Pill.Secondary" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/recordingStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text=""
+                    style="@style/Text.Caption" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- Playback card（录像回放） -->
+        <!-- 采集回放卡 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -241,53 +274,104 @@
                 style="@style/Text.Headline" />
 
             <TextView
-                android:layout_width="wrap_content"
+                android:id="@+id/playbackSelected"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_xs"
-                android:text="@string/home_playback_desc"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/home_playback_none"
                 style="@style/Text.Caption" />
 
+            <Button
+                android:id="@+id/playbackEnableButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/home_playback_enable"
+                style="@style/Button.Pill" />
+
+            <!-- 录像控制（仅录像选中时显示） -->
             <LinearLayout
+                android:id="@+id/playbackControls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_sm"
                 android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <CheckBox
-                    android:id="@+id/playbackLoopCheck"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/home_playback_loop" />
-
-                <Button
-                    android:id="@+id/playbackPlayButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:text="@string/home_playback_play"
-                    style="@style/Button.Pill" />
+                android:orientation="horizontal"
+                android:visibility="gone">
 
                 <Button
                     android:id="@+id/playbackPauseButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
                     android:layout_weight="1"
                     android:minWidth="0dp"
                     android:text="@string/home_playback_pause"
                     style="@style/Button.Pill.Secondary" />
 
                 <Button
+                    android:id="@+id/playbackResumeButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="@string/home_playback_resume"
+                    style="@style/Button.Pill.Secondary" />
+
+                <Button
+                    android:id="@+id/playbackRestartButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="@string/home_playback_restart"
+                    style="@style/Button.Pill.Secondary" />
+
+                <Button
                     android:id="@+id/playbackStopButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="@string/home_playback_stop"
+                    style="@style/Button.Pill.Secondary" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/playbackSpeedRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_playback_speed"
+                    style="@style/Text.Caption" />
+
+                <EditText
+                    android:id="@+id/playbackSpeedInput"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="@dimen/space_sm"
                     android:layout_weight="1"
+                    android:hint="@string/home_playback_speed_hint"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1"
+                    style="@style/EditText.Field" />
+
+                <Button
+                    android:id="@+id/playbackSpeedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
                     android:minWidth="0dp"
-                    android:text="@string/home_playback_stop"
+                    android:text="@string/home_playback_speed_set"
                     style="@style/Button.Pill.Secondary" />
             </LinearLayout>
 
@@ -298,30 +382,9 @@
                 android:layout_marginTop="@dimen/space_sm"
                 android:text=""
                 style="@style/Text.Caption" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="@dimen/space_md"
-                android:layout_marginBottom="@dimen/space_md"
-                android:background="@color/separator" />
-
-            <TextView
-                android:id="@+id/recordingsEmpty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/home_recordings_empty"
-                android:textColor="@color/text_secondary"
-                style="@style/Text.Caption" />
-
-            <LinearLayout
-                android:id="@+id/recordingList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
         </LinearLayout>
 
-        <!-- Saved collects card -->
+        <!-- 已保存采集（快照 + 录像统一列表） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

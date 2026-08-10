@@ -35,6 +35,26 @@ class EnvStateEngine(private val engineName: String) {
         ZLog.i("Core", "EnvStateEngine[$engineName] cleared")
     }
 
+    /**
+     * 单独开关：关闭时保留已加载数据但 Hook 放行真实数据（currentData 返回 null）。
+     * 开启时恢复上次加载的数据。
+     */
+    fun setEnabled(enabled: Boolean) {
+        val s = state.get()
+        val data = s.optJSONObject("data")
+        if (data != null) {
+            state.set(
+                JSONObject().apply {
+                    put("enabled", enabled)
+                    put("data", data)
+                }
+            )
+        } else {
+            state.set(JSONObject().apply { put("enabled", enabled) })
+        }
+        ZLog.i("Core", "EnvStateEngine[$engineName] setEnabled=$enabled")
+    }
+
     /** 返回当前虚拟数据；未启用时返回 null（Hook 放行真实数据）。 */
     fun currentData(): JSONObject? {
         val s = state.get()
