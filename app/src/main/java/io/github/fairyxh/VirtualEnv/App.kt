@@ -13,6 +13,7 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        io.github.fairyxh.VirtualEnv.app.ApiClient.initTokenFromAssets(this)
         ZLog.i("App", "ZhangVirtualEnvironment control app started")
     }
 }

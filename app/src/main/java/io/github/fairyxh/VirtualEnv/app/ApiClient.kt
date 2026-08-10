@@ -19,6 +19,20 @@ object ApiClient {
     private const val TAG_SCOPE = "ApiClient"
     private const val BASE_URL = "http://127.0.0.1:18790"
 
+    /** 访问令牌：由控制端 Application 从自身 APK assets/api_token.txt 初始化。 */
+    @Volatile
+    var token: String = ""
+
+    /** 由控制端 Application 调用，从 assets 读取访问令牌。 */
+    fun initTokenFromAssets(context: android.content.Context) {
+        token = try {
+            context.assets.open("api_token.txt").bufferedReader().use { it.readText().trim() }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "api token load failed: ${t.message}")
+            ""
+        }
+    }
+
     /** 后端是否可达。 */
     fun ping(): Boolean {
         return try {
@@ -197,6 +211,9 @@ object ApiClient {
 
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
+    /** 上报环境实时测试结果报告（供自动化验证/修正 Hook）。 */
+    fun postTestReport(report: org.json.JSONObject): ApiResult = post("/api/test/report", report)
+
     /** 临时停用全部虚拟环境（采集真实环境前调用，可嵌套）。 */
     fun suspendEnv(): ApiResult = post("/api/env/suspend", JSONObject())
 
@@ -298,6 +315,10 @@ object ApiClient {
             // 后端为单请求即关闭连接（Connection: close），禁止 keep-alive 复用，
             // 否则死连接上的后续 POST 会立即抛 EOFException（message=null）。
             conn.setRequestProperty("Connection", "close")
+            // 访问令牌：未设置时后端返回 404，调用方按不可达处理
+            if (token.isNotEmpty()) {
+                conn.setRequestProperty("X-ZVE-Token", token)
+            }
             if (body != null) {
                 conn.doOutput = true
                 conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }

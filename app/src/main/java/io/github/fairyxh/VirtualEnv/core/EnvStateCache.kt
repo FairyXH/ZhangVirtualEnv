@@ -15,8 +15,12 @@ import java.util.concurrent.TimeUnit
  *
  * 注意：被 Hook 的目标 App 进程通常不允许 cleartext HTTP（usesCleartextTraffic=false），
  * 因此这里使用原始 TCP Socket 直连 127.0.0.1，绕过应用层网络安全策略。
+ * 每个请求必须携带 X-ZVE-Token（与 ApiServer 一致），否则被 404 拒绝。
  */
-class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
+class EnvStateCache(
+    private val token: String = "",
+    private val pollIntervalMs: Long = 2000L,
+) {
 
     companion object {
         private const val TAG_SCOPE = "EnvCache"
@@ -30,6 +34,7 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     private var cell: JSONObject? = null
     private var ble: JSONObject? = null
     private var sensor: JSONObject? = null
+    private var gnss: JSONObject? = null
     private var locationEnabled: Boolean = false
     private var locationLat: Double = 0.0
     private var locationLon: Double = 0.0
@@ -71,6 +76,9 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
                 sensor = data.optJSONObject("sensor")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
+                gnss = data.optJSONObject("gnss")
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
             }
@@ -135,6 +143,9 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
     /** 当前虚拟传感器数据（加速度/陀螺仪/计步等）；未启用时 null。 */
     fun currentSensor(): JSONObject? = synchronized(lock) { sensor }
 
+    /** 当前虚拟 GNSS 数据；未启用时 null。 */
+    fun currentGnss(): JSONObject? = synchronized(lock) { gnss }
+
     /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
     fun isSensorStreamActive(): Boolean = synchronized(lock) {
         if (stepEnabled) return true
@@ -178,8 +189,10 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
         val enabled = isLocationEnabled()
         if (!enabled) return null
         val location = android.location.Location("fused")
-        location.latitude = locationLat()
-        location.longitude = locationLon()
+        // 随机抖动 ±0.000005°（约 ±0.5m），与 system_server 引擎一致
+        val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
+        location.latitude = locationLat() + jitter
+        location.longitude = locationLon() + jitter
         location.accuracy = locationAccuracy()
         location.speed = locationSpeed()
         location.bearing = locationBearing()
@@ -201,11 +214,15 @@ class EnvStateCache(private val pollIntervalMs: Long = 2000L) {
             socket.soTimeout = TIMEOUT_MS
             val request = "GET $path HTTP/1.1\r\n" +
                 "Host: $HOST\r\n" +
+                "X-ZVE-Token: $token\r\n" +
                 "Connection: close\r\n" +
                 "\r\n"
             socket.getOutputStream().write(request.toByteArray(Charsets.UTF_8))
             socket.getOutputStream().flush()
             val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
+            val statusLine = response.substringBefore("\r\n")
+            // 未授权/不存在时后端返回 404 空 body，直接视为无虚拟状态
+            if (!statusLine.contains("200")) return null
             val body = response.substringAfter("\r\n\r\n", "")
             if (body.isBlank()) return null
             JSONObject(body).optJSONObject("data")

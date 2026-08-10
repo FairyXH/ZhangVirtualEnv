@@ -20,14 +20,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 监听 127.0.0.1 端口，提供 App 控制端与 Backend 之间的通信。
  * 路由均为 `/api/...`，请求/响应均为 JSON。
+ *
+ * 访问控制：所有请求必须携带 `X-ZVE-Token` 头，值须与 [token] 完全一致。
+ * 未授权请求返回裸 404（无 JSON 特征、不写日志），避免其他应用识别出
+ * 本机存在该模块接口（不暴露检测点）。
  */
 class ApiServer(
     private val port: Int,
     private val backend: Backend,
+    private val token: String,
 ) {
     companion object {
         private const val TAG_SCOPE = "Api"
         const val DEFAULT_PORT = 18790
+        const val TOKEN_HEADER = "X-ZVE-Token"
 
         private const val BIND_ADDRESS = "127.0.0.1"
         private const val MAX_BODY = 1 shl 20 // 1MB
@@ -92,12 +98,21 @@ class ApiServer(
 
                 // 字节级读 header（避免 Reader 预缓冲 body 导致 UTF-8 中文长度错位）
                 var contentLength = 0
+                var authToken: String? = null
                 while (true) {
                     val line = readLineBytes(input) ?: break
                     if (line.isEmpty()) break
                     if (line.startsWith("Content-Length:", ignoreCase = true)) {
                         contentLength = line.substringAfter(':').trim().toIntOrNull() ?: 0
+                    } else if (line.startsWith(TOKEN_HEADER, ignoreCase = true)) {
+                        authToken = line.substringAfter(':').trim()
                     }
+                }
+                // 访问控制：token 不匹配时直接断开连接，不返回任何字节。
+                // 客户端表现为连接被重置/EOF（像访问不存在的主机），
+                // 不产生 HTTP 响应特征，避免暴露模块 API 存在。
+                if (authToken != token || authToken.isNullOrEmpty()) {
+                    return
                 }
                 val body = if (contentLength > 0 && contentLength <= MAX_BODY) {
                     val bytes = ByteArray(contentLength)
@@ -177,6 +192,9 @@ class ApiServer(
                 path == "/api/gnss/status" && method == "GET" -> envStatus("gnss")
                 path == "/api/gnss/set" && method == "POST" -> envSet("gnss", body)
                 path == "/api/profile/status" && method == "GET" -> profileStatus()
+                path == "/api/debug/random-env" && method == "POST" -> randomEnv()
+                path == "/api/test/report" && method == "POST" -> testReportSet(body)
+                path == "/api/test/report" && method == "GET" -> testReportGet()
                 path == "/api/recording/start" && method == "POST" -> recordingStart(body)
                 path == "/api/recording/append" && method == "POST" -> recordingAppend(body)
                 path == "/api/recording/stop" && method == "POST" -> recordingStop(body)
@@ -451,6 +469,29 @@ class ApiServer(
 
     private fun profileStatus(): ApiResult {
         return ApiResult.ok("ok", backend.profileInfoJson())
+    }
+
+    /** 调试辅助：生成全套随机虚拟环境并启用，返回生成的配置。 */
+    private fun randomEnv(): ApiResult {
+        val data = backend.generateRandomEnv()
+        return ApiResult.ok("ok", data)
+    }
+
+    /** App 环境实时测试上报报告。 */
+    private fun testReportSet(body: String): ApiResult {
+        val json = try {
+            JSONObject(body)
+        } catch (t: Throwable) {
+            return ApiResult.error("bad report json: ${t.message}")
+        }
+        backend.setTestReport(json)
+        return ApiResult.ok("ok")
+    }
+
+    /** 读取最近一次环境实时测试报告。 */
+    private fun testReportGet(): ApiResult {
+        val report = backend.getTestReport() ?: return ApiResult.error("no test report", 404)
+        return ApiResult.ok("ok", report)
     }
 
     // ---------- Recording ----------

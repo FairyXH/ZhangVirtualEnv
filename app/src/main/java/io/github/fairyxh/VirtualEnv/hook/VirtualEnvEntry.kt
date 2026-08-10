@@ -50,7 +50,8 @@ class VirtualEnvEntry : XposedModule() {
         // 具体 Hook 安装延迟到 onPackageReady（此时才有宿主 classLoader）。
         try {
             if (appCache != null) return
-            appCache = io.github.fairyxh.VirtualEnv.core.EnvStateCache()
+            val apiToken = io.github.fairyxh.VirtualEnv.util.ApiToken.readFromApk(moduleApplicationInfo.sourceDir)
+            appCache = io.github.fairyxh.VirtualEnv.core.EnvStateCache(apiToken)
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "[$TAG_SCOPE] onModuleLoaded cache init failed", t)
         }
@@ -119,8 +120,12 @@ class VirtualEnvEntry : XposedModule() {
             // 加载 Profile（从模块 APK assets/profiles 读取）
             backend.profileManager.load(moduleApplicationInfo.sourceDir)
 
-            // 启动 HTTP API 服务（App 控制端访问入口）
-            backend.startApiServer()
+            // 启动 HTTP API 服务（App 控制端访问入口）；携带访问令牌，未授权请求拒绝
+            val apiToken = io.github.fairyxh.VirtualEnv.util.ApiToken.readFromApk(moduleApplicationInfo.sourceDir)
+            backend.startApiServer(token = apiToken)
+            if (apiToken.isBlank()) {
+                log(Log.WARN, TAG, "[$TAG_SCOPE] api token missing/blank, ApiServer will reject all requests")
+            }
 
             // 安装 Hook Adapter
             val registrar = HookRegistrar { executable, interceptor ->
