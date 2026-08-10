@@ -132,6 +132,26 @@ class Backend private constructor(private val dataDir: File) {
         return joystickEngine.applyTo(base)
     }
 
+    /**
+     * 位置状态 JSON（App 展示用）。
+     *
+     * 附加 singleEnabled / mode：单点开关应只反映单点引擎，避免路线运行
+     * 时位置页开关误显示为开启（两个开关视觉上保持互斥）。
+     */
+    fun locationStatusJson(): org.json.JSONObject {
+        val json = locationState().toJson()
+        json.put("singleEnabled", locationEngine.isEnabled())
+        json.put(
+            "mode",
+            when {
+                routeEngine.isEnabled() -> "route"
+                locationEngine.isEnabled() -> "single"
+                else -> "none"
+            }
+        )
+        return json
+    }
+
     /** App 设置单点位置（经 ApiServer 调用）。 */
     fun setLocationPoint(latitude: Double, longitude: Double, speed: Float, bearing: Float) {
         locationEngine.setPoint(latitude, longitude, speed, bearing)
@@ -268,7 +288,7 @@ class Backend private constructor(private val dataDir: File) {
     // ---------- 路线模拟控制 ----------
 
     /** 一键启动路线模拟：加载路线点并按速度开始播放。与单点虚拟定位互斥。 */
-    fun startRoute(id: Long, speedKmh: Double): org.json.JSONObject? {
+    fun startRoute(id: Long, speedKmh: Double, stepFrequency: Int = 0): org.json.JSONObject? {
         val route = databaseManager.getRoute(id) ?: return null
         // 互斥：启动路线模拟时关闭单点虚拟定位
         if (locationEngine.isEnabled()) {
@@ -276,9 +296,9 @@ class Backend private constructor(private val dataDir: File) {
         }
         val points = route.optString("points", "")
         val speed = if (speedKmh > 0) speedKmh else route.optDouble("speed", 3.5)
-        val stepFrequency = route.optInt("stepFrequency", 120)
-        routeEngine.start(points, speed, stepFrequency)
-        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed stepFrequency=$stepFrequency")
+        val stepFreq = if (stepFrequency > 0) stepFrequency else route.optInt("stepFrequency", 120)
+        routeEngine.start(points, speed, stepFreq)
+        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed stepFrequency=$stepFreq")
         return route
     }
 

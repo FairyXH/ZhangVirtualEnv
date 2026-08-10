@@ -90,6 +90,7 @@
     <string name="location_search_empty">未找到相关地址</string>
     <string name="location_search_failed">搜索失败，请检查网络与高德 Key</string>
     <string name="location_locate_fallback">定位服务暂不可用，已使用最近一次已知位置</string>
+    <string name="location_amap_key_error">高德定位 Key 认证失败（错误码 7），请检查设置中的 API Key 与 SHA1/包名配置</string>
     <string name="location_map_init_failed">地图初始化失败，请检查高德 Key 与隐私同意</string>
     <string name="location_point_name_hint">地点名称，如：公司</string>
     <string name="location_point_remark_hint">备注（可选），如：工位 3 楼</string>
@@ -138,6 +139,13 @@
     <string name="route_status_running">路线运行中 · %1$d 个路径点</string>
     <string name="route_status_offline">Backend 未连接</string>
     <string name="route_select_first">请先加载或保存一条路线</string>
+    <string name="route_config_title">速度 / 步频</string>
+    <string name="route_speed_hint">速度 km/h</string>
+    <string name="route_step_hint">步频 步/分</string>
+    <string name="route_preset_walk">步行</string>
+    <string name="route_preset_run">跑步</string>
+    <string name="route_preset_bike">自行车</string>
+    <string name="route_preset_drive">驾车</string>
     <string name="route_locate_fallback">定位服务暂不可用，已使用最近一次已知位置</string>
     <string name="route_draw_hint">点击地图添加路径点</string>
     <string name="route_points_count">已添加 %1$d 个路径点</string>
@@ -207,6 +215,8 @@
     <string name="float_close">关闭</string>
     <string name="float_mode_joystick">摇杆</string>
     <string name="float_mode_route">路线</string>
+    <string name="float_speed_label">速度</string>
+    <string name="float_step_label">步频</string>
     <string name="float_speed">速度</string>
     <string name="float_speed_value">%1$.1f km/h</string>
     <string name="float_route_refresh">刷新</string>
@@ -227,6 +237,7 @@
     <string name="float_route_configured">速度/步频已应用</string>
     <string name="float_window_add_failed">悬浮窗添加失败，请检查悬浮窗权限</string>
     <string name="float_open">显示悬浮窗</string>
+    <string name="float_close_window">关闭悬浮窗</string>
     <string name="float_open_desc">摇杆移动 + 路线启停重置 + 速度/步频设置</string>
     <string name="float_permission_required">需要悬浮窗权限，请授权后重试</string>
 </resources>

@@ -54,6 +54,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private lateinit var privacyPrompt: View
     private lateinit var routeNameInput: EditText
     private lateinit var routeRemarkInput: EditText
+    private lateinit var routeSpeedInput: EditText
+    private lateinit var routeStepInput: EditText
     private lateinit var drawHint: TextView
     private lateinit var locateButton: Button
     private lateinit var savedRoutesEmpty: TextView
@@ -101,9 +103,15 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             if (checked) enableRouteSimulation() else disableRouteSimulation()
         }
         setupSearch()
+        routeSpeedInput = root.findViewById(R.id.routeSpeedInput)
+        routeStepInput = root.findViewById(R.id.routeStepInput)
+        setupPresets(root)
 
         locateButton.setOnClickListener { locateCurrentPosition() }
         root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
+        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
+            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
+        }
         root.findViewById<Button>(R.id.clearButton).setOnClickListener { clearRoute() }
         root.findViewById<Button>(R.id.saveButton).setOnClickListener { saveRoute() }
 
@@ -120,6 +128,27 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         refreshRouteStatus()
     }
 
+    /** 速度/步频预设：步行/跑步/自行车/驾车。 */
+    private fun setupPresets(root: View) {
+        fun bind(id: Int, speed: Double, freq: Int) {
+            root.findViewById<TextView>(id).setOnClickListener {
+                routeSpeedInput.setText(speed.toString())
+                routeStepInput.setText(freq.toString())
+            }
+        }
+        bind(R.id.presetWalk, 5.0, 110)
+        bind(R.id.presetRun, 10.0, 180)
+        bind(R.id.presetBike, 20.0, 90)
+        bind(R.id.presetDrive, 60.0, 60)
+    }
+
+    /** 读取输入框中的速度/步频（空/非法用 0 表示走路线默认）。 */
+    private fun readSpeedFreq(): Pair<Double, Int> {
+        val speed = routeSpeedInput.text.toString().trim().toDoubleOrNull() ?: 0.0
+        val freq = routeStepInput.text.toString().trim().toIntOrNull() ?: 0
+        return speed to freq
+    }
+
     /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
     private fun enableRouteSimulation() {
         if (currentRouteId <= 0) {
@@ -127,8 +156,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             setSwitchChecked(false)
             return
         }
+        val (speed, freq) = readSpeedFreq()
         executor.execute {
-            val result = ApiClient.startRoute(currentRouteId)
+            val result = ApiClient.startRoute(currentRouteId, speed, freq)
             requireActivity().runOnUiThread {
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(
@@ -386,8 +416,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         val name = item.optString("name", "")
         currentRouteId = id
         currentRouteName = name
+        val (speed, freq) = readSpeedFreq()
         executor.execute {
-            val result = ApiClient.startRoute(id)
+            val result = ApiClient.startRoute(id, speed, freq)
             requireActivity().runOnUiThread {
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(
@@ -483,6 +514,15 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         if (location == null || location.errorCode != 0) {
             val code = location?.errorCode ?: -1
             ZLog.w(TAG_SCOPE, "amap locate error=$code ${location?.errorInfo}")
+            if (code == 7) {
+                requireActivity().runOnUiThread {
+                    Toast.makeText(
+                        requireContext(),
+                        R.string.location_amap_key_error,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
             fallbackLastKnown()
             return
         }
@@ -493,8 +533,30 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         }
     }
 
-    /** 高德定位失败时回退系统最近已知位置（网络/GPS）。 */
+    /** 高德定位失败时：先请求一次真实定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
     private fun fallbackLastKnown() {
+        try {
+            io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->
+                requireActivity().runOnUiThread {
+                    if (loc != null) {
+                        ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
+                        amap?.moveCamera(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f)
+                        )
+                        Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
+                    } else {
+                        useLastKnownFallback()
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "system locate failed", t)
+            useLastKnownFallback()
+        }
+    }
+
+    /** 最后的兜底：系统最近已知位置（仅作最后手段）。 */
+    private fun useLastKnownFallback() {
         try {
             val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
             val loc = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)

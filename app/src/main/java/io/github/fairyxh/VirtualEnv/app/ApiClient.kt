@@ -85,11 +85,12 @@ object ApiClient {
 
     // ---------- 路线模拟控制 ----------
 
-    /** 一键启动路线模拟。speed 为 km/h，<=0 时使用路线默认速度。 */
-    fun startRoute(id: Long, speedKmh: Double = 0.0): ApiResult {
+    /** 一键启动路线模拟。speed 为 km/h，<=0 时使用路线默认速度；stepFrequency<=0 用路线默认步频。 */
+    fun startRoute(id: Long, speedKmh: Double = 0.0, stepFrequency: Int = 0): ApiResult {
         val body = JSONObject().apply {
             put("id", id)
             put("speed", speedKmh)
+            put("stepFrequency", stepFrequency)
         }
         return post("/api/route/start", body)
     }

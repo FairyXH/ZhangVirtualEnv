@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/ballView"
-    android:layout_width="56dp"
-    android:layout_height="56dp"
-    android:background="@drawable/bg_ball"
+    android:layout_width="64dp"
+    android:layout_height="64dp"
+    android:contentDescription="@string/float_ball_label"
     android:elevation="12dp"
-    android:gravity="center"
-    android:text="@string/float_ball_label"
-    android:textColor="@android:color/white"
-    android:textSize="14sp" />
+    android:src="@drawable/bg_ball" />

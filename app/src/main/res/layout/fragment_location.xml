@@ -209,13 +209,29 @@
                     android:text="@string/float_open_desc"
                     style="@style/Text.Caption" />
 
-                <Button
-                    android:id="@+id/floatWindowButton"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/space_sm"
-                    android:text="@string/float_open"
-                    style="@style/Button.Pill" />
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/floatWindowButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/float_open"
+                        style="@style/Button.Pill" />
+
+                    <Button
+                        android:id="@+id/closeFloatButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:layout_weight="1"
+                        android:text="@string/float_close_window"
+                        style="@style/Button.Pill.Secondary" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- Coordinates + save card -->

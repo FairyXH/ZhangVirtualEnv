@@ -105,6 +105,9 @@ class LocationSimFragment : Fragment() {
         }
 
         root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
+        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
+            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
+        }
 
         applyButton.setOnClickListener {
             val lat = latitudeInput.text.toString().toDoubleOrNull()
@@ -365,7 +368,8 @@ class LocationSimFragment : Fragment() {
             requireActivity().runOnUiThread {
                 val data = result.data
                 if (data != null) {
-                    val enabled = data.optBoolean("enabled", false)
+                    // 开关只反映单点引擎；路线运行中位置由路线引擎提供，开关保持关闭
+                    val enabled = data.optBoolean("singleEnabled", false)
                     updatingFromBackend = true
                     enableSwitch.isChecked = enabled
                     updatingFromBackend = false
@@ -403,6 +407,15 @@ class LocationSimFragment : Fragment() {
             client.setLocationListener { location ->
                 if (location == null || location.errorCode != 0) {
                     ZLog.w(TAG_SCOPE, "locate error=${location?.errorCode} ${location?.errorInfo}")
+                    if (location?.errorCode == 7) {
+                        requireActivity().runOnUiThread {
+                            Toast.makeText(
+                                requireContext(),
+                                R.string.location_amap_key_error,
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                     fallbackLastKnown()
                     return@setLocationListener
                 }
@@ -427,8 +440,30 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /** 高德定位失败时回退系统最近已知位置（网络/GPS）。 */
+    /** 高德定位失败时：先请求一次真实定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
     private fun fallbackLastKnown() {
+        try {
+            io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->
+                requireActivity().runOnUiThread {
+                    if (loc != null) {
+                        val latLng = LatLng(loc.latitude, loc.longitude)
+                        ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
+                        selectOnMap(latLng)
+                        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+                        Toast.makeText(requireContext(), R.string.location_locate_fallback, Toast.LENGTH_SHORT).show()
+                    } else {
+                        useLastKnownFallback()
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "system locate failed", t)
+            useLastKnownFallback()
+        }
+    }
+
+    /** 最后的兜底：系统最近已知位置（仅作最后手段）。 */
+    private fun useLastKnownFallback() {
         try {
             val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
             val loc = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)

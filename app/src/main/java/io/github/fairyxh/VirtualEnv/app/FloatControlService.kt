@@ -46,12 +46,22 @@ class FloatControlService : Service() {
                 ZLog.e(TAG_SCOPE, "start service failed", t)
             }
         }
+
+        /** 关闭悬浮窗（控制端页面按钮调用）。 */
+        fun stop(context: android.content.Context) {
+            try {
+                context.stopService(Intent(context, FloatControlService::class.java))
+            } catch (t: Throwable) {
+                ZLog.e(TAG_SCOPE, "stop service failed", t)
+            }
+        }
     }
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var panelView: View? = null
     private var ballView: View? = null
+    private var ballParams: WindowManager.LayoutParams? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private lateinit var joystickView: JoystickView
@@ -59,8 +69,12 @@ class FloatControlService : Service() {
     private lateinit var speedValue: TextView
     private lateinit var routePanel: View
     private lateinit var routeSpinner: Spinner
-    private lateinit var speedInput: EditText
-    private lateinit var stepInput: EditText
+    private lateinit var speedStepValue: TextView
+    private lateinit var freqStepValue: TextView
+
+    /** 悬浮窗路线速度/步频微调值（输入法不可用，改加减微调；精确输入在 App 内）。 */
+    private var routeSpeedKmh = 5.04
+    private var routeStepFreq = 120
 
     private val executor = Executors.newSingleThreadExecutor()
     private val joystickActive = AtomicBoolean(false)
@@ -112,8 +126,8 @@ class FloatControlService : Service() {
         speedValue = view.findViewById(R.id.speedValue)
         routePanel = view.findViewById(R.id.routePanel)
         routeSpinner = view.findViewById(R.id.routeSpinner)
-        speedInput = view.findViewById(R.id.routeSpeedInput)
-        stepInput = view.findViewById(R.id.routeStepInput)
+        speedStepValue = view.findViewById(R.id.speedStepValue)
+        freqStepValue = view.findViewById(R.id.freqStepValue)
 
         setupJoystick()
         setupHeaderDrag(view)
@@ -214,7 +228,7 @@ class FloatControlService : Service() {
                 toast(R.string.float_route_select_first)
                 return@setOnClickListener
             }
-            val speed = speedInput.text.toString().toDoubleOrNull() ?: 0.0
+            val speed = routeSpeedKmh
             executor.execute {
                 val result = ApiClient.startRoute(selectedRouteId, speed)
                 toastResult(result, R.string.float_route_started)
@@ -233,11 +247,37 @@ class FloatControlService : Service() {
             executor.execute { toastResult(ApiClient.stopRoute(), R.string.float_route_stopped) }
         }
         view.findViewById<View>(R.id.routeConfigButton).setOnClickListener {
-            val speed = speedInput.text.toString().toDoubleOrNull() ?: 0.0
-            val step = stepInput.text.toString().toIntOrNull() ?: 0
+            val speed = routeSpeedKmh
+            val step = routeStepFreq
             executor.execute { toastResult(ApiClient.configRoute(speed, step), R.string.float_route_configured) }
         }
+        setupRouteSteppers(view)
         view.findViewById<View>(R.id.routeRefreshButton).setOnClickListener { loadRoutes() }
+    }
+
+    /** 速度/步频加减微调（悬浮窗输入法不可用，精确输入在 App 内）。 */
+    private fun setupRouteSteppers(view: View) {
+        fun render() {
+            speedStepValue.text = String.format("%.1f", routeSpeedKmh)
+            freqStepValue.text = routeStepFreq.toString()
+        }
+        view.findViewById<View>(R.id.speedStepMinus).setOnClickListener {
+            routeSpeedKmh = (routeSpeedKmh - 0.5).coerceAtLeast(1.0)
+            render()
+        }
+        view.findViewById<View>(R.id.speedStepPlus).setOnClickListener {
+            routeSpeedKmh = (routeSpeedKmh + 0.5).coerceAtMost(60.0)
+            render()
+        }
+        view.findViewById<View>(R.id.freqStepMinus).setOnClickListener {
+            routeStepFreq = (routeStepFreq - 10).coerceAtLeast(40)
+            render()
+        }
+        view.findViewById<View>(R.id.freqStepPlus).setOnClickListener {
+            routeStepFreq = (routeStepFreq + 10).coerceAtMost(300)
+            render()
+        }
+        render()
     }
 
     private fun loadRoutes() {
@@ -292,11 +332,25 @@ class FloatControlService : Service() {
 
     // ---------- 收起为悬浮球 / 展开 ----------
 
+    /** 复制 LayoutParams（同一实例不能复用 addView，会导致窗口 1x1）。 */
+    private fun copyParams(src: WindowManager.LayoutParams): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            src.width, src.height,
+            src.type,
+            src.flags,
+            src.format
+        ).apply {
+            gravity = src.gravity
+            x = src.x
+            y = src.y
+        }
+    }
+
     /** 收起面板为悬浮球（无关闭按钮；再次点击悬浮球展开）。 */
     private fun collapseToBall() {
         stopJoystick()
         val panel = panelView ?: return
-        val params = layoutParams ?: return
+        val base = layoutParams ?: return
         try {
             windowManager.removeView(panel)
         } catch (_: Throwable) {
@@ -304,16 +358,28 @@ class FloatControlService : Service() {
         }
         val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
         ballView = ball
-        ball.setOnClickListener { expandFromBall() }
-        setupBallDrag(ball)
+        // 当前 64dp 的 80%：51.2dp，黑色半透明球
+        val px = (64 * 0.8f * resources.displayMetrics.density).toInt()
+        val params = WindowManager.LayoutParams(
+            px, px,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = base.x
+            y = base.y
+        }
+        ballParams = params
+        setupBallDrag(ball, params)
         try {
             windowManager.addView(ball, params)
-            ZLog.d(TAG_SCOPE, "collapsed to ball")
+            ZLog.d(TAG_SCOPE, "collapsed to ball at ${params.x},${params.y} size=${px}px")
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "add ball failed, restore panel", t)
             ballView = null
             try {
-                windowManager.addView(panel, params)
+                windowManager.addView(panel, copyParams(base))
             } catch (_: Throwable) {
             }
         }
@@ -322,45 +388,68 @@ class FloatControlService : Service() {
     /** 点击悬浮球展开面板。 */
     private fun expandFromBall() {
         val ball = ballView ?: return
-        val params = layoutParams ?: return
+        val base = layoutParams ?: return
         try {
             windowManager.removeView(ball)
         } catch (_: Throwable) {
         }
         ballView = null
+        ballParams = null
         val panel = panelView ?: return
         try {
-            windowManager.addView(panel, params)
+            windowManager.addView(panel, copyParams(base))
             ZLog.d(TAG_SCOPE, "expanded from ball")
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "re-add panel failed", t)
         }
     }
 
-    private fun setupBallDrag(ball: View) {
+    /**
+     * 悬浮球交互：点按（未拖动）展开面板，长距离移动则拖动悬浮球。
+     *
+     * 不能用 setOnClickListener + setOnTouchListener 组合：DOWN 被 touch
+     * listener 消费后 View 不再走 onClick，导致“点不开”。
+     */
+    private fun setupBallDrag(ball: View, params: WindowManager.LayoutParams) {
         var initialX = 0
         var initialY = 0
         var touchX = 0f
         var touchY = 0f
+        var dragged = false
+        val DRAG_SLOP = 8f
         ball.setOnTouchListener { _, event ->
-            val params = layoutParams ?: return@setOnTouchListener false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
                     initialY = params.y
                     touchX = event.rawX
                     touchY = event.rawY
+                    dragged = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - touchX).toInt()
-                    params.y = initialY + (event.rawY - touchY).toInt()
-                    try {
-                        windowManager.updateViewLayout(ball, params)
-                    } catch (_: Throwable) {
+                    val dx = event.rawX - touchX
+                    val dy = event.rawY - touchY
+                    if (kotlin.math.abs(dx) > DRAG_SLOP || kotlin.math.abs(dy) > DRAG_SLOP) {
+                        dragged = true
+                    }
+                    if (dragged) {
+                        params.x = initialX + dx.toInt()
+                        params.y = initialY + dy.toInt()
+                        try {
+                            windowManager.updateViewLayout(ball, params)
+                        } catch (_: Throwable) {
+                        }
                     }
                     true
                 }
+                MotionEvent.ACTION_UP -> {
+                    if (!dragged) {
+                        expandFromBall()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
                 else -> false
             }
         }

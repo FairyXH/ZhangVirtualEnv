@@ -236,9 +236,10 @@ class ApiServer(
         val json = JSONObject(body)
         val id = json.optLong("id", -1)
         val speed = json.optDouble("speed", 0.0)
-        val route = backend.startRoute(id, speed)
+        val stepFrequency = json.optInt("stepFrequency", 0)
+        val route = backend.startRoute(id, speed, stepFrequency)
             ?: return ApiResult.error("route not found: $id")
-        ZLog.i(TAG_SCOPE, "route start id=$id name=${route.optString("name")}")
+        ZLog.i(TAG_SCOPE, "route start id=$id name=${route.optString("name")} stepFrequency=$stepFrequency")
         return ApiResult.ok("started", route)
     }
 
@@ -517,7 +518,7 @@ class ApiServer(
     }
 
     private fun locationStatus(): ApiResult {
-        return ApiResult.ok("ok", backend.locationState().toJson())
+        return ApiResult.ok("ok", backend.locationStatusJson())
     }
 
     private fun locationSet(body: String): ApiResult {

@@ -238,41 +238,109 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <EditText
-                android:id="@+id/routeSpeedInput"
-                android:layout_width="0dp"
+            <TextView
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="@string/float_route_speed_hint"
-                android:inputType="numberDecimal"
-                android:maxLines="1"
-                android:minHeight="0dp"
-                android:textSize="11sp"
-                style="@style/EditText.Field" />
+                android:text="@string/float_speed_label"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
 
-            <EditText
-                android:id="@+id/routeStepInput"
+            <TextView
+                android:id="@+id/speedStepMinus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_pill_secondary"
+                android:gravity="center"
+                android:text="-"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/speedStepValue"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:hint="@string/float_route_step_hint"
-                android:inputType="number"
-                android:maxLines="1"
-                android:minHeight="0dp"
-                android:textSize="11sp"
-                style="@style/EditText.Field" />
+                android:gravity="center"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/speedStepPlus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_pill_secondary"
+                android:gravity="center"
+                android:text="+"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/float_step_label"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/freqStepMinus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_pill_secondary"
+                android:gravity="center"
+                android:text="-"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/freqStepValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/freqStepPlus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_pill_secondary"
+                android:gravity="center"
+                android:text="+"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="end">
 
             <Button
                 android:id="@+id/routeConfigButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
+                android:paddingStart="12dp"
                 android:paddingTop="6dp"
+                android:paddingEnd="12dp"
                 android:paddingBottom="6dp"
                 android:text="@string/float_route_config"
                 android:textSize="11sp"
