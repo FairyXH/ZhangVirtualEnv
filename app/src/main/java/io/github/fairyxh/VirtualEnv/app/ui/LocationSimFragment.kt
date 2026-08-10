@@ -69,7 +69,9 @@ class LocationSimFragment : Fragment() {
     private var selectedMarker: Marker? = null
     private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
     private var mapCollapsed = false
+    private var mapSatellite = false
     private lateinit var mapCollapseButton: TextView
+    private lateinit var satelliteToggle: TextView
     private lateinit var mapPanel: View
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -107,11 +109,6 @@ class LocationSimFragment : Fragment() {
             }
         }
 
-        root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
-        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
-            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
-        }
-
         applyButton.setOnClickListener {
             val lat = latitudeInput.text.toString().toDoubleOrNull()
             val lon = longitudeInput.text.toString().toDoubleOrNull()
@@ -126,8 +123,14 @@ class LocationSimFragment : Fragment() {
         locateButton.setOnClickListener { locateCurrentPosition() }
         setupSearch()
         mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
+        satelliteToggle = root.findViewById(R.id.satelliteToggle)
         mapPanel = root.findViewById(R.id.mapPanel)
         mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
+        satelliteToggle.setOnClickListener { toggleSatellite() }
+        // 输入框默认值：地点名称默认时间（有高德选点地址时自动使用地址）
+        pointNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.location_title))
+        )
 
         initMapSafely(savedInstanceState)
         refreshSavedPoints()
@@ -258,6 +261,10 @@ class LocationSimFragment : Fragment() {
         val wgs = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng)
         latitudeInput.setText(formatCoord(wgs.latitude))
         longitudeInput.setText(formatCoord(wgs.longitude))
+        // 名称默认取最近一次高德选点/搜索的地址，没有则使用日期
+        pointNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.locationOrRoute(getString(R.string.location_title))
+        )
         ZLog.d(TAG_SCOPE, "map picked gcj=${latLng.latitude},${latLng.longitude} wgs=${wgs.latitude},${wgs.longitude}")
     }
 
@@ -295,26 +302,20 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    private fun openFloatWindow() {
-        val context = requireContext()
-        if (!android.provider.Settings.canDrawOverlays(context)) {
-            Toast.makeText(context, R.string.float_permission_required, Toast.LENGTH_LONG).show()
-            try {
-                startActivity(
-                    android.content.Intent(
-                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        android.net.Uri.parse("package:${context.packageName}")
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (t: Throwable) {
-                startActivity(
-                    android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            return
+    /** 卫星图/标准图切换。 */
+    private fun toggleSatellite() {
+        mapSatellite = !mapSatellite
+        try {
+            amap?.mapType = if (mapSatellite) com.amap.api.maps.AMap.MAP_TYPE_SATELLITE
+            else com.amap.api.maps.AMap.MAP_TYPE_NORMAL
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "map type switch failed", t)
         }
-        io.github.fairyxh.VirtualEnv.app.FloatControlService.start(context)
+        satelliteToggle.setBackgroundResource(if (mapSatellite) R.drawable.bg_pill else R.drawable.bg_pill_secondary)
+        satelliteToggle.setTextColor(
+            resources.getColor(if (mapSatellite) R.color.bg_secondary else R.color.text_secondary, null)
+        )
+        satelliteToggle.text = getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite)
     }
 
     /** 保存当前输入坐标（含名称/备注），成功后刷新列表。 */
@@ -336,7 +337,11 @@ class LocationSimFragment : Fragment() {
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 if (result.code == ApiResult.CODE_OK) {
-                    pointNameInput.text.clear()
+                    pointNameInput.setText(
+                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                            getString(R.string.location_title)
+                        )
+                    )
                     pointRemarkInput.text.clear()
                     refreshSavedPoints()
                 }
@@ -622,6 +627,7 @@ class LocationSimFragment : Fragment() {
     private fun jumpToSearchResult(poi: com.amap.api.services.core.PoiItem) {
         val point = poi.latLonPoint ?: return
         val latLng = LatLng(point.latitude, point.longitude)
+        io.github.fairyxh.VirtualEnv.util.DefaultNames.rememberPoi(poi.title)
         amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
         selectOnMap(latLng)
         searchResults.visibility = View.GONE

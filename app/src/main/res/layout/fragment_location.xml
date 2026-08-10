@@ -32,20 +32,6 @@
                 android:text="@string/location_subtitle"
                 style="@style/Text.Caption" />
         </LinearLayout>
-
-        <!-- 地图面板收起/展开箭头 -->
-        <TextView
-            android:id="@+id/mapCollapseButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="@dimen/space_sm"
-            android:background="@drawable/bg_pill_secondary"
-            android:paddingStart="@dimen/space_md"
-            android:paddingTop="@dimen/space_xs"
-            android:paddingEnd="@dimen/space_md"
-            android:paddingBottom="@dimen/space_xs"
-            android:text="@string/map_panel_collapse"
-            android:textSize="@dimen/text_caption" />
     </LinearLayout>
 
     <!-- 可收起面板：搜索 + 结果 + 提示 + 地图 + 当前位置 -->
@@ -160,6 +146,42 @@
         android:minWidth="0dp"
         android:text="@string/route_locate"
         android:textSize="@dimen/text_caption" />
+
+    <!-- 地图工具行：卫星图切换 + iOS 通知栏式下拉箭头（收起地图） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginEnd="@dimen/space_md"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/satelliteToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill_secondary"
+            android:gravity="center"
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/space_md"
+            android:paddingBottom="@dimen/space_xs"
+            android:text="@string/map_satellite"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/text_caption" />
+
+        <TextView
+            android:id="@+id/mapCollapseButton"
+            android:layout_width="40dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="@dimen/space_sm"
+            android:background="@drawable/bg_pill_secondary"
+            android:gravity="center"
+            android:text="@string/map_panel_collapse"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+    </LinearLayout>
     </LinearLayout><!-- /mapPanel -->
 
     <ScrollView
@@ -214,53 +236,6 @@
                         android:id="@+id/enableSwitch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- Float window card -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
-                android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="@dimen/space_md">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/float_open"
-                    style="@style/Text.Headline" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_xs"
-                    android:text="@string/float_open_desc"
-                    style="@style/Text.Caption" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_sm"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/floatWindowButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/float_open"
-                        style="@style/Button.Pill" />
-
-                    <Button
-                        android:id="@+id/closeFloatButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="@dimen/space_sm"
-                        android:layout_weight="1"
-                        android:text="@string/float_close_window"
-                        style="@style/Button.Pill.Secondary" />
                 </LinearLayout>
             </LinearLayout>
 

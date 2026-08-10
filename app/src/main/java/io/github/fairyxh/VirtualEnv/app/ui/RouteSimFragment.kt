@@ -70,7 +70,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private var amap: AMap? = null
     private var locationClient: AMapLocationClient? = null
     private var mapCollapsed = false
+    private var mapSatellite = false
     private lateinit var mapCollapseButton: TextView
+    private lateinit var satelliteToggle: TextView
     private lateinit var mapPanel: View
 
     private val points = mutableListOf<LatLng>()
@@ -110,14 +112,16 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         routeStepInput = root.findViewById(R.id.routeStepInput)
         setupPresets(root)
         mapCollapseButton = root.findViewById(R.id.mapCollapseButton)
+        satelliteToggle = root.findViewById(R.id.satelliteToggle)
         mapPanel = root.findViewById(R.id.mapPanel)
         mapCollapseButton.setOnClickListener { toggleMapCollapsed() }
+        satelliteToggle.setOnClickListener { toggleSatellite() }
+        // 输入框默认值：路线名称默认时间（有高德选点地址时自动使用地址）
+        routeNameInput.setText(
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.route_title))
+        )
 
         locateButton.setOnClickListener { locateCurrentPosition() }
-        root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
-        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
-            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
-        }
         root.findViewById<Button>(R.id.clearButton).setOnClickListener { clearRoute() }
         root.findViewById<Button>(R.id.saveButton).setOnClickListener { saveRoute() }
 
@@ -346,10 +350,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     private fun saveRoute() {
         val name = routeNameInput.text.toString().trim()
-        if (name.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.route_name_required, Toast.LENGTH_SHORT).show()
-            return
-        }
+            .ifEmpty {
+                io.github.fairyxh.VirtualEnv.util.DefaultNames.locationOrRoute(getString(R.string.route_title))
+            }
         if (points.size < 2) {
             Toast.makeText(requireContext(), R.string.route_points_required, Toast.LENGTH_SHORT).show()
             return
@@ -363,7 +366,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                     currentRouteId = result.data?.optLong("id", -1L) ?: -1L
                     currentRouteName = name
                     clearRoute()
-                    routeNameInput.text.clear()
+                    routeNameInput.setText(
+                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                            getString(R.string.route_title)
+                        )
+                    )
                     routeRemarkInput.text.clear()
                     refreshSavedRoutes()
                 }
@@ -416,26 +423,19 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         }
     }
 
-    private fun openFloatWindow() {
-        val context = requireContext()
-        if (!android.provider.Settings.canDrawOverlays(context)) {
-            Toast.makeText(context, R.string.float_permission_required, Toast.LENGTH_LONG).show()
-            try {
-                startActivity(
-                    android.content.Intent(
-                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        android.net.Uri.parse("package:${context.packageName}")
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (t: Throwable) {
-                startActivity(
-                    android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            return
+    /** 卫星图/标准图切换。 */
+    private fun toggleSatellite() {
+        mapSatellite = !mapSatellite
+        try {
+            amap?.mapType = if (mapSatellite) AMap.MAP_TYPE_SATELLITE else AMap.MAP_TYPE_NORMAL
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "map type switch failed", t)
         }
-        io.github.fairyxh.VirtualEnv.app.FloatControlService.start(context)
+        satelliteToggle.setBackgroundResource(if (mapSatellite) R.drawable.bg_pill else R.drawable.bg_pill_secondary)
+        satelliteToggle.setTextColor(
+            resources.getColor(if (mapSatellite) R.color.bg_secondary else R.color.text_secondary, null)
+        )
+        satelliteToggle.text = getString(if (mapSatellite) R.string.map_standard else R.string.map_satellite)
     }
 
     /** 一键启动路线模拟（Backend RouteEngine 沿路线推进）。 */
@@ -693,6 +693,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private fun jumpToSearchResult(poi: com.amap.api.services.core.PoiItem) {
         val point = poi.latLonPoint ?: return
         val latLng = LatLng(point.latitude, point.longitude)
+        io.github.fairyxh.VirtualEnv.util.DefaultNames.rememberPoi(poi.title)
         amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
         searchResults.visibility = View.GONE
         hideKeyboard()
