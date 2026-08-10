@@ -193,5 +193,46 @@
                 android:text="@string/settings_amap_save"
                 style="@style/Button.Pill" />
         </LinearLayout>
+
+        <!-- BLE 扫描测试（不 Suspend） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="@dimen/space_md">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_ble_test_title"
+                style="@style/Text.Headline" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:text="@string/settings_ble_test_desc"
+                style="@style/Text.Caption" />
+
+            <Button
+                android:id="@+id/bleTestButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:text="@string/settings_ble_test_start"
+                style="@style/Button.Pill" />
+
+            <TextView
+                android:id="@+id/bleTestResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:fontFamily="monospace"
+                android:text="@string/settings_ble_test_idle"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/text_caption" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

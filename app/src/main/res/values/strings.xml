@@ -145,6 +145,13 @@
     <string name="settings_amap_save">保存 Key</string>
     <string name="settings_amap_saved">已保存，重启应用后生效</string>
     <string name="settings_amap_key_empty">请输入 API Key</string>
+    <string name="settings_ble_test_title">BLE 扫描测试（不 Suspend）</string>
+    <string name="settings_ble_test_desc">直接调用 BluetoothLeScanner.startScan 验证蓝牙栈虚拟 BLE 投递，不影响当前虚拟环境状态</string>
+    <string name="settings_ble_test_start">开始扫描 8 秒</string>
+    <string name="settings_ble_test_idle">未开始</string>
+    <string name="settings_ble_test_running">扫描中…</string>
+    <string name="settings_ble_test_none">扫描完成：未收到任何设备</string>
+    <string name="settings_ble_test_perm">缺少蓝牙扫描权限</string>
     <string name="settings_amap_privacy">我已阅读并同意《高德开放平台隐私权政策》</string>
     <string name="settings_amap_privacy_link">查看隐私合规说明文档</string>
     <string name="settings_amap_privacy_required">请先阅读并同意高德隐私政策</string>
