@@ -51,14 +51,37 @@ class FrameworkEnvHookAdapter(
         Thread(r, "ZVE-EnvRefresh").apply { isDaemon = true }
     }
 
+    /** 配置未就绪时暂存的 BLE 扫描回调（配置就绪后补投递虚拟结果）。 */
+    private val pendingBleCallbacks = java.util.concurrent.ConcurrentHashMap.newKeySet<Any>()
+
     private fun startRefreshLoop() {
         refreshExecutor.scheduleWithFixedDelay(
-            { runCatching { stepInjector.refresh() } },
+            {
+                runCatching { stepInjector.refresh() }
+                runCatching { flushPendingBle() }
+            },
+            300,
             500,
-            1000,
             java.util.concurrent.TimeUnit.MILLISECONDS
         )
         ZLog.i(TAG_SCOPE, "env refresh loop started")
+    }
+
+    /** BLE 配置就绪后补投递挂起的扫描回调（与传感器 pending 机制一致）。 */
+    private fun flushPendingBle() {
+        if (pendingBleCallbacks.isEmpty()) return
+        if (cache.currentBle() == null) return
+        val iter = pendingBleCallbacks.iterator()
+        while (iter.hasNext()) {
+            val callback = iter.next()
+            iter.remove()
+            try {
+                deliverVirtualBle(callback)
+                ZLog.i(TAG_SCOPE, "pending ble callback flushed -> virtual")
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "flush pending ble failed", t)
+            }
+        }
     }
 
     // ---------- 步频：SensorManager.registerListener ----------
@@ -214,14 +237,14 @@ class FrameworkEnvHookAdapter(
         if (hooked == 0) ZLog.w(TAG_SCOPE, "GnssStatus candidates not found")
     }
 
-    /** 立即投递一次虚拟状态并启动 1s 周期投递（虚拟关闭时自动停止）。 */
+    /** 立即投递一次虚拟状态并启动周期投递（虚拟关闭时自动停止）。 */
     private fun startGnssInject(callback: Any) {
         if (gnssListeners.containsKey(callback)) return
         deliverVirtualGnss(callback)
         val future = gnssExecutor.scheduleWithFixedDelay(
             { deliverVirtualGnss(callback) },
-            1000,
-            1000,
+            300,
+            300,
             java.util.concurrent.TimeUnit.MILLISECONDS
         )
         gnssListeners[callback] = future
@@ -330,14 +353,31 @@ class FrameworkEnvHookAdapter(
             }
         if (oneParam != null) {
             val ok = registrar.register(oneParam) { chain ->
-                deliverVirtualBle(chain.getArg(0)) ?: chain.proceed()
+                val callback = chain.getArg(0)
+                try {
+                    if (deliverVirtualBle(callback) == true) return@register null
+                    // 未启用/未就绪：暂存回调，配置就绪后补投递虚拟结果；同时放行真实扫描
+                    pendingBleCallbacks.add(callback)
+                    ZLog.d(TAG_SCOPE, "startScan(1) -> pending virtual ble")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "startScan(1) hook failed", t)
+                }
+                chain.proceed()
                 null
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(ScanCallback)")
         }
         if (threeParam != null) {
             val ok = registrar.register(threeParam) { chain ->
-                deliverVirtualBle(chain.getArg(2)) ?: chain.proceed()
+                val callback = chain.getArg(2)
+                try {
+                    if (deliverVirtualBle(callback) == true) return@register null
+                    pendingBleCallbacks.add(callback)
+                    ZLog.d(TAG_SCOPE, "startScan(3) -> pending virtual ble")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "startScan(3) hook failed", t)
+                }
+                chain.proceed()
                 null
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(List,ScanSettings,ScanCallback)")

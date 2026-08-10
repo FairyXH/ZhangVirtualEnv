@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  */
 class EnvStateCache(
     private val token: String = "",
-    private val pollIntervalMs: Long = 2000L,
+    private val pollIntervalMs: Long = 500L,
 ) {
 
     companion object {
