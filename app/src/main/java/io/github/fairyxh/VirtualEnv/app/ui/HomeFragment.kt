@@ -6,10 +6,36 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
@@ -17,6 +43,14 @@ import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
 import io.github.fairyxh.VirtualEnv.app.collect.StreamEnvironmentSampler
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCheckbox
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassSegmented
+import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
@@ -27,10 +61,8 @@ import java.util.concurrent.TimeUnit
 /**
  * 主页：模块状态 + 一键采集（快照/录像选项卡）+ 已保存采集（快照/录像统一）+ 采集回放。
  *
- * - 快照：一键采集当前环境 → 保存为 collect 包并拆轨道（基站/WiFi/GNSS/位置）。
- * - 录像：按采样间隔持续采集 → 保存录像，并生成路线轨道。
- * - 回放：选择已保存采集，快照一次性启用（自动同步位置/基站/WiFi/GNSS），
- *   录像支持开始 / 暂停 / 继续 / 重新开始 / 倍速。
+ * 视图层已迁移到 Compose Liquid Glass（GlassCard / GlassButton / GlassField / GlassToggle），
+ * 全部业务逻辑（ApiClient / collector / executor / 权限 / 轮询）保持不变。
  */
 class HomeFragment : Fragment() {
 
@@ -65,40 +97,36 @@ class HomeFragment : Fragment() {
         val meta: String
     )
 
-    private lateinit var statusDot: View
-    private lateinit var statusText: TextView
-    private lateinit var statusDetail: TextView
-    private lateinit var featureStatusList: LinearLayout
-    private lateinit var collectButton: Button
-    private lateinit var collectResult: TextView
-    private lateinit var collectNameInput: android.widget.EditText
-    private lateinit var collectRemarkInput: android.widget.EditText
-    private lateinit var saveCollectButton: Button
-    private lateinit var collectTabSnapshot: TextView
-    private lateinit var collectTabRecording: TextView
-    private lateinit var snapshotPanel: View
-    private lateinit var recordingPanel: View
-    private lateinit var savedCollectEmpty: TextView
-    private lateinit var savedCollectList: android.widget.LinearLayout
+    // ---------- Compose 视图状态 ----------
 
-    private lateinit var recordingNameInput: android.widget.EditText
-    private lateinit var recordingIntervalInput: android.widget.EditText
-    private lateinit var recordingStartButton: Button
-    private lateinit var recordingStopButton: Button
-    private lateinit var recordingStatus: TextView
+    private var statusDotEnabled by mutableStateOf(false)
+    private var statusText by mutableStateOf("")
+    private var statusDetail by mutableStateOf("")
+    private val featureStatusRows = mutableStateListOf<Pair<String, String>>()
 
-    private lateinit var playbackSelected: TextView
-    private lateinit var playbackEnableButton: Button
-    private lateinit var playbackControls: View
-    private lateinit var playbackSpeedRow: View
-    private lateinit var playbackPauseButton: Button
-    private lateinit var playbackResumeButton: Button
-    private lateinit var playbackRestartButton: Button
-    private lateinit var playbackStopButton: Button
-    private lateinit var playbackSpeedInput: android.widget.EditText
-    private lateinit var playbackSpeedButton: Button
-    private lateinit var playbackLoopCheck: android.widget.CheckBox
-    private lateinit var playbackStatus: TextView
+    private var collectResult by mutableStateOf<String?>(null)
+    private var collectName by mutableStateOf("")
+    private var collectRemark by mutableStateOf("")
+    private var collectButtonEnabled by mutableStateOf(true)
+    private var saveCollectEnabled by mutableStateOf(false)
+    private var collectRecordingMode by mutableStateOf(false)
+
+    private var recordingName by mutableStateOf("")
+    private var recordingInterval by mutableStateOf("3")
+    private var recordingStatus by mutableStateOf("")
+    private var recordingRunning by mutableStateOf(false)
+
+    private var playbackSelected by mutableStateOf("")
+    private var playbackStatus by mutableStateOf("")
+    private var playbackControlsVisible by mutableStateOf(false)
+    private var playbackSpeedRowVisible by mutableStateOf(false)
+    private var playbackSpeed by mutableStateOf("1.0")
+    private var playbackLoop by mutableStateOf(true)
+
+    private val savedItems = mutableStateListOf<SavedItem>()
+    private var selectedItem: SavedItem? = null
+
+    // ---------- 业务对象（逻辑不变） ----------
 
     private val executor = Executors.newSingleThreadExecutor()
     private var collector: EnvironmentCollector? = null
@@ -110,21 +138,15 @@ class HomeFragment : Fragment() {
     /** 录像期间连续采集真实传感器数据（加速度/陀螺仪/计步）并逐帧追加。 */
     private var sensorRecorder: SensorStreamRecorder? = null
 
-    private var collectRecordingMode = false
-
     @Volatile
     private var recordingId = -1L
     private var recordingFrames = 0
-    private var recordingName = ""
+    private var recordingNameBackend = ""
     private var recordingScheduler: ScheduledExecutorService? = null
     private var pendingRecordingStart = false
 
     /** 采样链保护：collectAll 为异步链，上一轮未完成时跳过本轮，避免并发扫描。 */
     private val samplingBusy = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    /** 统一已保存采集（快照 + 录像）。 */
-    private val savedItems = mutableListOf<SavedItem>()
-    private var selectedItem: SavedItem? = null
 
     private val playbackPollHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val playbackPoll = object : Runnable {
@@ -159,112 +181,26 @@ class HomeFragment : Fragment() {
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        val root = inflater.inflate(R.layout.fragment_home, container, false)
-        statusDot = root.findViewById(R.id.statusDot)
-        statusText = root.findViewById(R.id.statusText)
-        statusDetail = root.findViewById(R.id.statusDetail)
-        featureStatusList = root.findViewById(R.id.featureStatusList)
-        collectButton = root.findViewById(R.id.collectButton)
-        collectResult = root.findViewById(R.id.collectResult)
-        collectNameInput = root.findViewById(R.id.collectNameInput)
-        collectRemarkInput = root.findViewById(R.id.collectRemarkInput)
-        saveCollectButton = root.findViewById(R.id.saveCollectButton)
-        collectTabSnapshot = root.findViewById(R.id.collectTabSnapshot)
-        collectTabRecording = root.findViewById(R.id.collectTabRecording)
-        snapshotPanel = root.findViewById(R.id.snapshotPanel)
-        recordingPanel = root.findViewById(R.id.recordingPanel)
-        savedCollectEmpty = root.findViewById(R.id.savedCollectEmpty)
-        savedCollectList = root.findViewById(R.id.savedCollectList)
         collector = EnvironmentCollector(requireContext())
-
-        recordingNameInput = root.findViewById(R.id.recordingNameInput)
-        recordingIntervalInput = root.findViewById(R.id.recordingIntervalInput)
-        recordingStartButton = root.findViewById(R.id.recordingStartButton)
-        recordingStopButton = root.findViewById(R.id.recordingStopButton)
-        recordingStatus = root.findViewById(R.id.recordingStatus)
         sensorRecorder = SensorStreamRecorder(requireContext())
         streamSampler = StreamEnvironmentSampler(requireContext())
 
-        playbackSelected = root.findViewById(R.id.playbackSelected)
-        playbackEnableButton = root.findViewById(R.id.playbackEnableButton)
-        playbackControls = root.findViewById(R.id.playbackControls)
-        playbackSpeedRow = root.findViewById(R.id.playbackSpeedRow)
-        playbackPauseButton = root.findViewById(R.id.playbackPauseButton)
-        playbackResumeButton = root.findViewById(R.id.playbackResumeButton)
-        playbackRestartButton = root.findViewById(R.id.playbackRestartButton)
-        playbackStopButton = root.findViewById(R.id.playbackStopButton)
-        playbackSpeedInput = root.findViewById(R.id.playbackSpeedInput)
-        playbackSpeedButton = root.findViewById(R.id.playbackSpeedButton)
-        playbackLoopCheck = root.findViewById(R.id.playbackLoopCheck)
-        playbackStatus = root.findViewById(R.id.playbackStatus)
-
-        root.findViewById<Button>(R.id.floatWindowButton).setOnClickListener { openFloatWindow() }
-        root.findViewById<Button>(R.id.closeFloatButton).setOnClickListener {
-            io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
-        }
-
         // 输入框默认值：录像名称默认时间，采集间隔默认 3 秒，快照名称默认时间
-        recordingNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
-        )
-        recordingIntervalInput.setText("3")
-        collectNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
-        )
+        recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
+        recordingInterval = "3"
+        collectName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        recordingStatus = getString(R.string.home_recording_idle)
+        playbackStatus = getString(R.string.home_playback_idle)
+        collectRecordingMode = false
 
-        collectButton.setOnClickListener { startCollect() }
-        saveCollectButton.setOnClickListener { saveCollect() }
-        recordingStartButton.setOnClickListener { startRecording() }
-        recordingStopButton.setOnClickListener { stopRecording() }
-
-        collectTabSnapshot.setOnClickListener { setCollectMode(false) }
-        collectTabRecording.setOnClickListener { setCollectMode(true) }
-
-        playbackEnableButton.setOnClickListener { enableSelectedPlayback() }
-        playbackPauseButton.setOnClickListener {
-            executor.execute {
-                val result = ApiClient.pauseRecordingPlayback()
-                requireActivity().runOnUiThread {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        playbackResumeButton.setOnClickListener {
-            executor.execute {
-                val result = ApiClient.resumeRecordingPlayback()
-                requireActivity().runOnUiThread {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        playbackRestartButton.setOnClickListener {
-            val sel = selectedItem
-            if (sel?.kind == "recording") {
-                executor.execute {
-                    ApiClient.stopRecordingPlayback()
-                    val result = ApiClient.playRecordings(listOf(sel.id), playbackLoopCheck.isChecked)
-                    requireActivity().runOnUiThread {
-                        Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-        playbackStopButton.setOnClickListener {
-            executor.execute {
-                val result = ApiClient.stopRecordingPlayback()
-                requireActivity().runOnUiThread {
-                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        playbackSpeedButton.setOnClickListener { setPlaybackSpeed() }
-
-        recordingStatus.text = getString(R.string.home_recording_idle)
-        playbackStatus.text = getString(R.string.home_playback_idle)
-        setCollectMode(false)
         refreshBackendStatus()
         refreshSavedItems()
-        return root
+        return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                HomeScreen(this@HomeFragment)
+            }
+        }
     }
 
     override fun onResume() {
@@ -293,18 +229,605 @@ class HomeFragment : Fragment() {
         super.onDestroyView()
     }
 
+    // ---------- Compose UI ----------
+
+    @Composable
+    private fun HomeScreen(fragment: HomeFragment) {
+        GlassBackdropHost(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+        ) { backdrop ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val colors = glassColors()
+                BasicText(
+                    getString(R.string.app_name),
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                )
+                BasicText(
+                    getString(R.string.home_subtitle),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+
+                // 模块状态卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_status_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StatusDot(
+                                enabled = statusDotEnabled,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            BasicText(
+                                statusText,
+                                Modifier.padding(start = 8.dp),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 15.sp)
+                            )
+                        }
+                        if (statusDetail.isNotBlank()) {
+                            BasicText(
+                                statusDetail,
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        }
+                        BasicText(
+                            getString(R.string.home_feature_status_title),
+                            Modifier.padding(top = 16.dp),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            getString(R.string.home_feature_status_hint),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        featureStatusRows.forEach { (label, value) ->
+                            Row(
+                                Modifier
+                                    .padding(top = 6.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                BasicText(
+                                    label,
+                                    Modifier.weight(1f),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                                BasicText(
+                                    value,
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 悬浮窗卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_float_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            getString(R.string.home_float_desc),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.openFloatWindow() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.float_open),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = {
+                                    io.github.fairyxh.VirtualEnv.app.FloatControlService.stop(requireContext())
+                                },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.float_close_window),
+                                    style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 一键采集卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_collect_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        GlassSegmented(
+                            backdrop = backdrop,
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .fillMaxWidth(),
+                            selectedIndex = { if (collectRecordingMode) 1 else 0 },
+                            onSelect = { index ->
+                                fragment.setCollectMode(index == 1)
+                            },
+                            count = 2
+                        ) { index ->
+                            BasicText(
+                                if (index == 0) getString(R.string.home_collect_tab_snapshot)
+                                else getString(R.string.home_collect_tab_recording),
+                                style = TextStyle(
+                                    color = if ((if (collectRecordingMode) 1 else 0) == index) Color.White else colors.textPrimary,
+                                    fontSize = 13.sp
+                                )
+                            )
+                        }
+
+                        if (!collectRecordingMode) {
+                            // 快照模式
+                            BasicText(
+                                getString(R.string.home_collect_desc),
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                            GlassButton(
+                                onClick = { fragment.startCollect() },
+                                backdrop = backdrop,
+                                modifier = Modifier
+                                    .padding(top = 12.dp)
+                                    .fillMaxWidth(),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.home_collect_button),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            collectResult?.let { result ->
+                                BasicText(
+                                    result,
+                                    Modifier
+                                        .padding(top = 12.dp)
+                                        .fillMaxWidth(),
+                                    style = TextStyle(
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
+                            GlassField(
+                                value = collectName,
+                                onValueChange = { collectName = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                                placeholder = getString(R.string.home_collect_name_hint)
+                            )
+                            GlassField(
+                                value = collectRemark,
+                                onValueChange = { collectRemark = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                placeholder = getString(R.string.home_collect_remark_hint)
+                            )
+                            GlassButton(
+                                onClick = { fragment.saveCollect() },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.home_collect_save),
+                                    style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        } else {
+                            // 录像模式
+                            BasicText(
+                                getString(R.string.home_recording_desc),
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                            GlassField(
+                                value = recordingName,
+                                onValueChange = { recordingName = it },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                                placeholder = getString(R.string.home_recording_name_hint)
+                            )
+                            Row(
+                                Modifier
+                                    .padding(top = 8.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassField(
+                                    value = recordingInterval,
+                                    onValueChange = { recordingInterval = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    placeholder = getString(R.string.home_recording_interval_hint)
+                                )
+                                GlassButton(
+                                    onClick = { fragment.startRecording() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    tint = colors.accent
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_recording_start),
+                                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = { fragment.stopRecording() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_recording_stop),
+                                        style = TextStyle(color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            BasicText(
+                                recordingStatus,
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        }
+                    }
+                }
+
+                // 采集回放卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_playback_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            playbackSelected.ifBlank { getString(R.string.home_playback_none) },
+                            Modifier.padding(top = 6.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        GlassButton(
+                            onClick = { fragment.enableSelectedPlayback() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            tint = colors.accent
+                        ) {
+                            BasicText(
+                                if (selectedItem?.kind == "recording") getString(R.string.home_playback_start_video)
+                                else getString(R.string.home_playback_enable),
+                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                        if (playbackControlsVisible) {
+                            Row(
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                GlassButton(
+                                    onClick = {
+                                        executor.execute {
+                                            val result = ApiClient.pauseRecordingPlayback()
+                                            requireActivity().runOnUiThread {
+                                                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_playback_pause),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = {
+                                        executor.execute {
+                                            val result = ApiClient.resumeRecordingPlayback()
+                                            requireActivity().runOnUiThread {
+                                                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_playback_resume),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            Row(
+                                Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                GlassButton(
+                                    onClick = {
+                                        val sel = selectedItem
+                                        if (sel?.kind == "recording") {
+                                            executor.execute {
+                                                ApiClient.stopRecordingPlayback()
+                                                val result = ApiClient.playRecordings(listOf(sel.id), playbackLoop)
+                                                requireActivity().runOnUiThread {
+                                                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_playback_restart),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = {
+                                        executor.execute {
+                                            val result = ApiClient.stopRecordingPlayback()
+                                            requireActivity().runOnUiThread {
+                                                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_playback_stop),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                        if (playbackSpeedRowVisible) {
+                            Row(
+                                Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                BasicText(
+                                    getString(R.string.home_playback_speed),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                GlassField(
+                                    value = playbackSpeed,
+                                    onValueChange = { playbackSpeed = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .weight(1f),
+                                    placeholder = getString(R.string.home_playback_speed_hint)
+                                )
+                                GlassButton(
+                                    onClick = { fragment.setPlaybackSpeed() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_playback_speed_set),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            Row(
+                                Modifier.padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassCheckbox(
+                                    checked = playbackLoop,
+                                    onCheckedChange = { playbackLoop = it }
+                                )
+                                BasicText(
+                                    getString(R.string.home_playback_loop),
+                                    Modifier.padding(start = 8.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                )
+                            }
+                        }
+                        BasicText(
+                            playbackStatus,
+                            Modifier.padding(top = 8.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                    }
+                }
+
+                // 已保存采集卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_saved_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        if (savedItems.isEmpty()) {
+                            BasicText(
+                                getString(R.string.home_saved_empty),
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            savedItems.forEach { item ->
+                                SavedItemRow(
+                                    item = item,
+                                    selected = selectedItem?.kind == item.kind && selectedItem?.id == item.id,
+                                    backdrop = backdrop,
+                                    onSelect = { fragment.selectItem(item) },
+                                    onDetail = { fragment.showSavedDetail(item) },
+                                    onDelete = { fragment.deleteItem(item) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SavedItemRow(
+        item: SavedItem,
+        selected: Boolean,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onSelect: () -> Unit,
+        onDetail: () -> Unit,
+        onDelete: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onSelect,
+            backdrop = backdrop,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth(),
+            selected = selected,
+            containerColor = if (selected) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
+            height = 56.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    val kindLabel = if (item.kind == "snapshot") {
+                        getString(R.string.home_saved_kind_snapshot)
+                    } else {
+                        getString(R.string.home_saved_kind_recording)
+                    }
+                    BasicText(
+                        "$kindLabel ${item.name}",
+                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    )
+                    if (item.remark.isNotBlank()) {
+                        BasicText(
+                            getString(R.string.location_point_remark_format, item.remark),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                        )
+                    }
+                    BasicText(
+                        item.meta,
+                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                    )
+                }
+                GlassButton(
+                    onClick = onDetail,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_saved_detail),
+                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                    )
+                }
+                GlassButton(
+                    onClick = onDelete,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.danger.copy(alpha = 0.25f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_recording_delete),
+                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun StatusDot(enabled: Boolean, modifier: Modifier = Modifier) {
+        val colors = glassColors()
+        Box(
+            modifier
+                .clip(CircleShape)
+                .drawBehind {
+                    drawCircle(
+                        color = if (enabled) colors.success else colors.textTertiary,
+                        radius = size.minDimension / 2f
+                    )
+                    if (enabled) {
+                        drawCircle(
+                            color = colors.success.copy(alpha = 0.35f),
+                            radius = size.minDimension * 0.85f
+                        )
+                    }
+                }
+        )
+    }
+
     // ---------- 选项卡 ----------
 
     private fun setCollectMode(recording: Boolean) {
         collectRecordingMode = recording
-        snapshotPanel.visibility = if (recording) View.GONE else View.VISIBLE
-        recordingPanel.visibility = if (recording) View.VISIBLE else View.GONE
-        collectTabSnapshot.setBackgroundResource(
-            if (recording) R.drawable.bg_pill_secondary else R.drawable.bg_pill
-        )
-        collectTabRecording.setBackgroundResource(
-            if (recording) R.drawable.bg_pill else R.drawable.bg_pill_secondary
-        )
     }
 
     // ---------- 状态 ----------
@@ -314,22 +837,22 @@ class HomeFragment : Fragment() {
             val reachable = ApiClient.ping()
             val info = if (reachable) ApiClient.getSystemInfo() else null
             requireActivity().runOnUiThread {
-                statusDot.isEnabled = reachable
+                statusDotEnabled = reachable
                 if (reachable) {
-                    statusText.text = getString(R.string.home_status_ok)
+                    statusText = getString(R.string.home_status_ok)
                     val enabledText = if (ApiClient.getLocationStatus().data?.optBoolean("enabled", false) == true) {
                         getString(R.string.location_enabled)
                     } else {
                         getString(R.string.location_disabled)
                     }
-                    statusDetail.text = getString(
+                    statusDetail = getString(
                         R.string.home_status_detail,
                         info?.data?.optString("phase", "1") ?: "-",
                         enabledText
                     )
                 } else {
-                    statusText.text = getString(R.string.home_status_offline)
-                    statusDetail.text = getString(R.string.home_status_offline_detail)
+                    statusText = getString(R.string.home_status_offline)
+                    statusDetail = getString(R.string.home_status_offline_detail)
                 }
             }
         }
@@ -369,10 +892,9 @@ class HomeFragment : Fragment() {
         env: ApiResult,
         joystick: ApiResult
     ) {
-        featureStatusList.removeAllViews()
+        featureStatusRows.clear()
         if (loc.code != ApiResult.CODE_OK || env.code != ApiResult.CODE_OK) {
-            val row = featureStatusRow(getString(R.string.home_status_offline), "—")
-            featureStatusList.addView(row)
+            featureStatusRows.add(getString(R.string.home_status_offline) to "—")
             return
         }
         val locData = loc.data
@@ -383,7 +905,7 @@ class HomeFragment : Fragment() {
             singleEnabled -> getString(R.string.location_enabled)
             else -> getString(R.string.location_disabled)
         }
-        featureStatusList.addView(featureStatusRow("位置", locText))
+        featureStatusRows.add("位置" to locText)
 
         val routeData = route.data
         val routeRunning = routeData?.optBoolean("running", false) == true
@@ -393,7 +915,7 @@ class HomeFragment : Fragment() {
         } else {
             getString(R.string.route_status_idle)
         }
-        featureStatusList.addView(featureStatusRow(getString(R.string.route_title), routeText))
+        featureStatusRows.add(getString(R.string.route_title) to routeText)
 
         val joyData = joystick.data
         val joyText = if (joyData?.optBoolean("enabled", false) == true) {
@@ -401,7 +923,7 @@ class HomeFragment : Fragment() {
         } else {
             getString(R.string.location_disabled)
         }
-        featureStatusList.addView(featureStatusRow(getString(R.string.float_mode_joystick), joyText))
+        featureStatusRows.add(getString(R.string.float_mode_joystick) to joyText)
 
         val envData = env.data
         listOf(
@@ -412,36 +934,10 @@ class HomeFragment : Fragment() {
             "sensor" to getString(R.string.env_sensor_title)
         ).forEach { (key, label) ->
             val enabled = envData?.optJSONObject(key)?.optBoolean("enabled", false) == true
-            featureStatusList.addView(
-                featureStatusRow(
-                    label,
-                    getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
-                )
+            featureStatusRows.add(
+                label to getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
             )
         }
-    }
-
-    /** 生成一行两列功能状态（名称 + 状态）。 */
-    private fun featureStatusRow(label: String, value: String): android.view.View {
-        val row = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, dp(3), 0, dp(3))
-        }
-        val name = TextView(requireContext()).apply {
-            text = label
-            setTextColor(resources.getColor(R.color.text_secondary, null))
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        row.addView(name)
-        val status = TextView(requireContext()).apply {
-            text = value
-            setTextColor(resources.getColor(R.color.text_primary, null))
-            textSize = 12f
-        }
-        row.addView(status)
-        return row
     }
 
     // ---------- 权限 ----------
@@ -485,9 +981,8 @@ class HomeFragment : Fragment() {
     }
 
     private fun doCollect() {
-        collectButton.isEnabled = false
-        collectResult.text = getString(R.string.home_collect_running)
-        collectResult.visibility = View.VISIBLE
+        collectButtonEnabled = false
+        collectResult = getString(R.string.home_collect_running)
         Toast.makeText(requireContext(), R.string.home_collect_suspend_notice, Toast.LENGTH_LONG).show()
         executor.execute {
             ApiClient.suspendEnv()
@@ -495,9 +990,9 @@ class HomeFragment : Fragment() {
                 ApiClient.resumeEnv()
                 lastCollectResult = result
                 requireActivity().runOnUiThread {
-                    collectButton.isEnabled = true
-                    collectResult.text = summarize(result)
-                    collectResult.visibility = View.VISIBLE
+                    collectButtonEnabled = true
+                    saveCollectEnabled = true
+                    collectResult = summarize(result)
                     ZLog.i(TAG_SCOPE, "collect done: ${result.length()}")
                 }
             }
@@ -507,7 +1002,7 @@ class HomeFragment : Fragment() {
     // ---------- 保存采集（collect 包 + 轨道拆分） ----------
 
     private fun saveCollect() {
-        val name = collectNameInput.text.toString().trim()
+        val name = collectName.trim()
         if (name.isEmpty()) {
             Toast.makeText(requireContext(), R.string.home_collect_name_required, Toast.LENGTH_SHORT).show()
             return
@@ -517,7 +1012,7 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.home_collect_none, Toast.LENGTH_SHORT).show()
             return
         }
-        val remark = collectRemarkInput.text.toString().trim()
+        val remark = collectRemark.trim()
         executor.execute {
             val apiResult = ApiClient.createEnvSnapshot(name, remark, "collect", result)
             if (apiResult.code == ApiResult.CODE_OK) {
@@ -643,14 +1138,14 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.home_recording_running, Toast.LENGTH_SHORT).show()
             return
         }
-        val name = recordingNameInput.text.toString().trim()
+        val name = recordingName.trim()
         if (name.isEmpty()) {
             Toast.makeText(requireContext(), R.string.home_recording_name_required, Toast.LENGTH_SHORT).show()
             return
         }
         // 流式采集：间隔支持小数秒，最低 0.1s（0.1~300）
-        val interval = (recordingIntervalInput.text.toString().toDoubleOrNull() ?: 1.0).coerceIn(0.1, 300.0)
-        recordingIntervalInput.setText(if (interval % 1.0 == 0.0) interval.toInt().toString() else interval.toString())
+        val interval = (recordingInterval.toDoubleOrNull() ?: 1.0).coerceIn(0.1, 300.0)
+        recordingInterval = if (interval % 1.0 == 0.0) interval.toInt().toString() else interval.toString()
         executor.execute {
             val result = ApiClient.startRecording(name, "")
             // 采集真实环境前先临时停用虚拟环境；必须在后台线程（主线程禁止网络）
@@ -661,11 +1156,9 @@ class HomeFragment : Fragment() {
                 if (result.code == ApiResult.CODE_OK) {
                     recordingId = result.data?.optLong("id", -1L) ?: -1L
                     recordingFrames = 0
-                    recordingName = name
-                    recordingNameInput.setText(
-                        io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
-                            getString(R.string.home_recording_title)
-                        )
+                    recordingNameBackend = name
+                    recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+                        getString(R.string.home_recording_title)
                     )
                     // 启动流式监听（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询）
                     streamSampler?.start()
@@ -677,7 +1170,8 @@ class HomeFragment : Fragment() {
                         Toast.LENGTH_LONG
                     ).show()
                     startSamplingLoop(interval)
-                    recordingStatus.text = getString(R.string.home_recording_running, name, recordingFrames)
+                    recordingRunning = true
+                    recordingStatus = getString(R.string.home_recording_running, name, recordingFrames)
                 } else {
                     Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 }
@@ -708,9 +1202,9 @@ class HomeFragment : Fragment() {
                                     recordingFrames++
                                     requireActivity().runOnUiThread {
                                         if (isAdded) {
-                                            recordingStatus.text = getString(
+                                            recordingStatus = getString(
                                                 R.string.home_recording_running,
-                                                recordingName,
+                                                recordingNameBackend,
                                                 recordingFrames
                                             )
                                         }
@@ -748,11 +1242,12 @@ class HomeFragment : Fragment() {
             ApiClient.resumeEnv()
             val result = ApiClient.stopRecording(id)
             if (result.code == ApiResult.CODE_OK) {
-                saveRecordingAsRoute(id, recordingName)
+                saveRecordingAsRoute(id, recordingNameBackend)
             }
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()
-                recordingStatus.text = getString(R.string.home_recording_idle)
+                recordingRunning = false
+                recordingStatus = getString(R.string.home_recording_idle)
                 if (result.code == ApiResult.CODE_OK) {
                     refreshSavedItems()
                 }
@@ -845,62 +1340,16 @@ class HomeFragment : Fragment() {
                         )
                     }
                 }
-                renderSavedItems()
             }
-        }
-    }
-
-    private fun renderSavedItems() {
-        savedCollectList.removeAllViews()
-        savedCollectEmpty.visibility = if (savedItems.isEmpty()) View.VISIBLE else View.GONE
-        savedItems.forEach { item ->
-            val row = layoutInflater.inflate(R.layout.item_saved_collect, savedCollectList, false)
-            val kindLabel = if (item.kind == "snapshot") {
-                getString(R.string.home_saved_kind_snapshot)
-            } else {
-                getString(R.string.home_saved_kind_recording)
-            }
-            row.findViewById<TextView>(R.id.collectName).text = "$kindLabel ${item.name}"
-            val remarkView = row.findViewById<TextView>(R.id.collectRemark)
-            if (item.remark.isBlank()) {
-                remarkView.visibility = View.GONE
-            } else {
-                remarkView.text = getString(R.string.location_point_remark_format, item.remark)
-            }
-            row.findViewById<TextView>(R.id.collectMeta).text = item.meta
-            val useBtn = row.findViewById<Button>(R.id.useButton)
-            useBtn.text = getString(R.string.home_saved_select)
-            useBtn.setOnClickListener {
-                selectItem(item)
-            }
-            row.findViewById<Button>(R.id.detailButton).setOnClickListener {
-                showSavedDetail(item)
-            }
-            row.findViewById<Button>(R.id.deleteButton).setOnClickListener {
-                deleteItem(item)
-            }
-            // 选中高亮
-            row.setBackgroundResource(
-                if (selectedItem?.kind == item.kind && selectedItem?.id == item.id) {
-                    R.drawable.bg_pill
-                } else {
-                    R.drawable.bg_field
-                }
-            )
-            savedCollectList.addView(row)
         }
     }
 
     private fun selectItem(item: SavedItem) {
         selectedItem = item
-        playbackSelected.text = getString(R.string.home_playback_selected, kindLabel(item.kind), item.name)
+        playbackSelected = getString(R.string.home_playback_selected, kindLabel(item.kind), item.name)
         val isRecording = item.kind == "recording"
-        playbackControls.visibility = if (isRecording) View.VISIBLE else View.GONE
-        playbackSpeedRow.visibility = if (isRecording) View.VISIBLE else View.GONE
-        playbackEnableButton.text = getString(
-            if (isRecording) R.string.home_playback_start_video else R.string.home_playback_enable
-        )
-        renderSavedItems()
+        playbackControlsVisible = isRecording
+        playbackSpeedRowVisible = isRecording
     }
 
     private fun kindLabel(kind: String): String {
@@ -923,9 +1372,9 @@ class HomeFragment : Fragment() {
                 if (result.code == ApiResult.CODE_OK) {
                     if (selectedItem?.kind == item.kind && selectedItem?.id == item.id) {
                         selectedItem = null
-                        playbackSelected.text = getString(R.string.home_playback_none)
-                        playbackControls.visibility = View.GONE
-                        playbackSpeedRow.visibility = View.GONE
+                        playbackSelected = ""
+                        playbackControlsVisible = false
+                        playbackSpeedRowVisible = false
                     }
                     refreshSavedItems()
                 }
@@ -957,7 +1406,7 @@ class HomeFragment : Fragment() {
         val scroll = android.widget.ScrollView(requireContext()).apply {
             isFillViewport = true
         }
-        val tv = TextView(requireContext()).apply {
+        val tv = android.widget.TextView(requireContext()).apply {
             setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.text_primary))
             textSize = 12f
             setPadding(dp(16), dp(12), dp(16), dp(12))
@@ -1069,7 +1518,7 @@ class HomeFragment : Fragment() {
             val result = if (item.kind == "snapshot") {
                 ApiClient.useEnvSnapshot(item.id)
             } else {
-                ApiClient.playRecordings(listOf(item.id), playbackLoopCheck.isChecked)
+                ApiClient.playRecordings(listOf(item.id), playbackLoop)
             }
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
@@ -1078,7 +1527,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun setPlaybackSpeed() {
-        val speed = playbackSpeedInput.text.toString().toFloatOrNull() ?: return
+        val speed = playbackSpeed.toFloatOrNull() ?: return
         executor.execute {
             val result = ApiClient.setRecordingSpeed(speed)
             requireActivity().runOnUiThread {
@@ -1092,7 +1541,7 @@ class HomeFragment : Fragment() {
         val playing = data.optBoolean("playing", false)
         val paused = data.optBoolean("paused", false)
         if (!playing) {
-            playbackStatus.text = getString(R.string.home_playback_idle)
+            playbackStatus = getString(R.string.home_playback_idle)
             return
         }
         val playIndex = data.optInt("playIndex", 0) + 1
@@ -1116,7 +1565,7 @@ class HomeFragment : Fragment() {
         if (envParts.isNotEmpty()) syncParts.add("环境:" + envParts.joinToString("/"))
         val syncText = if (syncParts.isEmpty()) "" else " · " + syncParts.joinToString(" ")
         val loopText = if (data.optBoolean("loop", false)) " · 循环" else ""
-        playbackStatus.text = if (paused) {
+        playbackStatus = if (paused) {
             getString(R.string.home_playback_paused, playIndex, playlistSize, frameProgress, frameCount) + syncText + loopText
         } else {
             getString(R.string.home_playback_playing, playIndex, playlistSize, frameProgress, frameCount, syncText) + loopText
@@ -1127,13 +1576,9 @@ class HomeFragment : Fragment() {
 
     /** 保存/录制成功后重置默认名称（时间命名）。 */
     private fun resetDefaultNames() {
-        collectNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
-        )
-        collectRemarkInput.text.clear()
-        recordingNameInput.setText(
-            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
-        )
+        collectName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        collectRemark = ""
+        recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
     }
 
     private fun formatTime(millis: Long): String {
