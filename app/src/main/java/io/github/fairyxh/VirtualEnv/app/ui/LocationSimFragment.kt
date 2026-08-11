@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,6 +43,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -121,6 +123,8 @@ class LocationSimFragment : Fragment() {
     private var mapCollapsed by mutableStateOf(false)
     private var mapSatellite by mutableStateOf(false)
     private var mapFullscreen by mutableStateOf(false)
+    /** 触点是否在地图上：非全屏时也临时禁用页面滚动，保证地图手势 100% 可用 */
+    private var mapTouchActive by mutableStateOf(false)
     private var privacyShown by mutableStateOf(false)
     private var mapReady by mutableStateOf(false)
     private val savedPoints = mutableStateListOf<SavedPoint>()
@@ -240,7 +244,10 @@ class LocationSimFragment : Fragment() {
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState(), enabled = !fragment.mapFullscreen)
+                        .verticalScroll(
+                            rememberScrollState(),
+                            enabled = !fragment.mapFullscreen && !fragment.mapTouchActive
+                        )
                         .padding(
                             if (fragment.mapFullscreen) {
                                 PaddingValues(0.dp)
@@ -338,6 +345,27 @@ class LocationSimFragment : Fragment() {
                                     modifier = Modifier.fillMaxWidth(),
                                     placeholder = getString(R.string.location_search_hint)
                                 )
+                                if (searchText.isNotEmpty()) {
+                                    // 清空按钮：方形“清空”，嵌入搜索框右侧，点击清空并关闭候选
+                                    GlassButton(
+                                        onClick = {
+                                            searchText = ""
+                                            searchResultsVisible = false
+                                        },
+                                        backdrop = backdrop,
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .padding(end = 6.dp)
+                                            .width(64.dp)
+                                            .height(40.dp),
+                                        surfaceColor = colors.bgTertiary.copy(alpha = 0.35f)
+                                    ) {
+                                        BasicText(
+                                            "清空",
+                                            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                        )
+                                    }
+                                }
                             }
                             }
                             if (privacyShown && !fragment.mapFullscreen) {
@@ -383,7 +411,15 @@ class LocationSimFragment : Fragment() {
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .pointerInteropFilter { event ->
-                                                mapView?.dispatchTouchEvent(event) ?: false
+                                                // 触点在地图上：按下即锁定页面滚动（地图独占手势），
+                                                // 抬起/取消恢复；事件一律消费并转交 MapView
+                                                when (event.action) {
+                                                    android.view.MotionEvent.ACTION_DOWN -> mapTouchActive = true
+                                                    android.view.MotionEvent.ACTION_UP,
+                                                    android.view.MotionEvent.ACTION_CANCEL -> mapTouchActive = false
+                                                }
+                                                mapView?.dispatchTouchEvent(event)
+                                                true
                                             },
                                         onRelease = {
                                             // 生命周期由 Fragment 管理
@@ -611,9 +647,16 @@ class LocationSimFragment : Fragment() {
                         .width(with(density) { anchor.width.toDp() })
                         .zIndex(10f),
                     cornerRadius = 14.dp,
-                    containerColor = colors.bgSecondary.copy(alpha = 0.85f)
+                    // 候选框背景更透（磨砂玻璃感）；候选项各自带材质底
+                    containerColor = colors.bgSecondary.copy(alpha = 0.35f)
                 ) {
-                    Column(Modifier.padding(vertical = 6.dp)) {
+                    // 候选项较多时面板内部可滚动，整体限高防止超出屏幕
+                    Column(
+                        Modifier
+                            .padding(vertical = 6.dp)
+                            .heightIn(max = 300.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
                         searchResults.forEachIndexed { index, (title, poi) ->
                             GlassPill(
                                 onClick = { fragment.jumpToSearchResult(poi) },
@@ -622,7 +665,7 @@ class LocationSimFragment : Fragment() {
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                                     .fillMaxWidth(),
                                 selected = false,
-                                containerColor = Color.Transparent,
+                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
                                 height = 52.dp
                             ) {
                                 BasicText(
