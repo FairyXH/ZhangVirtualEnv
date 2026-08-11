@@ -103,15 +103,19 @@ class MainActivity : FragmentActivity() {
 
     private var rootView: SwipeAwareFrameLayout? = null
 
+    /** Fragment 容器：动画过渡时露出背景须与页面主题一致，避免白色闪烁 */
+    private var fragmentContainer: FragmentContainerView? = null
+
     private fun isDarkMode(): Boolean =
         (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 
-    /** 跟随系统主题设置窗口/root 背景与系统栏图标颜色。 */
+    /** 跟随系统主题设置窗口/root/容器背景与系统栏图标颜色。 */
     private fun applyThemeBackground() {
         val dark = isDarkMode()
         val bg = if (dark) AndroidColor.BLACK else AndroidColor.parseColor("#F2F2F7")
         rootView?.setBackgroundColor(bg)
+        fragmentContainer?.setBackgroundColor(bg)
         window.setBackgroundDrawable(ColorDrawable(bg))
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark
@@ -153,6 +157,7 @@ class MainActivity : FragmentActivity() {
         val container = FragmentContainerView(this).apply {
             id = R.id.fragmentContainer
         }
+        fragmentContainer = container
         root.addView(
             container,
             FrameLayout.LayoutParams(
@@ -272,25 +277,12 @@ class MainActivity : FragmentActivity() {
         if (currentTab == index) return
         val fm = supportFragmentManager
         val ft = fm.beginTransaction()
-        if (animate) {
-            // 前进：新页从右滑入、旧页向左滑出；后退方向相反
-            if (index > currentTab) {
-                ft.setCustomAnimations(
-                    R.anim.slide_in_right, R.anim.slide_out_left,
-                    R.anim.slide_in_left, R.anim.slide_out_right
-                )
-            } else {
-                ft.setCustomAnimations(
-                    R.anim.slide_in_left, R.anim.slide_out_right,
-                    R.anim.slide_in_right, R.anim.slide_out_left
-                )
-            }
-        } else {
-            ft.setCustomAnimations(
-                R.anim.fade_in, R.anim.fade_out,
-                R.anim.fade_in, R.anim.fade_out
-            )
-        }
+        // 优雅无缝切换：交叉淡入淡出（旧页淡出时新页淡入，重叠过渡不露背景），
+        // 不使用滑动动画——slide 会让新旧页错开，露出主题背景造成白色闪烁
+        ft.setCustomAnimations(
+            R.anim.fade_in, R.anim.fade_out,
+            R.anim.fade_in, R.anim.fade_out
+        )
         // 隐藏当前页（保留其视图与状态，切回时不重建）
         if (currentTab in 0..4) {
             fm.findFragmentByTag("tab$currentTab")?.let { ft.hide(it) }

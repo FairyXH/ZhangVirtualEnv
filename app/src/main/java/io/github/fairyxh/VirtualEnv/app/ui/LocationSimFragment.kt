@@ -201,9 +201,10 @@ class LocationSimFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // 全屏状态退出：解除页面滑动切页锁定
-        if (mapFullscreen) {
+        // 地图触摸/全屏状态退出：解除页面滑动切页锁定
+        if (mapFullscreen || mapTouchActive) {
             mapFullscreen = false
+            mapTouchActive = false
             MainActivity.swipeLocked = false
         }
         try {
@@ -411,12 +412,19 @@ class LocationSimFragment : Fragment() {
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .pointerInteropFilter { event ->
-                                                // 触点在地图上：按下即锁定页面滚动（地图独占手势），
+                                                // 触点在地图上：按下即锁定页面滚动与横向切页
+                                                // （地图独占手势，横向滑动松手不切 Tab），
                                                 // 抬起/取消恢复；事件一律消费并转交 MapView
                                                 when (event.action) {
-                                                    android.view.MotionEvent.ACTION_DOWN -> mapTouchActive = true
+                                                    android.view.MotionEvent.ACTION_DOWN -> {
+                                                        mapTouchActive = true
+                                                        MainActivity.swipeLocked = true
+                                                    }
                                                     android.view.MotionEvent.ACTION_UP,
-                                                    android.view.MotionEvent.ACTION_CANCEL -> mapTouchActive = false
+                                                    android.view.MotionEvent.ACTION_CANCEL -> {
+                                                        mapTouchActive = false
+                                                        MainActivity.swipeLocked = mapFullscreen
+                                                    }
                                                 }
                                                 mapView?.dispatchTouchEvent(event)
                                                 true
