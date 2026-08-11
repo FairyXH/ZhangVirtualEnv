@@ -80,6 +80,9 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val TAG_SCOPE = "UI"
         private const val KEY_TAB = "current_tab"
+        /** 地图全屏等沉浸场景下锁定横向滑动切页。 */
+        @Volatile
+        var swipeLocked = false
         private val TAB_ICONS = intArrayOf(
             R.drawable.ic_tab_home,
             R.drawable.ic_tab_location,
@@ -138,7 +141,9 @@ class MainActivity : FragmentActivity() {
         // 触屏横向滑动切换页面：只在快速 fling 时切换（dispatch 阶段观察，不消费事件，
         // 因此不影响页面纵向滚动与地图拖拽）
         root.onSwipe = { dx, dy, vx ->
-            if (kotlin.math.abs(dx) > 120 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f &&
+            // 地图全屏等场景锁定切页，避免与地图手势冲突
+            if (!swipeLocked &&
+                kotlin.math.abs(dx) > 120 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f &&
                 kotlin.math.abs(vx) > 600f
             ) {
                 if (dx < 0 && currentTab < 4) {

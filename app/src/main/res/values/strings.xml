@@ -151,6 +151,9 @@
     <string name="settings_appearance_title">外观</string>
     <string name="settings_appearance_desc">使用桌面壁纸作为 App 背景图</string>
     <string name="dialog_close">关闭</string>
+    <string name="settings_appearance_permission_denied">需要照片/文件权限才能使用壁纸背景</string>
+    <string name="map_fullscreen">全屏</string>
+    <string name="map_exit_fullscreen">退出全屏</string>
     <string name="settings_identity_title">应用标识</string>
     <string name="settings_identity_desc">用于高德开放平台创建 APP 时填写</string>
     <string name="settings_package_label">包名 (PackageName)</string>

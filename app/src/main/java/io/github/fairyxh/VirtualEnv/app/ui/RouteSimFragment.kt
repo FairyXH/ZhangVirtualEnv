@@ -8,9 +8,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,7 +31,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +59,7 @@ import com.amap.api.maps.model.PolylineOptions
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.MainActivity
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -103,6 +111,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private var searchText by mutableStateOf("")
     private var mapCollapsed by mutableStateOf(false)
     private var mapSatellite by mutableStateOf(false)
+    private var mapFullscreen by mutableStateOf(false)
     private var privacyShown by mutableStateOf(false)
     private var mapReady by mutableStateOf(false)
     private val savedRoutes = mutableStateListOf<SavedRoute>()
@@ -185,6 +194,11 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // 全屏状态退出：解除页面滑动切页锁定
+        if (mapFullscreen) {
+            mapFullscreen = false
+            MainActivity.swipeLocked = false
+        }
         try {
             locationClient?.stopLocation()
             locationClient?.onDestroy()
@@ -203,41 +217,54 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     // ---------- Compose UI ----------
 
     @Composable
+    @OptIn(ExperimentalComposeUiApi::class)
     private fun RouteScreen(fragment: RouteSimFragment, savedInstanceState: Bundle?) {
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
         ) { backdrop ->
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                val colors = glassColors()
-                BasicText(
-                    getString(R.string.route_title),
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val fullMapHeight = maxHeight
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(
+                            if (fragment.mapFullscreen) {
+                                PaddingValues(0.dp)
+                            } else {
+                                PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp)
+                            }
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    val colors = glassColors()
+                    if (!fragment.mapFullscreen) {
+                    BasicText(
+                        getString(R.string.route_title),
+                        style = TextStyle(
+                            color = colors.textPrimary,
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
+                        )
                     )
-                )
-                BasicText(
-                    getString(R.string.route_subtitle),
-                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
-                )
+                    BasicText(
+                        getString(R.string.route_subtitle),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                    )
+                    }
 
                 // 卡片1：搜索 + 地图 + 当前位置 + 收起展开/卫星图（同一卡片；地图收起时整卡收起）
                 GlassCard(
                     backdrop = backdrop,
                     modifier = Modifier.fillMaxWidth(),
-                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                    cornerRadius = if (fragment.mapFullscreen) 0.dp else 18.dp,
+                    containerColor = if (fragment.mapFullscreen) Color.Transparent
+                        else colors.bgSecondary.copy(alpha = 0.45f)
                 ) {
-                    Column(Modifier.padding(16.dp)) {
+                    Column(Modifier.padding(if (fragment.mapFullscreen) 0.dp else 16.dp)) {
+                        if (!fragment.mapFullscreen) {
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -275,6 +302,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                 )
                             }
                         }
+                        }
                         if (!mapCollapsed) {
                             Row(
                                 Modifier.padding(top = 10.dp).fillMaxWidth(),
@@ -298,6 +326,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                     )
                                 }
                             }
+                            if (!fragment.mapFullscreen) {
                             if (searchResultsVisible) {
                                 searchResults.forEach { (title, poi) ->
                                     GlassPill(
@@ -318,7 +347,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                     }
                                 }
                             }
-                            if (privacyShown) {
+                            }
+                            if (privacyShown && !fragment.mapFullscreen) {
                                 BasicText(
                                     getString(R.string.route_privacy_prompt),
                                     Modifier.padding(top = 10.dp),
@@ -327,21 +357,49 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                             } else {
                                 Box(
                                     Modifier
-                                        .padding(top = 10.dp)
+                                        .padding(top = if (fragment.mapFullscreen) 0.dp else 10.dp)
                                         .fillMaxWidth()
-                                        .height(240.dp)
+                                        .height(if (fragment.mapFullscreen) fullMapHeight else 240.dp)
                                 ) {
                                     AndroidView(
                                         factory = { ctx ->
                                             initMapView(ctx, savedInstanceState)
                                         },
-                                        modifier = Modifier.fillMaxSize(),
+                                        // 地图手势直接交给 MapView：拖动/双指缩放正常，
+                                        // 同时消费事件避免页面 verticalScroll 抢手势
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .pointerInteropFilter { event ->
+                                                mapView?.dispatchTouchEvent(event) ?: false
+                                            },
                                         onRelease = {
                                             // 生命周期由 Fragment 管理
                                         }
                                     )
+                                    if (fragment.mapFullscreen) {
+                                        // 全屏时右上角悬浮退出按钮
+                                        GlassButton(
+                                            onClick = { fragment.updateMapFullscreen(false) },
+                                            backdrop = backdrop,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(16.dp),
+                                            tint = colors.bgTertiary.copy(alpha = 0.75f)
+                                        ) {
+                                            BasicText(
+                                                getString(R.string.map_exit_fullscreen),
+                                                Modifier.padding(horizontal = 8.dp),
+                                                style = TextStyle(
+                                                    color = colors.textPrimary,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            )
+                                        }
+                                    }
                                 }
                             }
+                            if (!fragment.mapFullscreen) {
                             Row(
                                 Modifier.padding(top = 10.dp).fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -358,12 +416,26 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                         style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     )
                                 }
+                                GlassButton(
+                                    onClick = { fragment.updateMapFullscreen(true) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = mapReady,
+                                    tint = colors.bgTertiary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.map_fullscreen),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
                             }
                         }
                     }
                 }
 
                 // 卡片2：启用路线模拟开关
+                if (!fragment.mapFullscreen) {
                 GlassCard(
                     backdrop = backdrop,
                     modifier = Modifier.fillMaxWidth(),
@@ -549,8 +621,10 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                         }
                     }
                 }
+                } // if (!fragment.mapFullscreen) 结束（卡片2/3/4 仅非全屏显示）
             }
         }
+    }
     }
 
     @Composable
@@ -752,6 +826,13 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "map type switch failed", t)
         }
+    }
+
+    /** 地图全屏/退出：全屏时锁定页面横向滑动切页，避免与地图手势冲突。 */
+    private fun updateMapFullscreen(fullscreen: Boolean) {
+        if (mapFullscreen == fullscreen) return
+        mapFullscreen = fullscreen
+        MainActivity.swipeLocked = fullscreen
     }
 
     // ---------- 开关与状态 ----------
