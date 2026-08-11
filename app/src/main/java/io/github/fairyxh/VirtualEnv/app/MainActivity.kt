@@ -2,12 +2,13 @@ package io.github.fairyxh.VirtualEnv.app
 
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -122,21 +123,15 @@ class MainActivity : FragmentActivity() {
         )
         val bottomBar = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            // 液态玻璃：Android 12+ 的 View#setBackgroundBlurRadius 会对 View 背景后的真实
-            // 内容（Fragment 页面）做系统级模糊。该方法未在编译期 framework stub 暴露，
-            // 运行时通过反射调用（API 31+ 存在；ColorOS 会移除此方法，捕获后静默降级）。
+            // 底栏完全透明悬浮：不启用任何系统背景模糊。
+            // 部分 ROM 的 View#setBackgroundBlurRadius 反射成功后会把整个
+            // ComposeView 覆盖区渲染成全宽模糊条带，看起来就是包裹底栏的矩形。
             background = ColorDrawable(AndroidColor.TRANSPARENT)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                try {
-                    val radiusPx = (28 * resources.displayMetrics.density).toInt()
-                    val method = android.view.View::class.java.getMethod(
-                        "setBackgroundBlurRadius", Int::class.java
-                    )
-                    method.invoke(this, radiusPx)
-                } catch (t: Throwable) {
-                    ZLog.w("UI", "background blur unavailable", t)
-                }
-            }
+            // 关键：ViewGroup 默认 clipChildren=true，选中胶囊被拖动放大后顶部会
+            // 超出底栏 View 边界并被硬裁剪成一条平直线（“上半部分被削平”）。
+            // 关闭裁剪让胶囊真正“浮起”出底栏区域。
+            clipChildren = false
+            clipToPadding = false
             setContent {
                 LiquidBottomBar(
                     selectedTabIndex = { currentTab },
@@ -156,6 +151,22 @@ class MainActivity : FragmentActivity() {
         )
         setContentView(root)
         // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
+
+        // ComposeView 内部还有 AndroidComposeView 布局根，默认同样裁剪子绘制；
+        // 首次布局后递归关闭整条裁剪链，保证放大胶囊能越出底栏边界“浮起”。
+        bottomBar.viewTreeObserver.addOnGlobalLayoutListener(
+            object : ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    var view: View? = bottomBar
+                    while (view is ViewGroup) {
+                        view.clipChildren = false
+                        view.clipToPadding = false
+                        view = if (view.childCount > 0) view.getChildAt(0) else null
+                    }
+                    bottomBar.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                }
+            }
+        )
 
         if (savedInstanceState == null) {
             // switchTab 会因 currentTab == index 提前返回；先把索引置 -1，
@@ -227,8 +238,8 @@ private fun LiquidBottomBar(
     val backdrop = rememberLayerBackdrop()
 
     Box(Modifier.fillMaxWidth()) {
-        // 玻璃采样层：空层（不绘制任何矩形底色），仅让 drawBackdrop 的 blur/lens
-        // 有可用图层；真实磨砂感由 GlassBottomTabs 表面的高光/折射承担
+        // 玻璃采样层：完全透明（不绘制任何底色）。选中胶囊被拖动放大时通过
+        // ComposeView.clipChildren=false 越出底栏浮起，采样层无需加高。
         Box(
             Modifier
                 .fillMaxWidth()
