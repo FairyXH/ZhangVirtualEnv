@@ -32,6 +32,8 @@ fun GlassBackdropHost(
     content: @Composable BoxScope.(backdrop: LayerBackdrop) -> Unit
 ) {
     val backdrop = rememberLayerBackdrop()
+    // 主题在 Composable 作用域读取，drawBehind 内不能调用 @Composable
+    val darkBackground = androidx.compose.foundation.isSystemInDarkTheme()
 
     Box(modifier.fillMaxSize()) {
         // 背景层：默认透明（黑底透出）；壁纸模式全屏自绘壁纸
@@ -59,9 +61,15 @@ fun GlassBackdropHost(
                                 dstSize = IntSize(dstW.roundToInt(), dstH.roundToInt())
                             )
                         }
-                        // 黑底基础上：暗化保证对比度 + 极淡雾化模拟磨砂
+                        // 壁纸基础上：暗化保证对比度 + 极淡雾化模拟磨砂
                         drawRect(Color.Black.copy(alpha = 0.25f))
                         drawRect(Color.White.copy(alpha = 0.03f))
+                    } else {
+                        // 关闭壁纸：按系统主题铺背景色（浅色浅灰 / 深色纯黑），
+                        // 与 MainActivity 的 window/root 背景一致，避免边缘露出异色
+                        drawRect(
+                            if (darkBackground) Color(0xFF000000) else Color(0xFFF2F2F7)
+                        )
                     }
                 }
         )

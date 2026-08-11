@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -20,12 +21,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
@@ -98,6 +101,29 @@ class MainActivity : FragmentActivity() {
 
     private var barRefraction: LiquidGlassBarRefraction? = null
 
+    private var rootView: SwipeAwareFrameLayout? = null
+
+    private fun isDarkMode(): Boolean =
+        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    /** 跟随系统主题设置窗口/root 背景与系统栏图标颜色。 */
+    private fun applyThemeBackground() {
+        val dark = isDarkMode()
+        val bg = if (dark) AndroidColor.BLACK else AndroidColor.parseColor("#F2F2F7")
+        rootView?.setBackgroundColor(bg)
+        window.setBackgroundDrawable(ColorDrawable(bg))
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyThemeBackground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         currentTab = savedInstanceState?.getInt(KEY_TAB, 0) ?: 0
@@ -105,10 +131,10 @@ class MainActivity : FragmentActivity() {
 
         // Fragment 容器必须在视图树中立即可用（FragmentManager onStart 时按 id 查找），
         // 因此不放进 Compose AndroidView，底栏单独用 ComposeView 叠加。
-        // 黑底阶段：root 直接铺黑色，所有卡片浮在黑色之上。
         val root = SwipeAwareFrameLayout(this).apply {
             setBackgroundColor(AndroidColor.BLACK)
         }
+        rootView = root
         // 触屏横向滑动切换页面：只在快速 fling 时切换（dispatch 阶段观察，不消费事件，
         // 因此不影响页面纵向滚动与地图拖拽）
         root.onSwipe = { dx, dy, vx ->
@@ -166,8 +192,7 @@ class MainActivity : FragmentActivity() {
         // 左侧漏底），root 消费后所有 Compose 内容真正全屏；insets 缓存在
         // AppInsets，页面内容层与底栏用它手动避让系统栏。
         io.github.fairyxh.VirtualEnv.app.ui.glass.AppInsets.attachConsume(root)
-        // 黑底阶段：窗口背景纯黑，与 root 一致
-        window.setBackgroundDrawable(ColorDrawable(AndroidColor.BLACK))
+        applyThemeBackground()
         // edge-to-edge：关闭 fitsSystemWindows 自动推移，否则 Fragment 的 ComposeView
         // 被系统 insets（顶部状态栏/左侧曲面安全区/底部导航栏）整体挤小，
         // 窗口透明后这些区域会露出黑边。insets 由 GlassBackdropHost 内容层自行处理。
@@ -182,11 +207,6 @@ class MainActivity : FragmentActivity() {
         }
         if (Build.VERSION.SDK_INT >= 28) {
             window.navigationBarDividerColor = AndroidColor.TRANSPARENT
-        }
-        // 黑底主题：状态栏/导航栏图标用浅色
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
         }
         // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
 
@@ -301,6 +321,10 @@ private fun LiquidBottomBar(
     tabLabels: IntArray
 ) {
     val backdrop = rememberLayerBackdrop()
+    val barDark = isSystemInDarkTheme()
+    // 底栏背景磨砂底色（drawBackdrop 的 onDrawSurface 非 Composable 上下文，提前计算）
+    val barGlassColor =
+        if (barDark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.12f)
 
     Column(Modifier.fillMaxWidth()) {
         // 顶部透明扩展区：让放大后的胶囊顶部能在底栏上边缘之上浮起，
@@ -308,8 +332,10 @@ private fun LiquidBottomBar(
         // RenderNode 无效，这里直接用布局空间解决）。该区域透明且不拦截触摸。
         Spacer(Modifier.height(24.dp))
         Box(Modifier.fillMaxWidth()) {
-            // 玻璃采样层：完全透明（不绘制任何底色）。
-            // 导航栏避让用 AppInsets 缓存（窗口 insets 已在 root 层被消费）
+            // 底栏背景磨砂玻璃：整条全宽半透明玻璃底色（非胶囊）。
+            // 胶囊本身保持全透（GlassBottomTabs 只保留透镜折射）。
+            // 注意：不能用 drawBackdrop blur / RuntimeShader —— Oplus 上全宽
+            // blur 会让 RenderThread SIGSEGV 崩溃；这里用静态半透明+高光模拟。
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -317,6 +343,21 @@ private fun LiquidBottomBar(
                     .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
                     .height(64.dp)
                     .layerBackdrop(backdrop)
+                    .drawBehind {
+                        drawRect(barGlassColor)
+                        // 顶部微高光，模拟磨砂玻璃受光
+                        drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                colors = listOf(
+                                    if (barDark) Color.White.copy(alpha = 0.05f)
+                                    else Color.White.copy(alpha = 0.10f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = size.height * 0.4f
+                            )
+                        )
+                    }
             )
 
             val current = selectedTabIndex()

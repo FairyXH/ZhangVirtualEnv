@@ -189,7 +189,8 @@ fun GlassBottomTabs(
                     shape = { Capsule() },
                     effects = {
                         vibrancy()
-                        // 清晰的透镜效果：不做磨砂模糊（磨砂感由容器折射 shader + 表面高光承担）
+                        // 胶囊保持全透：磨砂玻璃由底栏背景层（LiquidBottomBar 的
+                        // 采样层全宽 drawBackdrop）承担，这里只保留透镜折射
                         lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
                     layerBlock = {

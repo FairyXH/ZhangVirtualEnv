@@ -82,6 +82,7 @@ val LocalGlassColors = staticCompositionLocalOf { LightGlassColors }
 
 @Composable
 fun glassColors(): GlassColors {
-    // 黑底阶段：始终使用深色配色（纯黑背景 + 浅色文字/卡片）
-    return DarkGlassColors
+    // 跟随系统主题：浅色模式用浅色玻璃配色，深色模式用深色配色。
+    // （此前黑底阶段强制深色，导致 App 无论系统主题都像黑暗模式）
+    return if (isSystemInDarkTheme()) DarkGlassColors else LightGlassColors
 }
