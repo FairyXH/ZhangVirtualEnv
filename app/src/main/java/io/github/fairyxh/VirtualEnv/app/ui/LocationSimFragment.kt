@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -42,10 +43,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -72,6 +77,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -217,27 +223,34 @@ class LocationSimFragment : Fragment() {
     @Composable
     @OptIn(ExperimentalComposeUiApi::class)
     private fun LocationScreen(fragment: LocationSimFragment, savedInstanceState: Bundle?) {
+        // 搜索框全局锚点：结果面板悬浮在搜索框正下方（页面级，不被地图覆盖）
+        var rootLeft by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+        var searchAnchor by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
         ) { backdrop ->
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-            val fullMapHeight = maxHeight
-            Column(
+            BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(
-                        if (fragment.mapFullscreen) {
-                            PaddingValues(0.dp)
-                        } else {
-                            PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp)
-                        }
-                    ),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .onGloballyPositioned { rootLeft = it.positionInRoot() }
             ) {
+                val fullMapHeight = maxHeight
                 val colors = glassColors()
-                if (!fragment.mapFullscreen) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState(), enabled = !fragment.mapFullscreen)
+                        .padding(
+                            if (fragment.mapFullscreen) {
+                                PaddingValues(0.dp)
+                            } else {
+                                PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp)
+                            }
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (!fragment.mapFullscreen) {
                 BasicText(
                     getString(R.string.location_title),
                     style = TextStyle(
@@ -303,12 +316,20 @@ class LocationSimFragment : Fragment() {
                         }
                         if (!mapCollapsed) {
                             if (!fragment.mapFullscreen) {
-                            // 搜索框：输入时在下方弹出下拉提示（固定高度 Box，面板悬浮不挤压布局）
+                            // 搜索框：输入时在正下方弹出悬浮候选列表（面板在页面级绘制，见下方 searchAnchor 面板）
                             Box(
                                 Modifier
                                     .padding(top = 10.dp)
                                     .fillMaxWidth()
                                     .height(52.dp)
+                                    .onGloballyPositioned { coords ->
+                                        val pos = coords.positionInRoot()
+                                        searchAnchor = androidx.compose.ui.geometry.Rect(
+                                            pos.x, pos.y,
+                                            pos.x + coords.size.width,
+                                            pos.y + coords.size.height
+                                        )
+                                    }
                             ) {
                                 GlassField(
                                     value = searchText,
@@ -317,41 +338,6 @@ class LocationSimFragment : Fragment() {
                                     modifier = Modifier.fillMaxWidth(),
                                     placeholder = getString(R.string.location_search_hint)
                                 )
-                                if (searchResultsVisible) {
-                                    GlassCard(
-                                        backdrop = backdrop,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(top = 58.dp)
-                                            .fillMaxWidth()
-                                            .zIndex(2f),
-                                        containerColor = colors.bgSecondary.copy(alpha = 0.95f)
-                                    ) {
-                                        Column(Modifier.padding(vertical = 6.dp)) {
-                                            searchResults.forEach { (title, poi) ->
-                                                GlassPill(
-                                                    onClick = { fragment.jumpToSearchResult(poi) },
-                                                    backdrop = backdrop,
-                                                    modifier = Modifier
-                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                                        .fillMaxWidth(),
-                                                    selected = false,
-                                                    containerColor = Color.Transparent,
-                                                    height = 52.dp
-                                                ) {
-                                                    BasicText(
-                                                        title,
-                                                        Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(horizontal = 10.dp),
-                                                        maxLines = 2,
-                                                        style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                             }
                             if (privacyShown && !fragment.mapFullscreen) {
@@ -606,6 +592,59 @@ class LocationSimFragment : Fragment() {
                 if (!fragment.mapFullscreen && searchText.isNotBlank()) {
                     delay(300)
                     fragment.searchPoi(hideKey = false)
+                }
+            }
+            // 候选列表：悬浮于地图之上、与搜索框等宽无缝接壤、磨砂背景、带分隔符。
+            // 必须在页面级绘制（Column 之后），否则会被地图等后续内容覆盖。
+            val density = LocalDensity.current
+            val anchor = searchAnchor
+            if (searchResultsVisible && anchor != null && !fragment.mapFullscreen) {
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (anchor.left - rootLeft.x).roundToInt(),
+                                (anchor.top - rootLeft.y + anchor.height).roundToInt()
+                            )
+                        }
+                        .width(with(density) { anchor.width.toDp() })
+                        .zIndex(10f),
+                    cornerRadius = 14.dp,
+                    containerColor = colors.bgSecondary.copy(alpha = 0.85f)
+                ) {
+                    Column(Modifier.padding(vertical = 6.dp)) {
+                        searchResults.forEachIndexed { index, (title, poi) ->
+                            GlassPill(
+                                onClick = { fragment.jumpToSearchResult(poi) },
+                                backdrop = backdrop,
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .fillMaxWidth(),
+                                selected = false,
+                                containerColor = Color.Transparent,
+                                height = 52.dp
+                            ) {
+                                BasicText(
+                                    title,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp),
+                                    maxLines = 2,
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
+                                )
+                            }
+                            if (index < searchResults.lastIndex) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(0.6.dp)
+                                        .padding(horizontal = 14.dp)
+                                        .background(colors.textTertiary.copy(alpha = 0.3f))
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
