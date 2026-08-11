@@ -186,7 +186,7 @@ fun GlassBottomTabs(
                     shape = { Capsule() },
                     effects = {
                         vibrancy()
-                        blur(8f.dp.toPx())
+                        // 清晰的透镜效果：不做磨砂模糊（磨砂感由容器折射 shader + 表面高光承担）
                         lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
                     layerBlock = {

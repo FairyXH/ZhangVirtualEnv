@@ -12,6 +12,8 @@ import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -47,6 +49,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTab
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTabs
+import io.github.fairyxh.VirtualEnv.app.ui.glass.LiquidGlassBarRefraction
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 
@@ -87,6 +90,8 @@ class MainActivity : FragmentActivity() {
 
     /** Compose state：底栏滑块跟随此值动画。 */
     private var currentTab by mutableIntStateOf(0)
+
+    private var barRefraction: LiquidGlassBarRefraction? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -153,7 +158,8 @@ class MainActivity : FragmentActivity() {
         // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
 
         // ComposeView 内部还有 AndroidComposeView 布局根，默认同样裁剪子绘制；
-        // 首次布局后递归关闭整条裁剪链，保证放大胶囊能越出底栏边界“浮起”。
+        // 每次布局都执行（不提前移除监听），确保子视图就绪后也把裁剪链关掉，
+        // 否则放大胶囊顶部会在底栏上边缘被硬裁成平直线。
         bottomBar.viewTreeObserver.addOnGlobalLayoutListener(
             object : ViewTreeObserver.OnGlobalLayoutListener {
                 override fun onGlobalLayout() {
@@ -161,12 +167,26 @@ class MainActivity : FragmentActivity() {
                     while (view is ViewGroup) {
                         view.clipChildren = false
                         view.clipToPadding = false
+                        view.clipToOutline = false
                         view = if (view.childCount > 0) view.getChildAt(0) else null
                     }
-                    bottomBar.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 }
             }
         )
+
+        // 透镜折射：对页面内容做清晰的光线折射（非磨砂/非模糊），
+        // 挂在 Fragment 容器上，只影响玻璃条带区域；失败则静默降级为透明底栏。
+        val refraction = LiquidGlassBarRefraction(
+            container = container,
+            bar = bottomBar,
+            capsuleLeftDp = 20f,
+            capsuleRightDp = 20f,
+            featherDp = 16f,
+            refractionDp = 3.5f
+        )
+        if (refraction.attach()) {
+            barRefraction = refraction
+        }
 
         if (savedInstanceState == null) {
             // switchTab 会因 currentTab == index 提前返回；先把索引置 -1，
@@ -179,6 +199,12 @@ class MainActivity : FragmentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt(KEY_TAB, currentTab)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        barRefraction?.detach()
+        barRefraction = null
     }
 
     private fun switchTab(index: Int, animate: Boolean) {
@@ -237,39 +263,44 @@ private fun LiquidBottomBar(
 ) {
     val backdrop = rememberLayerBackdrop()
 
-    Box(Modifier.fillMaxWidth()) {
-        // 玻璃采样层：完全透明（不绘制任何底色）。选中胶囊被拖动放大时通过
-        // ComposeView.clipChildren=false 越出底栏浮起，采样层无需加高。
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
-                .height(64.dp)
-                .layerBackdrop(backdrop)
-        )
+    Column(Modifier.fillMaxWidth()) {
+        // 顶部透明扩展区：让放大后的胶囊顶部能在底栏上边缘之上浮起，
+        // 避免被 ComposeView 的 View 边界硬裁剪（clipChildren 对 Compose 内部
+        // RenderNode 无效，这里直接用布局空间解决）。该区域透明且不拦截触摸。
+        Spacer(Modifier.height(24.dp))
+        Box(Modifier.fillMaxWidth()) {
+            // 玻璃采样层：完全透明（不绘制任何底色）。
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+                    .height(64.dp)
+                    .layerBackdrop(backdrop)
+            )
 
-        val current = selectedTabIndex()
-        GlassBottomTabs(
-            selectedTabIndex = selectedTabIndex,
-            onTabSelected = onTabSelected,
-            backdrop = backdrop,
-            tabsCount = tabIcons.size,
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
-        ) {
-            repeat(tabIcons.size) { index ->
-                GlassBottomTab(
-                    onClick = { onTabSelected(index) },
-                    modifier = Modifier
-                ) {
-                    TabIcon(
-                        painter = painterResource(tabIcons[index]),
-                        active = index == current,
-                        label = tabLabels[index]
-                    )
+            val current = selectedTabIndex()
+            GlassBottomTabs(
+                selectedTabIndex = selectedTabIndex,
+                onTabSelected = onTabSelected,
+                backdrop = backdrop,
+                tabsCount = tabIcons.size,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+            ) {
+                repeat(tabIcons.size) { index ->
+                    GlassBottomTab(
+                        onClick = { onTabSelected(index) },
+                        modifier = Modifier
+                    ) {
+                        TabIcon(
+                            painter = painterResource(tabIcons[index]),
+                            active = index == current,
+                            label = tabLabels[index]
+                        )
+                    }
                 }
             }
         }
