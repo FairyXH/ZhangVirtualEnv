@@ -277,12 +277,18 @@ class MainActivity : FragmentActivity() {
         if (currentTab == index) return
         val fm = supportFragmentManager
         val ft = fm.beginTransaction()
-        // 优雅无缝切换：交叉淡入淡出（旧页淡出时新页淡入，重叠过渡不露背景），
-        // 不使用滑动动画——slide 会让新旧页错开，露出主题背景造成白色闪烁
-        ft.setCustomAnimations(
-            R.anim.fade_in, R.anim.fade_out,
-            R.anim.fade_in, R.anim.fade_out
-        )
+        // 无缝翻页：新旧页同时平移且位移量互补（前进时旧页向左、新页从右补位），
+        // 两页边缘始终相接，像 Word 滑动页面一样无缝衔接，不露背景。
+        // 纯位移不带 alpha——淡入淡出会让页面半透明露底，产生“断页”闪烁。
+        if (animate) {
+            val forward = index > currentTab
+            ft.setCustomAnimations(
+                if (forward) R.anim.tab_slide_in_right else R.anim.tab_slide_in_left,
+                if (forward) R.anim.tab_slide_out_left else R.anim.tab_slide_out_right,
+                if (forward) R.anim.tab_slide_in_left else R.anim.tab_slide_in_right,
+                if (forward) R.anim.tab_slide_out_right else R.anim.tab_slide_out_left
+            )
+        }
         // 隐藏当前页（保留其视图与状态，切回时不重建）
         if (currentTab in 0..4) {
             fm.findFragmentByTag("tab$currentTab")?.let { ft.hide(it) }
