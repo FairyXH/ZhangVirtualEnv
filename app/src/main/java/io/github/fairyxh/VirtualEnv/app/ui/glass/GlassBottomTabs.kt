@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
@@ -309,6 +310,25 @@ fun GlassBottomTabs(
                             else Color.Black.copy(alpha = 0.25f)
                         )
                         val progress = dampedDragAnimation.pressProgress
+                        // 拖动放大时 Oplus 上半部分采样丢失、顶部看起来被切平；
+                        // 沿胶囊顶部画一层高光弧补回圆润曲面（仅拖动/按压时出现，常态无感）
+                        if (progress > 0.001f) {
+                            val arcCenter = Offset(size.width / 2f, -size.height * 0.35f)
+                            val arcRadius = size.maxDimension * 1.1f
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.34f * progress),
+                                        Color.White.copy(alpha = 0.10f * progress),
+                                        Color.Transparent
+                                    ),
+                                    center = arcCenter,
+                                    radius = arcRadius
+                                ),
+                                radius = arcRadius,
+                                center = arcCenter
+                            )
+                        }
                         drawRect(
                             if (isLightTheme) Color.Black.copy(0.1f)
                             else Color.White.copy(0.1f),

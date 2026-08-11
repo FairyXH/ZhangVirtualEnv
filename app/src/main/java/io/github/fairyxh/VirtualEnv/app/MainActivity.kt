@@ -22,13 +22,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -49,7 +46,6 @@ import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTab
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTabs
-import io.github.fairyxh.VirtualEnv.app.ui.glass.LiquidGlassBarBlur
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 
@@ -91,8 +87,6 @@ class MainActivity : FragmentActivity() {
     /** Compose state：底栏滑块跟随此值动画。 */
     private var currentTab by mutableIntStateOf(0)
 
-    private var bandBlur: LiquidGlassBarBlur? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         currentTab = savedInstanceState?.getInt(KEY_TAB, 0) ?: 0
@@ -128,9 +122,21 @@ class MainActivity : FragmentActivity() {
         )
         val bottomBar = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            // 玻璃表面由 Compose 绘制；对页面内容的实时模糊由 LiquidGlassBarBlur
-            // （RenderNode + AGSL RuntimeShader，API 31+）提供，见下方 setContentView 之后。
+            // 液态玻璃：Android 12+ 的 View#setBackgroundBlurRadius 会对 View 背景后的真实
+            // 内容（Fragment 页面）做系统级模糊。该方法未在编译期 framework stub 暴露，
+            // 运行时通过反射调用（API 31+ 存在；ColorOS 会移除此方法，捕获后静默降级）。
             background = ColorDrawable(AndroidColor.TRANSPARENT)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    val radiusPx = (28 * resources.displayMetrics.density).toInt()
+                    val method = android.view.View::class.java.getMethod(
+                        "setBackgroundBlurRadius", Int::class.java
+                    )
+                    method.invoke(this, radiusPx)
+                } catch (t: Throwable) {
+                    ZLog.w("UI", "background blur unavailable", t)
+                }
+            }
             setContent {
                 LiquidBottomBar(
                     selectedTabIndex = { currentTab },
@@ -151,34 +157,6 @@ class MainActivity : FragmentActivity() {
         setContentView(root)
         // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
 
-        // GPU 实时模糊底栏条带（RenderNode + AGSL）：对 Fragment 页面内容做真实模糊/折射。
-        // ColorOS 移除了 View#setBackgroundBlurRadius，这里优先用自定义 shader；
-        // 失败时再退回反射调用系统 blur（仅部分 ROM 可用）。
-        val blur = LiquidGlassBarBlur(
-            container = container,
-            bar = bottomBar,
-            capsuleLeftDp = 20f,
-            capsuleRightDp = 20f,
-            featherDp = 12f,
-            blurRadiusDp = 28f,
-            refractionDp = 4f
-        )
-        if (!blur.attach()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                try {
-                    val radiusPx = (28 * resources.displayMetrics.density).toInt()
-                    val method = android.view.View::class.java.getMethod(
-                        "setBackgroundBlurRadius", Int::class.java
-                    )
-                    method.invoke(bottomBar, radiusPx)
-                } catch (t: Throwable) {
-                    ZLog.w("UI", "background blur unavailable", t)
-                }
-            }
-        } else {
-            bandBlur = blur
-        }
-
         if (savedInstanceState == null) {
             // switchTab 会因 currentTab == index 提前返回；先把索引置 -1，
             // 确保启动时真正提交首页 Fragment（否则主页空白，需切换后才显示）
@@ -190,12 +168,6 @@ class MainActivity : FragmentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt(KEY_TAB, currentTab)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        bandBlur?.detach()
-        bandBlur = null
     }
 
     private fun switchTab(index: Int, animate: Boolean) {
@@ -253,12 +225,10 @@ private fun LiquidBottomBar(
     tabLabels: IntArray
 ) {
     val backdrop = rememberLayerBackdrop()
-    val colors = glassColors()
-    val density = LocalDensity.current
 
     Box(Modifier.fillMaxWidth()) {
-        // 玻璃采样层：只覆盖底栏胶囊区域（不延伸为全宽衬底），
-        // 为 GlassBottomTabs 的 blur/lens 提供可模糊的极淡内容，视觉上是磨砂玻璃面
+        // 玻璃采样层：空层（不绘制任何矩形底色），仅让 drawBackdrop 的 blur/lens
+        // 有可用图层；真实磨砂感由 GlassBottomTabs 表面的高光/折射承担
         Box(
             Modifier
                 .fillMaxWidth()
@@ -266,14 +236,6 @@ private fun LiquidBottomBar(
                 .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
                 .height(64.dp)
                 .layerBackdrop(backdrop)
-                .drawBehind {
-                    drawRect(
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.06f),
-                            1f to Color.White.copy(alpha = 0.03f)
-                        )
-                    )
-                }
         )
 
         val current = selectedTabIndex()
