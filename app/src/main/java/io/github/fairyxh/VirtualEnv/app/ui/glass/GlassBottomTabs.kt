@@ -31,14 +31,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
@@ -61,15 +68,20 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.sign
 
 /**
  * Liquid Glass 底栏（移植自 AndroidLiquidGlass LiquidBottomTabs，Apache-2.0）。
  *
  * 由三层玻璃构成：
- * - 外层胶囊：Backdrop blur + 透镜折射 + Fresnel 边缘高光（常驻）
- * - 中间选中态胶囊：随滑块位置移动，按压时折射增强、色散出现
- * - 内层图标层：tint 强调色，拖拽时整体跟随
+ * - 外层胶囊：Backdrop blur + 透镜折射 + Fresnel 边缘高光 + 内部柔和阴影（常驻）
+ * - 中间选中态胶囊：独立浮起的液态玻璃球，随滑块位置移动，带顶部镜面高光弧、
+ *   边缘描边、蓝色内发光与内阴影；按压/选中时折射增强、轻微放大浮起
+ * - 内层图标层：tint 强调色 + 选中态蓝色外发光，拖拽时整体跟随
+ *
+ * 页面内容的实时模糊由 LiquidGlassBarBlur（RenderNode + AGSL）提供，
+ * 本组件只负责玻璃材质本身（表面/高光/厚度/动态光照）。
  */
 @Composable
 fun GlassBottomTabs(
@@ -81,14 +93,14 @@ fun GlassBottomTabs(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val colors = glassColors()
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
-    // 底栏不要背景：全透明玻璃，仅保留 blur/lens 与滑块高光。
-    // （用户明确：全透明即可，衬底样式会与页面内容混在一起）
+    // 底栏表面：接近透明的玻璃基底，质感由后面的实时模糊 + 顶部镜面渐变/边缘高光承载
     val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.05f)
-        else Color(0xFF121212).copy(0.08f)
+        if (isLightTheme) Color(0xFFFAFAFA).copy(0.10f)
+        else Color(0xFF121212).copy(0.14f)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -162,6 +174,15 @@ fun GlassBottomTabs(
                 }
         }
 
+        // 选中浮起度：滑块贴近任意 tab 中心时最强，拖动过渡时自然“融化”
+        val selectedIdle by remember {
+            derivedStateOf {
+                val v = dampedDragAnimation.value
+                val nearest = v.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
+                (1f - abs(v - nearest)).coerceIn(0f, 1f)
+            }
+        }
+
         val interactiveHighlight = remember(animationScope) {
             InteractiveHighlight(
                 animationScope = animationScope,
@@ -188,13 +209,35 @@ fun GlassBottomTabs(
                         blur(8f.dp.toPx())
                         lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
+                    highlight = {
+                        // 常驻 Fresnel 边缘高光：玻璃边缘一圈连续亮边
+                        Highlight.Default.copy(alpha = 0.5f)
+                    },
+                    innerShadow = {
+                        // 内部柔和阴影：玻璃厚度
+                        InnerShadow(
+                            radius = 14f.dp,
+                            offset = DpOffset(0f.dp, 6f.dp),
+                            color = colors.glassShadow.copy(alpha = 0.6f)
+                        )
+                    },
                     layerBlock = {
                         val progress = dampedDragAnimation.pressProgress
                         val scale = lerp(1f, 1f + 16f.dp.toPx() / size.width, progress)
                         scaleX = scale
                         scaleY = scale
                     },
-                    onDrawSurface = { drawRect(containerColor) }
+                    onDrawSurface = {
+                        drawRect(containerColor)
+                        // 顶部镜面渐变：沿胶囊曲面连续衰减，替代“磨平”的纯 alpha 面
+                        drawRect(
+                            Brush.verticalGradient(
+                                0f to colors.glassHighlight.copy(alpha = 0.10f),
+                                0.30f to Color.Transparent,
+                                1f to Color.Transparent
+                            )
+                        )
+                    }
                 )
                 .then(interactiveHighlight.modifier)
                 .height(64f.dp)
@@ -206,7 +249,8 @@ fun GlassBottomTabs(
 
         CompositionLocalProvider(
             LocalLiquidBottomTabScale provides {
-                lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
+                lerp(1f, 1.2f, dampedDragAnimation.pressProgress) *
+                    lerp(1f, 1.07f, selectedIdle)
             }
         ) {
             Row(
@@ -273,6 +317,7 @@ fun GlassBottomTabs(
                     shape = { Capsule() },
                     effects = {
                         val progress = dampedDragAnimation.pressProgress
+                        blur(5f.dp.toPx())
                         lens(
                             10f.dp.toPx() * progress,
                             14f.dp.toPx() * progress,
@@ -281,34 +326,121 @@ fun GlassBottomTabs(
                     },
                     highlight = {
                         val progress = dampedDragAnimation.pressProgress
-                        Highlight.Default.copy(alpha = progress)
+                        Highlight.Default.copy(alpha = 0.35f + 0.65f * max(selectedIdle, progress))
                     },
                     shadow = {
                         val progress = dampedDragAnimation.pressProgress
-                        Shadow(alpha = progress)
+                        // 选中态自带浮起阴影（不只在按压时出现），形成空间层级
+                        Shadow(
+                            radius = 14f.dp,
+                            color = Color.Black.copy(alpha = 0.35f),
+                            alpha = 0.35f * selectedIdle + 0.65f * progress
+                        )
                     },
                     innerShadow = {
                         val progress = dampedDragAnimation.pressProgress
                         InnerShadow(
-                            radius = 8f.dp * progress,
-                            alpha = progress
+                            radius = 12f.dp * lerp(0.4f, 1f, max(selectedIdle, progress)),
+                            offset = DpOffset(0f.dp, 4f.dp),
+                            color = Color.Black.copy(alpha = 0.16f),
+                            alpha = lerp(0.4f, 1f, max(selectedIdle, progress))
                         )
                     },
                     layerBlock = {
-                        scaleX = dampedDragAnimation.scaleX
-                        scaleY = dampedDragAnimation.scaleY
+                        // 选中浮起：在按压缩放基础上叠加轻微放大（液态膨胀）
+                        scaleX = dampedDragAnimation.scaleX * lerp(1f, 1.06f, selectedIdle)
+                        scaleY = dampedDragAnimation.scaleY * lerp(1f, 1.06f, selectedIdle)
                         val velocity = dampedDragAnimation.velocity / 10f
                         scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
-                        // 常态画一层完整胶囊底色：Oplus 上 blur 采样可能只覆盖下半部分，
-                        // 这层底色保证玻璃滑块上半部分也完整可见（液态高光由 highlight 提供）
-                        drawRect(
-                            if (isLightTheme) Color.White.copy(alpha = 0.22f)
-                            else Color.Black.copy(alpha = 0.25f)
-                        )
                         val progress = dampedDragAnimation.pressProgress
+                        val emphasis = max(selectedIdle, progress)
+
+                        // 1) 完整胶囊底色：Oplus 上 blur 采样可能只覆盖下半部分，
+                        //    这层保证玻璃球上半部分也完整可见；选中时更亮
+                        drawRect(
+                            if (isLightTheme) Color.White.copy(alpha = 0.20f + 0.10f * emphasis)
+                            else Color.Black.copy(alpha = 0.24f + 0.12f * emphasis)
+                        )
+
+                        // 2) 顶部液态高光弧：光源在胶囊上方，光沿曲面连续衰减，
+                        //    修复“上方边缘被切平/磨平”的直线裁剪感
+                        val arcCenter = Offset(size.width / 2f, -size.height * 0.30f)
+                        val arcRadius = size.maxDimension * 1.2f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    if (isLightTheme)
+                                        Color.White.copy(alpha = 0.42f * emphasis + 0.12f)
+                                    else
+                                        Color.White.copy(alpha = 0.28f * emphasis + 0.08f),
+                                    if (isLightTheme)
+                                        Color.White.copy(alpha = 0.14f * emphasis)
+                                    else
+                                        Color.White.copy(alpha = 0.08f * emphasis),
+                                    Color.Transparent
+                                ),
+                                center = arcCenter,
+                                radius = arcRadius
+                            ),
+                            radius = arcRadius,
+                            center = arcCenter
+                        )
+
+                        // 3) 底部内阴影：玻璃厚度
+                        val shadowCenter = Offset(size.width / 2f, size.height * 1.25f)
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.16f * emphasis + 0.04f),
+                                    Color.Transparent
+                                ),
+                                center = shadowCenter,
+                                radius = size.width * 0.55f
+                            ),
+                            radius = size.width * 0.55f,
+                            center = shadowCenter
+                        )
+
+                        // 4) 蓝色内发光：选中态内部光感
+                        val glowCenter = Offset(size.width / 2f, size.height / 2f)
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = 0.10f + 0.12f * emphasis),
+                                    accentColor.copy(alpha = 0.03f * emphasis),
+                                    Color.Transparent
+                                ),
+                                center = glowCenter,
+                                radius = size.width * 0.5f
+                            ),
+                            radius = size.width * 0.5f,
+                            center = glowCenter
+                        )
+
+                        // 5) 边缘镜面描边：沿胶囊轮廓的高光边，顶部最亮
+                        val rimRadius = size.minDimension / 2f
+                        val rimPath = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    Rect(0f, 0f, size.width, size.height),
+                                    CornerRadius(rimRadius, rimRadius)
+                                )
+                            )
+                        }
+                        drawPath(
+                            path = rimPath,
+                            brush = Brush.verticalGradient(
+                                0f to Color.White.copy(alpha = 0.5f * emphasis + 0.12f),
+                                0.55f to Color.White.copy(alpha = 0.18f * emphasis + 0.05f),
+                                1f to Color.White.copy(alpha = 0.06f * emphasis + 0.02f)
+                            ),
+                            style = Stroke(width = 2f.dp.toPx())
+                        )
+
+                        // 6) 按压过渡压暗（保留原逻辑）
                         drawRect(
                             if (isLightTheme) Color.Black.copy(0.1f)
                             else Color.White.copy(0.1f),
