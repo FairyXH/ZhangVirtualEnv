@@ -8,8 +8,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,13 +30,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.TextStyle
@@ -46,8 +52,8 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
-import com.amap.api.maps.MapView
 import com.amap.api.maps.MapsInitializer
+import com.amap.api.maps.TextureMapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
@@ -64,6 +70,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -104,6 +111,7 @@ class LocationSimFragment : Fragment() {
     private var pointName by mutableStateOf("")
     private var pointRemark by mutableStateOf("")
     private var searchText by mutableStateOf("")
+    private var searchOverlay by mutableStateOf(false)
     private var mapCollapsed by mutableStateOf(false)
     private var mapSatellite by mutableStateOf(false)
     private var mapFullscreen by mutableStateOf(false)
@@ -115,7 +123,7 @@ class LocationSimFragment : Fragment() {
 
     // ---------- 高德地图 ----------
 
-    private var mapView: MapView? = null
+    private var mapView: TextureMapView? = null
     private var amap: AMap? = null
     private var selectedMarker: Marker? = null
     private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
@@ -295,48 +303,25 @@ class LocationSimFragment : Fragment() {
                         }
                         if (!mapCollapsed) {
                             if (!fragment.mapFullscreen) {
+                            // 搜索入口：点击弹出独立搜索浮层（结果不挤在卡片内）
                             Row(
-                                Modifier.padding(top = 10.dp).fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Modifier.padding(top = 10.dp).fillMaxWidth()
                             ) {
-                                GlassField(
-                                    value = searchText,
-                                    onValueChange = { searchText = it },
-                                    backdrop = backdrop,
-                                    modifier = Modifier.weight(1f),
-                                    placeholder = getString(R.string.location_search_hint)
-                                )
                                 GlassButton(
-                                    onClick = { fragment.searchPoi() },
+                                    onClick = { fragment.searchOverlay = true },
                                     backdrop = backdrop,
-                                    tint = colors.accent
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.3f)
                                 ) {
                                     BasicText(
-                                        getString(R.string.location_search),
-                                        style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
-                            }
-                            if (!fragment.mapFullscreen) {
-                            if (searchResultsVisible) {
-                                searchResults.forEach { (title, poi) ->
-                                    GlassPill(
-                                        onClick = { fragment.jumpToSearchResult(poi) },
-                                        backdrop = backdrop,
-                                        modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
-                                        selected = false,
-                                        containerColor = colors.bgTertiary.copy(alpha = 0.3f),
-                                        height = 44.dp
-                                    ) {
-                                        BasicText(
-                                            title,
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp),
-                                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                        if (searchText.isEmpty()) getString(R.string.location_search_hint) else searchText,
+                                        Modifier.fillMaxWidth().padding(start = 10.dp),
+                                        maxLines = 1,
+                                        style = TextStyle(
+                                            color = if (searchText.isEmpty()) colors.textTertiary else colors.textPrimary,
+                                            fontSize = 14.sp
                                         )
-                                    }
+                                    )
                                 }
                             }
                             }
@@ -364,7 +349,7 @@ class LocationSimFragment : Fragment() {
                                                 if (!key.isNullOrEmpty()) {
                                                     com.amap.api.maps.MapsInitializer.setApiKey(key)
                                                 }
-                                                MapView(ctx).also { mv ->
+                                                TextureMapView(ctx).also { mv ->
                                                     mapView = mv
                                                     mv.onCreate(savedInstanceState)
                                                     amap = mv.map
@@ -587,8 +572,122 @@ class LocationSimFragment : Fragment() {
                 }
                 } // if (!fragment.mapFullscreen) 结束（卡片2/3/4 仅非全屏显示）
             }
+            if (fragment.searchOverlay) {
+                // 弹出式搜索浮层：覆盖整个内容区，实时搜索提示
+                SearchOverlay(
+                    fragment = fragment,
+                    backdrop = backdrop,
+                    onClose = { fragment.searchOverlay = false }
+                )
+            }
         }
     }
+    }
+
+    @Composable
+    private fun SearchOverlay(
+        fragment: LocationSimFragment,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onClose: () -> Unit
+    ) {
+        val colors = glassColors()
+        // 输入变化后 300ms 实时搜索（防抖）
+        LaunchedEffect(fragment.searchText) {
+            delay(300)
+            fragment.searchPoi(hideKey = false)
+        }
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            focusRequester.requestFocus()
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(colors.overlayScrim.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClose
+                )
+        ) {
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 12.dp, end = 16.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GlassButton(
+                        onClick = onClose,
+                        backdrop = backdrop,
+                        modifier = Modifier.width(44.dp).height(48.dp),
+                        surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                    ) {
+                        BasicText(
+                            "×",
+                            style = TextStyle(color = colors.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                        )
+                    }
+                    GlassField(
+                        value = fragment.searchText,
+                        onValueChange = { fragment.searchText = it },
+                        backdrop = backdrop,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        placeholder = getString(R.string.location_search_hint),
+                        focusRequester = focusRequester
+                    )
+                }
+                if (fragment.searchResultsVisible) {
+                    GlassCard(
+                        backdrop = backdrop,
+                        modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                        containerColor = colors.bgSecondary.copy(alpha = 0.92f)
+                    ) {
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            fragment.searchResults.forEach { (title, poi) ->
+                                GlassPill(
+                                    onClick = {
+                                        fragment.jumpToSearchResult(poi)
+                                        onClose()
+                                    },
+                                    backdrop = backdrop,
+                                    modifier = Modifier
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .fillMaxWidth(),
+                                    selected = false,
+                                    containerColor = Color.Transparent,
+                                    height = 52.dp
+                                ) {
+                                    BasicText(
+                                        title,
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp),
+                                        maxLines = 2,
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (fragment.searchText.isNotBlank()) {
+                    BasicText(
+                        getString(R.string.location_search_empty),
+                        Modifier.padding(top = 14.dp),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                    )
+                }
+            }
+        }
     }
 
     @Composable
@@ -977,7 +1076,7 @@ class LocationSimFragment : Fragment() {
 
     // ---------- 地址搜索 ----------
 
-    private fun searchPoi() {
+    private fun searchPoi(hideKey: Boolean = true) {
         val keyword = searchText.trim()
         if (keyword.isEmpty()) return
         val context = requireContext()
@@ -1005,7 +1104,7 @@ class LocationSimFragment : Fragment() {
                 }
             })
             search.searchPOIAsyn()
-            hideKeyboard()
+            if (hideKey) hideKeyboard()
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "poi search failed", t)
             Toast.makeText(context, R.string.location_search_failed, Toast.LENGTH_SHORT).show()

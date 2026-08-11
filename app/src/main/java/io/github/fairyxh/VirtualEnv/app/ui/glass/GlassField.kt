@@ -9,6 +9,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -32,7 +34,8 @@ fun GlassField(
     cornerRadius: Dp = 12.dp,
     singleLine: Boolean = true,
     visualTransformation: VisualTransformation = VisualTransformation.None,
-    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    focusRequester: FocusRequester? = null
 ) {
     val colors = glassColors()
 
@@ -58,7 +61,11 @@ fun GlassField(
                 onValueChange = onValueChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.CenterStart),
+                    .align(Alignment.CenterStart)
+                    .then(
+                        if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                        else Modifier
+                    ),
                 textStyle = textStyle.copy(color = colors.textPrimary),
                 cursorBrush = SolidColor(colors.accent),
                 singleLine = singleLine,
