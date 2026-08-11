@@ -50,6 +50,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCheckbox
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassSegmented
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -106,6 +107,7 @@ class HomeFragment : Fragment() {
 
     private var collectResult by mutableStateOf<String?>(null)
     private var collectName by mutableStateOf("")
+    private var detailDialog by mutableStateOf<Pair<String, String>?>(null)
     private var collectRemark by mutableStateOf("")
     private var collectButtonEnabled by mutableStateOf(true)
     private var saveCollectEnabled by mutableStateOf(false)
@@ -242,7 +244,7 @@ class HomeFragment : Fragment() {
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 val colors = glassColors()
@@ -724,6 +726,13 @@ class HomeFragment : Fragment() {
                         }
                     }
                 }
+            }
+            detailDialog?.let { (title, text) ->
+                GlassTextDialog(
+                    title = title,
+                    text = text,
+                    onDismiss = { detailDialog = null }
+                )
             }
         }
     }
@@ -1401,23 +1410,9 @@ class HomeFragment : Fragment() {
         }
     }
 
-    /** 可滚动详情弹窗（录像帧数多时避免内容溢出）。 */
+    /** 可滚动详情弹窗（液态玻璃样式，录像帧数多时避免内容溢出）。 */
     private fun showScrollableDialog(title: String, text: String) {
-        val scroll = android.widget.ScrollView(requireContext()).apply {
-            isFillViewport = true
-        }
-        val tv = android.widget.TextView(requireContext()).apply {
-            setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.text_primary))
-            textSize = 12f
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            setText(text)
-        }
-        scroll.addView(tv)
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle(title)
-            .setView(scroll)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+        detailDialog = title to text
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

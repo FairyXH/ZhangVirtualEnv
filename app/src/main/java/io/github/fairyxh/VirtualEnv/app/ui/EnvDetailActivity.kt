@@ -37,6 +37,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -80,7 +81,7 @@ class EnvDetailActivity : ComponentActivity() {
 
     private var detailTitle by mutableStateOf("")
     private var detailStatus by mutableStateOf("")
-
+    private var detailDialog by mutableStateOf<JSONObject?>(null)
     // cell 表单
     private var cellType by mutableStateOf("")
     private var cellMcc by mutableStateOf("")
@@ -419,6 +420,13 @@ class EnvDetailActivity : ComponentActivity() {
                     }
                 }
             }
+            detailDialog?.let { item ->
+                GlassTextDialog(
+                    title = getString(R.string.env_detail_data_title) + " · " + item.optString("name", ""),
+                    text = formatConfigData(item.optJSONObject("data")),
+                    onDismiss = { detailDialog = null }
+                )
+            }
         }
     }
 
@@ -731,16 +739,9 @@ class EnvDetailActivity : ComponentActivity() {
         savedItems.addAll(items)
     }
 
-    /** 配置详情弹窗：展示保存的完整数据。 */
+    /** 配置详情弹窗：展示保存的完整数据（液态玻璃样式）。 */
     private fun showDetailDialog(item: JSONObject) {
-        val text = formatConfigData(item.optJSONObject("data"))
-        android.app.AlertDialog.Builder(this)
-            .setTitle(
-                getString(R.string.env_detail_data_title) + " · " + item.optString("name", "")
-            )
-            .setMessage(text)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+        detailDialog = item
     }
 
     private fun formatConfigData(data: JSONObject?): String {

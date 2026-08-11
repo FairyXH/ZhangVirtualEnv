@@ -47,6 +47,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.HomeFragment
 import io.github.fairyxh.VirtualEnv.app.ui.LocationSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
+import io.github.fairyxh.VirtualEnv.app.ui.glass.AppBackground
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTab
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTabs
 import io.github.fairyxh.VirtualEnv.app.ui.glass.LiquidGlassBarRefraction
@@ -96,6 +97,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         currentTab = savedInstanceState?.getInt(KEY_TAB, 0) ?: 0
+        AppBackground.load(applicationContext)
 
         // Fragment 容器必须在视图树中立即可用（FragmentManager onStart 时按 id 查找），
         // 因此不放进 Compose AndroidView，底栏单独用 ComposeView 叠加。
@@ -181,6 +183,7 @@ class MainActivity : FragmentActivity() {
             bar = bottomBar,
             capsuleLeftDp = 20f,
             capsuleRightDp = 20f,
+            contentTopOffsetDp = 24f,
             featherDp = 16f,
             refractionDp = 3.5f
         )

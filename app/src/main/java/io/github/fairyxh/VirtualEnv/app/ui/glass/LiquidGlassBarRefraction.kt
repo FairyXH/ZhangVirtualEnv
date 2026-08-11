@@ -22,6 +22,7 @@ class LiquidGlassBarRefraction(
     private val bar: View,
     private val capsuleLeftDp: Float = 20f,
     private val capsuleRightDp: Float = 20f,
+    private val contentTopOffsetDp: Float = 0f,
     private val featherDp: Float = 16f,
     private val refractionDp: Float = 3.5f
 ) : ViewTreeObserver.OnGlobalLayoutListener {
@@ -89,7 +90,9 @@ class LiquidGlassBarRefraction(
         val barWidth = bar.width
         if (barWidth <= 0) return
         shader.setFloatUniform("size", w.toFloat(), h.toFloat())
-        shader.setFloatUniform("bandTop", barTop.toFloat())
+        // bandTop 用玻璃内容顶部而非 ComposeView 顶部：底栏顶部有透明扩展区，
+        // 若从扩展区开始折射会让页面内容在扩展区内被透镜偏移，形成左侧白边
+        shader.setFloatUniform("bandTop", barTop + contentTopOffsetDp * density)
         shader.setFloatUniform("bandLeft", barLeft + capsuleLeftDp * density)
         shader.setFloatUniform("bandRight", barLeft + barWidth - capsuleRightDp * density)
         renderEffect?.let { container.setRenderEffect(it) }

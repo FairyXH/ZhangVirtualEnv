@@ -63,6 +63,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
+import io.github.fairyxh.VirtualEnv.app.ui.glass.AppBackground
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -266,7 +267,7 @@ class SettingsFragment : Fragment() {
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
+                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 val colors = glassColors()
@@ -343,6 +344,31 @@ class SettingsFragment : Fragment() {
                                 )
                             }
                         }
+                    }
+                }
+
+                // 外观设置卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Row(
+                        Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            SectionTitle(getString(R.string.settings_appearance_title))
+                            SectionDesc(getString(R.string.settings_appearance_desc))
+                        }
+                        GlassToggle(
+                            selected = { AppBackground.useWallpaper },
+                            onSelect = { fragment.setWallpaperBackground(it) },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
                     }
                 }
 
@@ -1214,6 +1240,10 @@ class SettingsFragment : Fragment() {
             .apply()
         ZLog.i(TAG_SCOPE, "amap config saved")
         Toast.makeText(requireContext(), R.string.settings_amap_saved, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun setWallpaperBackground(enabled: Boolean) {
+        AppBackground.setUseWallpaper(requireContext(), enabled)
     }
 
     private fun copyText(text: String) {
