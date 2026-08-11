@@ -8,13 +8,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -67,22 +63,6 @@ fun GlassBackdropHost(
                         drawRect(Color.Black.copy(alpha = 0.25f))
                         drawRect(Color.White.copy(alpha = 0.03f))
                     }
-                    // ColorOS 曲面屏左缘安全区（约 56px）由系统强制绘制黑色，
-                    // 应用内容无法渲染到该区域；画一条黑→透明的横向渐变让交界柔和
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                Color.Black,
-                                Color.Black.copy(alpha = 0.75f),
-                                Color.Black.copy(alpha = 0.35f),
-                                Color.Transparent
-                            ),
-                            startX = 0f,
-                            endX = 112.dp.toPx()
-                        ),
-                        topLeft = Offset.Zero,
-                        size = Size(112.dp.toPx(), size.height)
-                    )
                 }
         )
 
