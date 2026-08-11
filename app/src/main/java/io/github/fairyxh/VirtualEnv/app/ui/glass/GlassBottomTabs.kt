@@ -307,50 +307,8 @@ fun GlassBottomTabs(
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
-                        // 与悬浮圆形返回按钮同款材质：半透明深色底 + 顶部径向
-                        // 高光 + 白色描边；常态画一层完整胶囊底色，保证玻璃滑块
-                        // 上半部分也完整可见（液态高光由 highlight 提供）
-                        drawRect(colors.bgTertiary.copy(alpha = 0.45f))
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.22f),
-                                    Color.Transparent
-                                ),
-                                center = Offset(size.width * 0.32f, size.height * 0.24f),
-                                radius = size.maxDimension * 0.9f
-                            ),
-                            radius = size.maxDimension * 0.9f,
-                            center = Offset(size.width * 0.32f, size.height * 0.24f)
-                        )
-                        val progress = dampedDragAnimation.pressProgress
-                        // 拖动放大时 Oplus 上半部分采样丢失、顶部看起来被切平；
-                        // 沿胶囊顶部画一层高光弧补回圆润曲面（仅拖动/按压时出现，常态无感）
-                        if (progress > 0.001f) {
-                            val arcCenter = Offset(size.width / 2f, -size.height * 0.35f)
-                            val arcRadius = size.maxDimension * 1.1f
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.34f * progress),
-                                        Color.White.copy(alpha = 0.10f * progress),
-                                        Color.Transparent
-                                    ),
-                                    center = arcCenter,
-                                    radius = arcRadius
-                                ),
-                                radius = arcRadius,
-                                center = arcCenter
-                            )
-                        }
-                        // 透明按钮同款白色描边（胶囊形），按压时淡出
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.18f),
-                            style = Stroke(width = 1.dp.toPx()),
-                            cornerRadius = CornerRadius(size.height / 2f),
-                            alpha = 1f - progress
-                        )
-                        drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                        // 选中胶囊全透：不绘制任何底色/高光/描边（用户要求），
+                        // 玻璃感仅来自 drawBackdrop 的 lens 折射与按压 highlight/shadow
                     }
                 )
                 .height(56f.dp)

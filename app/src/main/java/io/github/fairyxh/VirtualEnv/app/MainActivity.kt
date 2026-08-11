@@ -12,7 +12,6 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -21,14 +20,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
@@ -326,21 +323,14 @@ private fun LiquidBottomBar(
     tabLabels: IntArray
 ) {
     val backdrop = rememberLayerBackdrop()
-    val barDark = isSystemInDarkTheme()
-    // 底栏背景磨砂底色（drawBackdrop 的 onDrawSurface 非 Composable 上下文，提前计算）
-    val barGlassColor =
-        if (barDark) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.12f)
 
     Column(Modifier.fillMaxWidth()) {
-        // 顶部透明扩展区：让放大后的胶囊顶部能在底栏上边缘之上浮起，
         // 避免被 ComposeView 的 View 边界硬裁剪（clipChildren 对 Compose 内部
         // RenderNode 无效，这里直接用布局空间解决）。该区域透明且不拦截触摸。
         Spacer(Modifier.height(24.dp))
         Box(Modifier.fillMaxWidth()) {
-            // 底栏背景磨砂玻璃：整条全宽半透明玻璃底色（非胶囊）。
-            // 胶囊本身保持全透（GlassBottomTabs 只保留透镜折射）。
-            // 注意：不能用 drawBackdrop blur / RuntimeShader —— Oplus 上全宽
-            // blur 会让 RenderThread SIGSEGV 崩溃；这里用静态半透明+高光模拟。
+            // 玻璃采样层：完全透明（不绘制任何底色），恢复全透底栏。
+            // 导航栏避让用 AppInsets 缓存（窗口 insets 已在 root 层被消费）
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -348,21 +338,6 @@ private fun LiquidBottomBar(
                     .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
                     .height(64.dp)
                     .layerBackdrop(backdrop)
-                    .drawBehind {
-                        drawRect(barGlassColor)
-                        // 顶部微高光，模拟磨砂玻璃受光
-                        drawRect(
-                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                colors = listOf(
-                                    if (barDark) Color.White.copy(alpha = 0.05f)
-                                    else Color.White.copy(alpha = 0.10f),
-                                    Color.Transparent
-                                ),
-                                startY = 0f,
-                                endY = size.height * 0.4f
-                            )
-                        )
-                    }
             )
 
             val current = selectedTabIndex()
