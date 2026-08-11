@@ -208,18 +208,23 @@ class MainActivity : FragmentActivity() {
         )
 
         // 透镜折射：对页面内容做清晰的光线折射（非磨砂/非模糊），
-        // 挂在 Fragment 容器上，只影响玻璃条带区域；失败则静默降级为透明底栏。
-        val refraction = LiquidGlassBarRefraction(
-            container = container,
-            bar = bottomBar,
-            capsuleLeftDp = 20f,
-            capsuleRightDp = 20f,
-            contentTopOffsetDp = 33f,
-            featherDp = 16f,
-            refractionDp = 3.5f
-        )
-        if (refraction.attach()) {
-            barRefraction = refraction
+        // 挂在 Fragment 容器上，只影响玻璃条带区域。
+        // 注意：ColorOS/Oplus 上 View#setRenderEffect(RuntimeShader) 的输出区域
+        // 会从 x=56 开始（左 56px 不渲染，露出窗口背景黑边），因此默认不挂载；
+        // 玻璃感由底栏自身 drawBackdrop 的 blur/lens 承担。
+        if (false) {
+            val refraction = LiquidGlassBarRefraction(
+                container = container,
+                bar = bottomBar,
+                capsuleLeftDp = 20f,
+                capsuleRightDp = 20f,
+                contentTopOffsetDp = 33f,
+                featherDp = 16f,
+                refractionDp = 3.5f
+            )
+            if (refraction.attach()) {
+                barRefraction = refraction
+            }
         }
 
         if (savedInstanceState == null) {
