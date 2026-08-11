@@ -238,7 +238,6 @@ class HomeFragment : Fragment() {
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
         ) { backdrop ->
             Column(
                 Modifier

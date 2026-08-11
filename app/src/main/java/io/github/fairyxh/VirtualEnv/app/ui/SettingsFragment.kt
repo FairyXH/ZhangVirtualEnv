@@ -261,7 +261,6 @@ class SettingsFragment : Fragment() {
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
         ) { backdrop ->
             Column(
                 Modifier
@@ -1243,8 +1242,35 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setWallpaperBackground(enabled: Boolean) {
+        if (enabled) {
+            // ColorOS 读取壁纸位图需要图片权限；未授权时先请求，授权后再启用
+            val permission = if (Build.VERSION.SDK_INT >= 33) {
+                Manifest.permission.READ_MEDIA_IMAGES
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            val granted = ContextCompat.checkSelfPermission(requireContext(), permission) ==
+                PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                wallpaperPermissionLauncher.launch(permission)
+                return
+            }
+        }
         AppBackground.setUseWallpaper(requireContext(), enabled)
     }
+
+    private val wallpaperPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                AppBackground.setUseWallpaper(requireContext(), true)
+            } else {
+                Toast.makeText(
+                    requireContext(),
+                    R.string.settings_appearance_permission_denied,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
 
     private fun copyText(text: String) {
         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

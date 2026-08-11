@@ -2,6 +2,7 @@ package io.github.fairyxh.VirtualEnv.app
 
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
@@ -14,9 +15,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
@@ -28,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
@@ -48,6 +51,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.LocationSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.RouteSimFragment
 import io.github.fairyxh.VirtualEnv.app.ui.SettingsFragment
 import io.github.fairyxh.VirtualEnv.app.ui.glass.AppBackground
+import io.github.fairyxh.VirtualEnv.app.ui.glass.AppInsets
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTab
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBottomTabs
 import io.github.fairyxh.VirtualEnv.app.ui.glass.LiquidGlassBarRefraction
@@ -101,10 +105,10 @@ class MainActivity : FragmentActivity() {
 
         // Fragment 容器必须在视图树中立即可用（FragmentManager onStart 时按 id 查找），
         // 因此不放进 Compose AndroidView，底栏单独用 ComposeView 叠加。
-        val root = SwipeAwareFrameLayout(this)
-        root.setBackgroundColor(
-            ContextCompat.getColor(this, R.color.bg_primary)
-        )
+        // 黑底阶段：root 直接铺黑色，所有卡片浮在黑色之上。
+        val root = SwipeAwareFrameLayout(this).apply {
+            setBackgroundColor(AndroidColor.BLACK)
+        }
         // 触屏横向滑动切换页面：只在快速 fling 时切换（dispatch 阶段观察，不消费事件，
         // 因此不影响页面纵向滚动与地图拖拽）
         root.onSwipe = { dx, dy, vx ->
@@ -157,6 +161,33 @@ class MainActivity : FragmentActivity() {
             )
         )
         setContentView(root)
+        // attach 后再消费窗口 insets：AndroidComposeView 默认把 insets 当作
+        // contentPadding（ColorOS 曲面安全区 left=56px 会让整页从 x=56 开始、
+        // 左侧漏底），root 消费后所有 Compose 内容真正全屏；insets 缓存在
+        // AppInsets，页面内容层与底栏用它手动避让系统栏。
+        io.github.fairyxh.VirtualEnv.app.ui.glass.AppInsets.attachConsume(root)
+        // 黑底阶段：窗口背景纯黑，与 root 一致
+        window.setBackgroundDrawable(ColorDrawable(AndroidColor.BLACK))
+        // edge-to-edge：关闭 fitsSystemWindows 自动推移，否则 Fragment 的 ComposeView
+        // 被系统 insets（顶部状态栏/左侧曲面安全区/底部导航栏）整体挤小，
+        // 窗口透明后这些区域会露出黑边。insets 由 GlassBackdropHost 内容层自行处理。
+        window.setDecorFitsSystemWindows(false)
+        // 沉浸式系统栏：状态栏/导航栏背景透明 + 关闭对比度增强，让手势小白条
+        // 透明融入背景（不隐藏系统栏，保留小白条但沉浸化）
+        window.statusBarColor = AndroidColor.TRANSPARENT
+        window.navigationBarColor = AndroidColor.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.navigationBarDividerColor = AndroidColor.TRANSPARENT
+        }
+        // 黑底主题：状态栏/导航栏图标用浅色
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         // 内容区不做底部预留：卡片可以滚动穿过底栏（底栏悬浮在页面之上）
 
         // ComposeView 内部还有 AndroidComposeView 布局根，默认同样裁剪子绘制；
@@ -183,7 +214,7 @@ class MainActivity : FragmentActivity() {
             bar = bottomBar,
             capsuleLeftDp = 20f,
             capsuleRightDp = 20f,
-            contentTopOffsetDp = 24f,
+            contentTopOffsetDp = 33f,
             featherDp = 16f,
             refractionDp = 3.5f
         )
@@ -273,10 +304,11 @@ private fun LiquidBottomBar(
         Spacer(Modifier.height(24.dp))
         Box(Modifier.fillMaxWidth()) {
             // 玻璃采样层：完全透明（不绘制任何底色）。
+            // 导航栏避让用 AppInsets 缓存（窗口 insets 已在 root 层被消费）
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
+                    .padding(AppInsets.navigationBars.asPaddingValues())
                     .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
                     .height(64.dp)
                     .layerBackdrop(backdrop)
@@ -290,7 +322,7 @@ private fun LiquidBottomBar(
                 tabsCount = tabIcons.size,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
+                    .padding(AppInsets.navigationBars.asPaddingValues())
                     .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
             ) {
                 repeat(tabIcons.size) { index ->

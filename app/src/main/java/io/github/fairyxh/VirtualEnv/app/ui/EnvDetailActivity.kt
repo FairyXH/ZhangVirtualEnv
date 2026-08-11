@@ -162,7 +162,6 @@ class EnvDetailActivity : ComponentActivity() {
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
         ) { backdrop ->
             Column(
                 Modifier
