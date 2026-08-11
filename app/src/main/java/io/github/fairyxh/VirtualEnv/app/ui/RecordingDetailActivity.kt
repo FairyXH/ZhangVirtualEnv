@@ -5,14 +5,17 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,12 +44,14 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
- * 录像帧详情页：按帧列出录像保存的各信息摘要（帧与帧之间带分隔符），
- * 点击任意帧切换查看该帧保存的全部原始数据（各信息 JSON），带返回按钮。
+ * 录像帧详情页：按帧列出录像保存的各信息摘要，点击任意帧切换查看该帧保存的
+ * 全部原始数据（各信息 JSON），带返回按钮。
  *
- * 满足需求：已保存采集详情可查看具体哪个帧保存了哪些信息的原始数据/详细信息。
- *
- * 视图层已迁移到 Compose Liquid Glass，业务逻辑不变。
+ * 性能策略：
+ * - 列表按页加载/渲染（每页 [pageSize] 帧），帧数再多也只组合一页。
+ * - 即使旧 Backend 忽略 offset/limit 返回全量帧，客户端也防御性截取本页。
+ * - 单帧 JSON 在后台线程格式化，UI 用 LazyColumn 逐行虚拟化渲染，
+ *   避免超大文本一次性布局导致 ANR/黑屏。
  */
 class RecordingDetailActivity : ComponentActivity() {
 
@@ -76,6 +82,10 @@ class RecordingDetailActivity : ComponentActivity() {
     private var loadingPage by mutableStateOf(false)
     private var firstTs = 0L
     private var showingFrame by mutableStateOf<JSONObject?>(null)
+
+    /** 当前帧原始 JSON 的格式化行（后台线程生成，避免 UI 线程卡顿）。 */
+    private val detailJsonLines = mutableStateListOf<String>()
+    private var detailJsonReady by mutableStateOf(false)
 
     private var recordingId = -1L
     private var recordingName = ""
@@ -113,9 +123,10 @@ class RecordingDetailActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxSize()
         ) { backdrop ->
+            val colors = glassColors()
             val scrollState = rememberScrollState()
-            // 翻页后回到页首，避免停留在上一页的滚动位置
-            LaunchedEffect(pageIndex) { scrollState.scrollTo(0) }
+            // 翻页后不回顶：scrollTo 是挂起等待布局的版本，在重组/协程取消时
+            // 可能卡住渲染；翻页内容切换后滚动位置保持即可，不为此引入挂起风险
             Column(
                 Modifier
                     .fillMaxSize()
@@ -123,7 +134,6 @@ class RecordingDetailActivity : ComponentActivity() {
                     .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                val colors = glassColors()
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -161,55 +171,45 @@ class RecordingDetailActivity : ComponentActivity() {
 
                 val frame = showingFrame
                 if (frame == null) {
-                    // 列表视图
-                    GlassCard(
-                        backdrop = backdrop,
-                        modifier = Modifier.fillMaxWidth(),
-                        containerColor = colors.bgSecondary.copy(alpha = 0.45f)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
+                    // 列表视图：不包单个巨型 GlassCard。大高度 backdrop（几千 px）
+                    // 在 ColorOS/Oplus 上 RuntimeShader/RenderEffect 渲染会整片失败，
+                    // 表现为黑屏/白屏；改为每帧独立小 GlassCard 直接排列。
+                    BasicText(
+                        detailStatus,
+                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                    )
+                    if (pageFrames.isEmpty()) {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
                             BasicText(
-                                detailStatus,
-                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                getString(R.string.recording_detail_empty),
+                                Modifier
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
                             )
-                            if (pageFrames.isEmpty()) {
-                                BasicText(
-                                    getString(R.string.recording_detail_empty),
-                                    Modifier
-                                        .padding(top = 16.dp, bottom = 16.dp)
-                                        .fillMaxWidth(),
-                                    style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
-                                )
-                            } else {
-                                BasicText(
-                                    getString(R.string.recording_detail_click_hint),
-                                    Modifier.padding(top = 10.dp),
-                                    style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
-                                )
-                                pageFrames.forEachIndexed { index, item ->
-                                    FrameCard(
-                                        frame = item,
-                                        index = index,
-                                        firstTs = firstTs,
-                                        backdrop = backdrop,
-                                        onClick = { showingFrame = item }
-                                    )
-                                    if (index < pageFrames.size - 1) {
-                                        Row(
-                                            Modifier
-                                                .padding(horizontal = 8.dp)
-                                                .fillMaxWidth(),
-                                        ) {
-                                            BasicText(
-                                                "",
-                                                Modifier
-                                                    .weight(1f)
-                                                    .padding(top = 0.dp),
-                                                style = TextStyle(fontSize = 1.sp)
-                                            )
-                                        }
-                                    }
+                        }
+                    } else {
+                        BasicText(
+                            getString(R.string.recording_detail_click_hint),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                        )
+                        pageFrames.forEachIndexed { index, item ->
+                            FrameCard(
+                                frame = item,
+                                index = index,
+                                firstTs = firstTs,
+                                backdrop = backdrop,
+                                onClick = {
+                                    showingFrame = item
+                                    loadDetailJson(item)
                                 }
+                            )
+                        }
                                 // 帧数超过单页上限时显示翻页控件
                                 if (totalFrames > pageSize) {
                                     val totalPages =
@@ -274,10 +274,9 @@ class RecordingDetailActivity : ComponentActivity() {
                                     }
                                 }
                             }
-                        }
-                    }
-                } else {
-                    // 单帧详情视图
+                    } else {
+                    // 单帧详情视图：JSON 逐行虚拟化渲染（固定高度，避免嵌套滚动无限测量），
+                    // 帧数据再大也不会一次性布局整段文本
                     GlassCard(
                         backdrop = backdrop,
                         modifier = Modifier.fillMaxWidth(),
@@ -293,18 +292,44 @@ class RecordingDetailActivity : ComponentActivity() {
                                     seq,
                                     String.format("%06.1fs", offsetSec)
                                 ),
-                                style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            )
-                            val data = frame.optJSONObject("data")
-                            BasicText(
-                                if (data != null) data.toString(2) else getString(R.string.recording_detail_empty),
-                                Modifier.padding(top = 10.dp).fillMaxWidth(),
                                 style = TextStyle(
-                                    color = colors.textSecondary,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
+                                    color = colors.accent,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             )
+                            if (!detailJsonReady) {
+                                BasicText(
+                                    getString(R.string.recording_detail_loading),
+                                    Modifier.padding(top = 10.dp),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                                )
+                            } else if (detailJsonLines.isEmpty()) {
+                                BasicText(
+                                    getString(R.string.recording_detail_empty),
+                                    Modifier.padding(top = 10.dp),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
+                                )
+                            } else {
+                                LazyColumn(
+                                    Modifier
+                                        .padding(top = 10.dp)
+                                        .fillMaxWidth()
+                                        .height(520.dp)
+                                ) {
+                                    items(detailJsonLines) { line ->
+                                        BasicText(
+                                            line,
+                                            Modifier.fillMaxWidth(),
+                                            style = TextStyle(
+                                                color = colors.textSecondary,
+                                                fontSize = 12.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -325,15 +350,16 @@ class RecordingDetailActivity : ComponentActivity() {
         val offsetSec = ((ts - firstTs).coerceAtLeast(0L)) / 1000.0
         val seq = frame.optInt("seq", index + 1)
 
-        GlassCard(
-            backdrop = backdrop,
-            modifier = Modifier
+        // 帧卡片改用普通纯色圆角卡片：Oplus15 上大量 drawBackdrop 卡片同时渲染
+        // 会整片失败（黑屏/白屏），帧列表可用性优先于玻璃质感。
+        androidx.compose.foundation.layout.Box(
+            Modifier
                 .padding(top = 8.dp)
                 .fillMaxWidth()
-                .clickable(onClick = onClick),
-            containerColor = colors.bgTertiary.copy(alpha = 0.3f),
-            cornerRadius = 14.dp,
-            contentPadding = 12.dp
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                .background(colors.bgTertiary.copy(alpha = 0.35f))
+                .clickable(onClick = onClick)
+                .padding(12.dp)
         ) {
             Column {
                 BasicText(
@@ -371,36 +397,84 @@ class RecordingDetailActivity : ComponentActivity() {
         loadingPage = true
         val offset = index * pageSize
         executor.execute {
-            val result = ApiClient.getRecordingFrames(recordingId, offset, pageSize)
-            runOnUiThread {
-                loadingPage = false
-                val data = result.data
-                val arr = data?.optJSONArray("frames")
-                val loaded = mutableListOf<JSONObject>()
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        arr.optJSONObject(i)?.let { loaded.add(it) }
+            try {
+                val result = ApiClient.getRecordingFrames(recordingId, offset, pageSize)
+                runOnUiThread {
+                    loadingPage = false
+                    val data = result.data
+                    val arr = data?.optJSONArray("frames")
+                    val loaded = mutableListOf<JSONObject>()
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            arr.optJSONObject(i)?.let { loaded.add(it) }
+                        }
                     }
+                    // 旧 Backend 可能忽略 offset/limit 直接返回全量帧：
+                    // 只要响应帧数超过单页上限，就视为全量并防御性截取本页范围，
+                    // 保证 UI 永远只组合 pageSize 个卡片。
+                    val paged = if (loaded.size > pageSize) {
+                        val from = offset.coerceIn(0, loaded.size)
+                        val to = (offset + pageSize).coerceIn(from, loaded.size)
+                        loaded.subList(from, to)
+                    } else loaded
+
+                    totalFrames = data?.optInt("total", loaded.size) ?: loaded.size
+                    val metaFirst = data?.optLong("firstTs", 0L) ?: 0L
+                    if (metaFirst > 0) firstTs = metaFirst
+                    // 旧 Backend 无元数据时用本页首帧时间戳回退，保证相对时间/时长显示正确
+                    if (firstTs <= 0) {
+                        firstTs = paged.firstOrNull()?.optLong("timestampMs", 0L) ?: 0L
+                    }
+                    // optLong 对缺失字段返回 0 而非 null，须显式判断后再回退到全量帧末帧
+                    val metaLast = data?.optLong("lastTs", 0L) ?: 0L
+                    val lastTs = if (metaLast > 0) metaLast
+                    else loaded.lastOrNull()?.optLong("timestampMs", 0L) ?: firstTs
+                    // 帧数变化导致页码越界（如录像被清空）：回到最后一页
+                    val maxIndex = ((totalFrames - 1) / pageSize).coerceAtLeast(0)
+                    if (paged.isEmpty() && totalFrames > 0 && index > maxIndex) {
+                        loadPage(maxIndex)
+                        return@runOnUiThread
+                    }
+                    pageIndex = index
+                    pageFrames.clear()
+                    pageFrames.addAll(paged)
+                    detailStatus = getString(
+                        R.string.home_saved_meta_recording,
+                        formatDuration(((lastTs - firstTs).coerceAtLeast(0L)) / 1000L),
+                        totalFrames
+                    )
                 }
-                totalFrames = data?.optInt("total", loaded.size) ?: loaded.size
-                data?.optLong("firstTs", 0L)?.let { if (it > 0) firstTs = it }
-                val lastTs = data?.optLong("lastTs", 0L)
-                    ?: loaded.lastOrNull()?.optLong("timestampMs", 0L)
-                    ?: firstTs
-                // 帧数变化导致页码越界（如录像被清空）：回到最后一页
-                val maxIndex = ((totalFrames - 1) / pageSize).coerceAtLeast(0)
-                if (loaded.isEmpty() && totalFrames > 0 && index > maxIndex) {
-                    loadPage(maxIndex)
-                    return@runOnUiThread
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "load page failed: ${t.message}")
+                runOnUiThread {
+                    loadingPage = false
+                    detailStatus = getString(R.string.recording_detail_empty)
                 }
-                pageIndex = index
-                pageFrames.clear()
-                pageFrames.addAll(loaded)
-                detailStatus = getString(
-                    R.string.home_saved_meta_recording,
-                    formatDuration(((lastTs - firstTs).coerceAtLeast(0L)) / 1000L),
-                    totalFrames
-                )
+            }
+        }
+    }
+
+    /** 点击帧后后台格式化该帧原始 JSON，避免 UI 线程处理大字符串。 */
+    private fun loadDetailJson(frame: JSONObject) {
+        detailJsonReady = false
+        detailJsonLines.clear()
+        executor.execute {
+            try {
+                val data = frame.optJSONObject("data")
+                val text = if (data != null) data.toString(2)
+                else getString(R.string.recording_detail_empty)
+                val lines = text.split('\n')
+                runOnUiThread {
+                    detailJsonLines.clear()
+                    detailJsonLines.addAll(lines)
+                    detailJsonReady = true
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "load frame json failed: ${t.message}")
+                runOnUiThread {
+                    detailJsonLines.clear()
+                    detailJsonReady = true
+                }
             }
         }
     }
