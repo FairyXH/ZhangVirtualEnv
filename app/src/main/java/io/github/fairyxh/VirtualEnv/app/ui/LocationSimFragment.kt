@@ -325,29 +325,32 @@ class LocationSimFragment : Fragment() {
                         if (!mapCollapsed) {
                             if (!fragment.mapFullscreen) {
                             // 搜索框：输入时在正下方弹出悬浮候选列表（面板在页面级绘制，见下方 searchAnchor 面板）
-                            Box(
+                            Row(
                                 Modifier
                                     .padding(top = 10.dp)
                                     .fillMaxWidth()
-                                    .height(52.dp)
-                                    .onGloballyPositioned { coords ->
-                                        val pos = coords.positionInRoot()
-                                        searchAnchor = androidx.compose.ui.geometry.Rect(
-                                            pos.x, pos.y,
-                                            pos.x + coords.size.width,
-                                            pos.y + coords.size.height
-                                        )
-                                    }
+                                    .height(52.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 GlassField(
                                     value = searchText,
                                     onValueChange = { searchText = it },
                                     backdrop = backdrop,
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .onGloballyPositioned { coords ->
+                                            val pos = coords.positionInRoot()
+                                            searchAnchor = androidx.compose.ui.geometry.Rect(
+                                                pos.x, pos.y,
+                                                pos.x + coords.size.width,
+                                                pos.y + coords.size.height
+                                            )
+                                        },
                                     placeholder = getString(R.string.location_search_hint)
                                 )
                                 if (searchText.isNotEmpty()) {
-                                    // 清空按钮：方形“清空”，嵌入搜索框右侧，点击清空并关闭候选
+                                    // 清空按钮：方形“清空”，与搜索框同排垂直居中，点击清空并关闭候选
                                     GlassButton(
                                         onClick = {
                                             searchText = ""
@@ -355,8 +358,6 @@ class LocationSimFragment : Fragment() {
                                         },
                                         backdrop = backdrop,
                                         modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .padding(end = 6.dp)
                                             .width(64.dp)
                                             .height(40.dp),
                                         surfaceColor = colors.bgTertiary.copy(alpha = 0.35f)
