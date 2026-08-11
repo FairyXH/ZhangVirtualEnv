@@ -146,8 +146,9 @@
         android:minWidth="0dp"
         android:text="@string/route_locate"
         android:textSize="@dimen/text_caption" />
+    </LinearLayout><!-- /mapPanel -->
 
-    <!-- 地图工具行：卫星图切换 + iOS 通知栏式下拉箭头（收起地图） -->
+    <!-- 地图工具行（面板外，收起后仍可见）：卫星图切换 + iOS 通知栏式下拉箭头 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -182,7 +183,6 @@
             android:textColor="@color/text_primary"
             android:textSize="12sp" />
     </LinearLayout>
-    </LinearLayout><!-- /mapPanel -->
 
     <ScrollView
         android:layout_width="match_parent"

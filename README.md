@@ -4,7 +4,7 @@
 
 > 工程名 `ZhangVirtualEnv`；控制端 App 显示名 `ZhangVirtualEnvironment`，包名 `io.github.fairyxh.VirtualEnv`。
 
-> 设计思想：不是针对单个 App 的作弊工具，而是一个 **Android Environment Replay Framework**——真实环境采集 → 环境数据包 → 虚拟环境加载 → 应用认为处于真实环境。
+> 设计思想：不是针对单个 App 的隐私保护工具，而是一个 **Android Environment Replay Framework**——真实环境采集 → 环境数据包 → 虚拟环境加载 → 应用认为处于真实环境。
 
 ---
 
@@ -234,7 +234,7 @@ io.github.fairyxh.VirtualEnv
 io.github.fairyxh.VirEnvDetector
 ```
 
-**硬性约束：不得加入任何第三方 App（百度/微信/高德等）。**
+**硬性约束：不得加入任何第三方 App。**
 
 ### 5.2 逆向确认 Hook 目标签名
 

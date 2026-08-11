@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="160dp"
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="@drawable/bg_card"
+    android:background="@drawable/bg_card_glass"
     android:elevation="12dp"
     android:orientation="vertical"
     android:padding="8dp">
@@ -38,45 +38,13 @@
             android:textSize="10sp" />
     </LinearLayout>
 
-    <!-- 模式切换：点击哪个哪个变色，另一个无色 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal">
+    <!-- 摇杆 + 路线 二合一：单点模拟时摇杆控制移动，路线运行时摇杆作为人工补偿 -->
 
-        <TextView
-            android:id="@+id/modeJoystick"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/bg_pill"
-            android:gravity="center"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:text="@string/float_mode_joystick"
-            android:textColor="@color/bg_secondary"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/modeRoute"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:text="@string/float_mode_route"
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp" />
-    </LinearLayout>
-
-    <!-- 摇杆面板（与路线面板等大） -->
+    <!-- 摇杆面板 -->
     <LinearLayout
         android:id="@+id/joystickPanel"
         android:layout_width="match_parent"
-        android:layout_height="150dp"
+        android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:orientation="vertical">
 
@@ -119,6 +87,7 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginEnd="4dp"
                 android:layout_weight="1"
+                android:minWidth="0dp"
                 android:background="@drawable/bg_field"
                 android:gravity="center"
                 android:hint="@string/float_route_speed_hint_value"
@@ -141,44 +110,15 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 路线面板（与摇杆面板等大） -->
+    <!-- 路线面板（与摇杆同窗显示；摇杆在路线运行时作为人工补偿） -->
     <LinearLayout
         android:id="@+id/routePanel"
         android:layout_width="match_parent"
-        android:layout_height="150dp"
+        android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:orientation="vertical"
-        android:visibility="gone">
+        android:orientation="vertical">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <Spinner
-                android:id="@+id/routeSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:spinnerMode="dropdown" />
-
-            <TextView
-                android:id="@+id/routeRefreshButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:background="@drawable/bg_pill_secondary"
-                android:paddingStart="6dp"
-                android:paddingTop="3dp"
-                android:paddingEnd="6dp"
-                android:paddingBottom="3dp"
-                android:text="@string/float_route_refresh"
-                android:textColor="@color/text_secondary"
-                android:textSize="10sp" />
-        </LinearLayout>
-
-        <!-- 开始 / 暂停·继续 / 停止（停止即重置） -->
+        <!-- 开始（开始/暂停/继续 三态）/ 停止（停止即重置） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -197,20 +137,6 @@
                 android:text="@string/float_route_start"
                 android:textSize="10sp"
                 style="@style/Button.Pill" />
-
-            <Button
-                android:id="@+id/routePauseResumeButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:paddingTop="5dp"
-                android:paddingBottom="5dp"
-                android:text="@string/float_route_pause_resume"
-                android:textSize="10sp"
-                style="@style/Button.Pill.Secondary" />
 
             <Button
                 android:id="@+id/routeStopButton"

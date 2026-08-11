@@ -84,10 +84,9 @@ fun GlassToggle(
                     fraction = if (targetValue >= 0.5f) 1f else 0f
                     onSelect(fraction == 1f)
                     didDrag = false
-                } else {
-                    fraction = if (selected()) 0f else 1f
-                    onSelect(fraction == 1f)
                 }
+                // 点击（无拖动）由外层 clickable 处理，这里不再触发，
+                // 否则 clickable 消费事件后会与 drag 手势各触发一次 onSelect
             },
             onDrag = { _, dragAmount ->
                 if (!didDrag) {
@@ -121,12 +120,13 @@ fun GlassToggle(
 
     Box(
         modifier
-            // 消费 tap：开关只切换状态，不把点击冒泡给外层卡片（详情）
+            // 消费 tap：开关只切换状态，不把点击冒泡给外层卡片（详情）。
+            // 直接在这里触发切换，避免事件被 consume 后 onDragStopped 收不到 up
             .clickable(
                 interactionSource = null,
                 indication = null,
                 role = Role.Switch,
-                onClick = {}
+                onClick = { onSelect(!selected()) }
             ),
         contentAlignment = Alignment.CenterStart
     ) {

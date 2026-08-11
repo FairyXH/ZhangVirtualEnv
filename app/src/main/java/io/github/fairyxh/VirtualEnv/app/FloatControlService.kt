@@ -9,9 +9,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.ArrayAdapter
 import android.widget.EditText
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import io.github.fairyxh.VirtualEnv.R
@@ -26,11 +24,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 运行在控制端进程，通过 ApiClient 与 system_server Backend 通信：
  * - 摇杆拖动 → /api/joystick/set（节流 120ms）
- * - 路线开始/暂停·继续/停止（停止即重置）→ /api/route/start、pause、resume、stop
+ * - 开始按钮三态（开始/暂停/继续）→ /api/route/start、pause、resume
+ * - 停止（停止即重置）→ /api/route/stop
  * - 速度/步频 → /api/route/config（输入即生效，无“应用”按钮）
  *
- * 打开时默认悬浮球状态；面板与球透明度 60%；摇杆/路线面板等大；
- * 摇杆与路线模式切换采用“选中变色、另一无色”的配色。
+ * 悬浮窗只保留摇杆、开始、停止、速度、步频；面板宽度锁死为
+ * 摇杆直径 + 10px，不再提供路线/录像记录选择。
  */
 class FloatControlService : Service() {
 
@@ -39,9 +38,6 @@ class FloatControlService : Service() {
 
         /** 摇杆上报节流间隔（ms）。 */
         private const val JOYSTICK_THROTTLE_MS = 120L
-
-        /** 面板/悬浮球透明度（0~1）。 */
-        private const val PANEL_ALPHA = 0.6f
 
         fun start(context: android.content.Context) {
             try {
@@ -72,11 +68,7 @@ class FloatControlService : Service() {
     private lateinit var speedInput: EditText
     private lateinit var routePanel: View
     private lateinit var joystickPanel: View
-    private lateinit var routeSpinner: Spinner
-    private lateinit var pauseResumeButton: TextView
     private lateinit var startButton: TextView
-    private lateinit var modeJoystick: View
-    private lateinit var modeRoute: View
     private lateinit var freqStepValue: TextView
 
     /** 悬浮窗路线速度/步频微调值（输入框 + 加减；输入即生效）。 */
@@ -88,7 +80,6 @@ class FloatControlService : Service() {
     private var lastJoystickPost = 0L
     private var lastSpeedKmh = 5.5
     private var selectedRouteId = -1L
-    private val routeNames = mutableListOf<String>()
     private val routeIds = mutableListOf<Long>()
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -130,28 +121,28 @@ class FloatControlService : Service() {
         val view = inflater.inflate(R.layout.float_control_window, null) ?: return
         overlayView = view
         panelView = view
-        // 透明度 60%
-        view.alpha = PANEL_ALPHA
 
         joystickView = view.findViewById(R.id.joystickPad)
         speedInput = view.findViewById(R.id.speedInput)
         routePanel = view.findViewById(R.id.routePanel)
         joystickPanel = view.findViewById(R.id.joystickPanel)
-        routeSpinner = view.findViewById(R.id.routeSpinner)
-        pauseResumeButton = view.findViewById(R.id.routePauseResumeButton)
         startButton = view.findViewById(R.id.routeStartButton)
-        modeJoystick = view.findViewById(R.id.modeJoystick)
-        modeRoute = view.findViewById(R.id.modeRoute)
         freqStepValue = view.findViewById(R.id.freqStepValue)
 
         setupJoystick()
         setupHeaderDrag(view)
         setupSpeed()
-        setupModeSwitch(view)
         setupRouteControls(view)
+        // 二合一：路线面板始终可见，进入即加载路线列表
+        loadRoutes()
+        refreshRouteUi()
 
+        // 面板宽度锁死：摇杆直径 + 72dp 排版余量（速度/步频/按钮行需要横排空间）
+        val joystickPx = joystickView.layoutParams?.width?.takeIf { it > 0 }
+            ?: (78f * resources.displayMetrics.density).toInt()
+        val panelWidthPx = joystickPx + (72f * resources.displayMetrics.density).toInt()
         layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            panelWidthPx,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -165,7 +156,7 @@ class FloatControlService : Service() {
         }
         try {
             windowManager.addView(view, layoutParams)
-            ZLog.d(TAG_SCOPE, "panel shown (alpha=${PANEL_ALPHA})")
+            ZLog.d(TAG_SCOPE, "panel shown")
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "add overlay failed", t)
             Toast.makeText(this, R.string.float_window_add_failed, Toast.LENGTH_LONG).show()
@@ -272,55 +263,44 @@ class FloatControlService : Service() {
         }
     }
 
-    // ---------- 模式切换（选中变色、另一无色） ----------
-
-    private fun setupModeSwitch(view: View) {
-        modeJoystick.setOnClickListener { setMode(true) }
-        modeRoute.setOnClickListener { setMode(false) }
-        setMode(true)
-    }
-
-    private fun setMode(joystick: Boolean) {
-        joystickPanel.visibility = if (joystick) View.VISIBLE else View.GONE
-        routePanel.visibility = if (joystick) View.GONE else View.VISIBLE
-        updateModeStyle(modeJoystick, joystick)
-        updateModeStyle(modeRoute, !joystick)
-        if (!joystick) {
-            loadRoutes()
-            refreshRouteUi()
-        }
-    }
-
-    private fun updateModeStyle(view: View, active: Boolean) {
-        if (active) {
-            view.setBackgroundResource(R.drawable.bg_pill)
-            (view as? TextView)?.setTextColor(resources.getColor(R.color.bg_secondary, null))
-        } else {
-            view.setBackgroundResource(android.R.color.transparent)
-            (view as? TextView)?.setTextColor(resources.getColor(R.color.text_secondary, null))
-        }
-    }
-
     // ---------- 路线控制 ----------
 
     private fun setupRouteControls(view: View) {
         view.findViewById<View>(R.id.collapseButton).setOnClickListener { collapseToBall() }
 
+        // 单按钮三态：空闲→开始（从头）；运行中→暂停；已暂停→继续
         startButton.setOnClickListener {
-            if (selectedRouteId <= 0) {
-                toast(R.string.float_route_select_first)
-                return@setOnClickListener
-            }
             applySpeedInput()
             executor.execute {
-                // 停止即重置：重新开始前先停止，保证从头播放
-                ApiClient.stopRoute()
-                val result = ApiClient.startRoute(selectedRouteId, routeSpeedKmh)
-                toastResult(result, R.string.float_route_started)
+                val data = ApiClient.getRouteStatus().data
+                val running = data?.optBoolean("running", false) == true
+                val enabled = data?.optBoolean("enabled", false) == true
+                val result: ApiResult
+                val okRes: Int
+                when {
+                    running -> {
+                        result = ApiClient.pauseRoute()
+                        okRes = R.string.float_route_paused
+                    }
+                    enabled -> {
+                        result = ApiClient.resumeRoute()
+                        okRes = R.string.float_route_resumed
+                    }
+                    else -> {
+                        if (selectedRouteId <= 0) {
+                            toast(R.string.float_route_select_first)
+                            return@execute
+                        }
+                        // 停止即重置：重新开始前先停止，保证从头播放
+                        ApiClient.stopRoute()
+                        result = ApiClient.startRoute(selectedRouteId, routeSpeedKmh)
+                        okRes = R.string.float_route_started
+                    }
+                }
+                toastResult(result, okRes)
                 refreshRouteUi()
             }
         }
-        pauseResumeButton.setOnClickListener { togglePauseResume() }
         view.findViewById<View>(R.id.routeStopButton).setOnClickListener {
             executor.execute {
                 val result = ApiClient.stopRoute()
@@ -329,27 +309,6 @@ class FloatControlService : Service() {
             }
         }
         setupFreqSteppers(view)
-        view.findViewById<View>(R.id.routeRefreshButton).setOnClickListener { loadRoutes() }
-    }
-
-    /** 暂停与继续合并：运行中 → 暂停；已暂停 → 继续。 */
-    private fun togglePauseResume() {
-        executor.execute {
-            val data = ApiClient.getRouteStatus().data
-            val running = data?.optBoolean("running", false) == true
-            val enabled = data?.optBoolean("enabled", false) == true
-            if (!running && !enabled) {
-                toast(R.string.float_route_select_first)
-                return@execute
-            }
-            val result = if (running) {
-                ApiClient.pauseRoute()
-            } else {
-                ApiClient.resumeRoute()
-            }
-            toastResult(result, if (running) R.string.float_route_paused else R.string.float_route_resumed)
-            refreshRouteUi()
-        }
     }
 
     /** 步频加减微调（悬浮窗输入法不可用，精确输入在 App 内）；立即生效。 */
@@ -370,18 +329,14 @@ class FloatControlService : Service() {
         render()
     }
 
-    /** 刷新路线按钮文本（开始/暂停/继续）与运行状态。 */
+    /** 刷新开始按钮文本：运行中 → 暂停；空闲/已暂停 → 开始（点击继续）。 */
     private fun refreshRouteUi() {
         executor.execute {
             val data = ApiClient.getRouteStatus().data
             runOnUi {
                 val running = data?.optBoolean("running", false) == true
-                val enabled = data?.optBoolean("enabled", false) == true
-                pauseResumeButton.text = getString(
-                    if (running) R.string.float_route_pause else R.string.float_route_resume
-                )
                 startButton.text = getString(
-                    if (running || enabled) R.string.float_route_restart else R.string.float_route_start
+                    if (running) R.string.float_route_pause else R.string.float_route_start
                 )
             }
         }
@@ -391,29 +346,15 @@ class FloatControlService : Service() {
         executor.execute {
             val result = ApiClient.listRoutes()
             val routes = result.data?.optJSONArray("routes") ?: return@execute
-            val names = mutableListOf<String>()
             val ids = mutableListOf<Long>()
             for (i in 0 until routes.length()) {
                 val item = routes.optJSONObject(i) ?: continue
-                names.add(item.optString("name", "route-${item.optLong("id")}"))
                 ids.add(item.optLong("id", -1L))
             }
             runOnUi {
-                routeNames.clear()
                 routeIds.clear()
-                routeNames.addAll(names)
                 routeIds.addAll(ids)
-                val adapter = ArrayAdapter(
-                    this,
-                    android.R.layout.simple_spinner_dropdown_item,
-                    routeNames
-                )
-                routeSpinner.adapter = adapter
-                if (routeIds.isNotEmpty()) {
-                    selectedRouteId = routeIds[0]
-                } else {
-                    selectedRouteId = -1L
-                }
+                selectedRouteId = routeIds.firstOrNull() ?: -1L
             }
         }
     }
@@ -460,7 +401,6 @@ class FloatControlService : Service() {
         val baseY = layoutParams?.y ?: 120
         val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
         ballView = ball
-        ball.alpha = PANEL_ALPHA
         // 40dp 悬浮球（较旧版 51.2dp 再缩小 20%）
         val px = (40f * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(
@@ -477,7 +417,7 @@ class FloatControlService : Service() {
         setupBallDrag(ball, params)
         try {
             windowManager.addView(ball, params)
-            ZLog.d(TAG_SCOPE, "ball shown at ${params.x},${params.y} size=${px}px alpha=$PANEL_ALPHA")
+            ZLog.d(TAG_SCOPE, "ball shown at ${params.x},${params.y} size=${px}px")
         } catch (t: Throwable) {
             ZLog.e(TAG_SCOPE, "add ball failed, fallback to panel", t)
             ballView = null
@@ -497,7 +437,6 @@ class FloatControlService : Service() {
         }
         val ball = LayoutInflater.from(this).inflate(R.layout.float_ball, null)
         ballView = ball
-        ball.alpha = PANEL_ALPHA
         val px = (40f * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(
             px, px,

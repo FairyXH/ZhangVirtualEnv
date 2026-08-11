@@ -19,6 +19,10 @@
     <color name="glass_border">#40FFFFFF</color>
     <color name="glass_highlight">#66FFFFFF</color>
     <color name="glass_shadow">#14000000</color>
+    <!-- 液态玻璃悬浮球（浅色） -->
+    <color name="glass_ball_bg">#D9F2F2F7</color>
+    <color name="glass_ball_highlight">#8CFFFFFF</color>
+    <color name="glass_ball_ring">#73000000</color>
     <color name="tab_icon_normal">#8E8E93</color>
     <color name="tab_icon_active">#0071E3</color>
     <color name="overlay_scrim">#59000000</color>
