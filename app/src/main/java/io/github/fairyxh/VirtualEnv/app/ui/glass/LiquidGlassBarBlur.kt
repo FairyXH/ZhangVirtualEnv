@@ -104,6 +104,7 @@ class LiquidGlassBarBlur(
     private companion object {
         // 内容采样：content = 容器 RenderNode 输出。模糊仅作用于玻璃胶囊条带，
         // 条带外原样透出；上/左/右边缘 smoothstep 羽化，避免“一刀切”的平直边界。
+        // 采样坐标必须 clamp：越界 content.eval 返回黑色，会在条带边缘形成灰色描边。
         const val BAND_BLUR_SHADER = """
             uniform shader content;
 
@@ -115,17 +116,22 @@ class LiquidGlassBarBlur(
             uniform float blurRadius;
             uniform float refraction;
 
+            half4 sampleContent(float2 coord) {
+                return content.eval(clamp(coord, float2(0.0, 0.0), size));
+            }
+
             half4 blurAt(float2 coord) {
                 float r = blurRadius;
-                half4 color = content.eval(coord) * 0.227027;
-                color += (content.eval(coord + float2(1.3846, 0.0) * r) +
-                          content.eval(coord - float2(1.3846, 0.0) * r)) * 0.3162162;
-                color += (content.eval(coord + float2(3.2307, 0.0) * r) +
-                          content.eval(coord - float2(3.2307, 0.0) * r)) * 0.0702703;
-                color += (content.eval(coord + float2(0.0, 1.3846) * r) +
-                          content.eval(coord - float2(0.0, 1.3846) * r)) * 0.3162162;
-                color += (content.eval(coord + float2(0.0, 3.2307) * r) +
-                          content.eval(coord - float2(0.0, 3.2307) * r)) * 0.0702703;
+                // 归一化权重（中心和 ≈1），避免整条带被提亮/发灰
+                half4 color = sampleContent(coord) * 0.128;
+                color += (sampleContent(coord + float2(1.3846, 0.0) * r) +
+                          sampleContent(coord - float2(1.3846, 0.0) * r)) * 0.1783;
+                color += (sampleContent(coord + float2(3.2307, 0.0) * r) +
+                          sampleContent(coord - float2(3.2307, 0.0) * r)) * 0.0396;
+                color += (sampleContent(coord + float2(0.0, 1.3846) * r) +
+                          sampleContent(coord - float2(0.0, 1.3846) * r)) * 0.1783;
+                color += (sampleContent(coord + float2(0.0, 3.2307) * r) +
+                          sampleContent(coord - float2(0.0, 3.2307) * r)) * 0.0396;
                 return color;
             }
 
@@ -135,16 +141,20 @@ class LiquidGlassBarBlur(
                 float yFactor = smoothstep(bandTop - feather, bandTop, coord.y);
                 float bandFactor = xFactor * yFactor;
                 if (bandFactor <= 0.001) {
-                    return content.eval(coord);
+                    return sampleContent(coord);
                 }
 
                 // 轻微折射：条带内容向玻璃中心轻微挤压，形成厚度感
                 float2 center = float2((bandLeft + bandRight) * 0.5, bandTop + size.y * 0.25);
                 float2 dir = (coord - center) / max(size.x, size.y);
-                float2 refracted = coord + dir * refraction * bandFactor;
+                float2 refracted = clamp(
+                    coord + dir * refraction * bandFactor,
+                    float2(0.0, 0.0),
+                    size
+                );
 
                 half4 blurred = blurAt(refracted);
-                half4 base = content.eval(coord);
+                half4 base = sampleContent(coord);
                 return mix(base, blurred, bandFactor);
             }
         """

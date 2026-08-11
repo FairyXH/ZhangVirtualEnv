@@ -10,9 +10,7 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -23,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
@@ -314,43 +311,16 @@ private fun TabIcon(
 ) {
     val colors = glassColors()
     val tint = if (active) colors.tabIconActive else colors.tabIconNormal
-    val density = LocalDensity.current
-    val glowRadius = with(density) { 42.dp.toPx() }
-    Box(
-        Modifier.drawBehind {
-            // 选中态：图标/文字下方的蓝色外发光，形成控制中心式光晕
-            if (active) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            colors.tabIconActive.copy(alpha = 0.42f),
-                            colors.tabIconActive.copy(alpha = 0.15f),
-                            Color.Transparent
-                        ),
-                        center = center,
-                        radius = glowRadius
-                    ),
-                    radius = glowRadius
-                )
-            }
-        }
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
-        ) {
-            Image(
-                painter = painter,
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-                colorFilter = ColorFilter.tint(tint)
-            )
-            BasicText(
-                text = androidx.compose.ui.res.stringResource(label),
-                style = TextStyle(color = tint, fontSize = 10.sp)
-            )
-        }
-    }
+    Image(
+        painter = painter,
+        contentDescription = null,
+        modifier = Modifier.size(26.dp),
+        colorFilter = ColorFilter.tint(tint)
+    )
+    BasicText(
+        text = androidx.compose.ui.res.stringResource(label),
+        style = TextStyle(color = tint, fontSize = 10.sp)
+    )
 }
 
 /**
