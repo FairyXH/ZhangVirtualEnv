@@ -206,6 +206,13 @@ class RecordingEngine(
 
     fun getFrames(id: Long): List<JSONObject> = databaseManager.queryRecordingFrames(id)
 
+    /** 分页查询录像帧（按 seq 升序）。 */
+    fun getFramesPaged(id: Long, offset: Int, limit: Int): List<JSONObject> =
+        databaseManager.queryRecordingFrames(id, offset, limit)
+
+    /** 录像帧范围统计（首帧/末帧时间戳与总帧数），无帧返回 null。 */
+    fun getFrameRange(id: Long): JSONObject? = databaseManager.recordingFrameRange(id)
+
     fun deleteRecording(id: Long): Boolean = databaseManager.deleteRecording(id)
 
     // ---------- 回放 ----------

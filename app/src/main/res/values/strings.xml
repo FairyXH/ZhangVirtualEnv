@@ -101,6 +101,9 @@
     <string name="recording_detail_frame">第 %1$d 帧 · +%2$s</string>
     <string name="recording_detail_raw">该帧保存的各信息原始数据（展开 JSON）</string>
     <string name="recording_detail_click_hint">点击帧查看该帧各信息的原始数据</string>
+    <string name="recording_detail_prev">上一页</string>
+    <string name="recording_detail_next">下一页</string>
+    <string name="recording_detail_page">第 %1$d/%2$d 页</string>
     <string name="recording_detail_interrupted_badge">[中断恢复]</string>
 
     <!-- Location -->

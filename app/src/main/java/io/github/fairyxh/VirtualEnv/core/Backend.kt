@@ -914,6 +914,17 @@ class Backend private constructor(private val dataDir: File) {
         return recordingEngine.getFrames(id)
     }
 
+    /** 分页取录像帧：返回 frames + total/firstTs/lastTs 元数据。 */
+    fun getRecordingFramesPaged(id: Long, offset: Int, limit: Int): org.json.JSONObject {
+        val data = org.json.JSONObject()
+        data.put("frames", org.json.JSONArray(recordingEngine.getFramesPaged(id, offset, limit)))
+        val range = recordingEngine.getFrameRange(id)
+        data.put("total", range?.optInt("count", 0) ?: 0)
+        data.put("firstTs", range?.optLong("firstTs", 0L) ?: 0L)
+        data.put("lastTs", range?.optLong("lastTs", 0L) ?: 0L)
+        return data
+    }
+
     fun deleteRecording(id: Long): Boolean {
         return recordingEngine.deleteRecording(id)
     }

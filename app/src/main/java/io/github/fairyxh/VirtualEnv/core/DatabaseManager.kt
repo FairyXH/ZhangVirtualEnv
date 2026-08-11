@@ -500,9 +500,18 @@ class DatabaseManager(private val dbFile: File) {
         return null
     }
 
-    /** 查询录像帧（按 seq 升序）。 */
-    fun queryRecordingFrames(recordingId: Long): List<org.json.JSONObject> {
+    /** 查询录像帧（按 seq 升序），offset/limit 非空时分页返回。 */
+    fun queryRecordingFrames(
+        recordingId: Long,
+        offset: Int? = null,
+        limit: Int? = null
+    ): List<org.json.JSONObject> {
         val result = mutableListOf<org.json.JSONObject>()
+        val limitClause = when {
+            limit != null && limit > 0 && offset != null && offset > 0 -> "$limit OFFSET $offset"
+            limit != null && limit > 0 -> limit.toString()
+            else -> null
+        }
         val cursor = open().query(
             TABLE_RECORDING_FRAME,
             null,
@@ -510,7 +519,8 @@ class DatabaseManager(private val dbFile: File) {
             arrayOf(recordingId.toString()),
             null,
             null,
-            "$COL_SEQ ASC"
+            "$COL_SEQ ASC",
+            limitClause
         )
         cursor?.use {
             val seqIdx = it.getColumnIndexOrThrow(COL_SEQ)

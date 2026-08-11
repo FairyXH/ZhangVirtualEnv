@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,7 +67,13 @@ class RecordingDetailActivity : ComponentActivity() {
 
     private var detailTitle by mutableStateOf("")
     private var detailStatus by mutableStateOf("")
-    private var frames = mutableStateListOf<JSONObject>()
+
+    /** 每页渲染帧数：控制单页组合规模，避免帧数过大导致卡顿/无法查看。 */
+    private val pageSize = 20
+    private val pageFrames = mutableStateListOf<JSONObject>()
+    private var totalFrames by mutableStateOf(0)
+    private var pageIndex by mutableStateOf(0)
+    private var loadingPage by mutableStateOf(false)
     private var firstTs = 0L
     private var showingFrame by mutableStateOf<JSONObject?>(null)
 
@@ -106,10 +113,13 @@ class RecordingDetailActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxSize()
         ) { backdrop ->
+            val scrollState = rememberScrollState()
+            // 翻页后回到页首，避免停留在上一页的滚动位置
+            LaunchedEffect(pageIndex) { scrollState.scrollTo(0) }
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -162,7 +172,7 @@ class RecordingDetailActivity : ComponentActivity() {
                                 detailStatus,
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
-                            if (frames.isEmpty()) {
+                            if (pageFrames.isEmpty()) {
                                 BasicText(
                                     getString(R.string.recording_detail_empty),
                                     Modifier
@@ -176,7 +186,7 @@ class RecordingDetailActivity : ComponentActivity() {
                                     Modifier.padding(top = 10.dp),
                                     style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
                                 )
-                                frames.forEachIndexed { index, item ->
+                                pageFrames.forEachIndexed { index, item ->
                                     FrameCard(
                                         frame = item,
                                         index = index,
@@ -184,7 +194,7 @@ class RecordingDetailActivity : ComponentActivity() {
                                         backdrop = backdrop,
                                         onClick = { showingFrame = item }
                                     )
-                                    if (index < frames.size - 1) {
+                                    if (index < pageFrames.size - 1) {
                                         Row(
                                             Modifier
                                                 .padding(horizontal = 8.dp)
@@ -196,6 +206,69 @@ class RecordingDetailActivity : ComponentActivity() {
                                                     .weight(1f)
                                                     .padding(top = 0.dp),
                                                 style = TextStyle(fontSize = 1.sp)
+                                            )
+                                        }
+                                    }
+                                }
+                                // 帧数超过单页上限时显示翻页控件
+                                if (totalFrames > pageSize) {
+                                    val totalPages =
+                                        ((totalFrames + pageSize - 1) / pageSize).coerceAtLeast(1)
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 12.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val canPrev = pageIndex > 0 && !loadingPage
+                                        val canNext = pageIndex < totalPages - 1 && !loadingPage
+                                        GlassPill(
+                                            onClick = { if (canPrev) loadPage(pageIndex - 1) },
+                                            backdrop = backdrop,
+                                            selected = false,
+                                            containerColor = colors.bgTertiary.copy(
+                                                alpha = if (canPrev) 0.4f else 0.12f
+                                            ),
+                                            height = 34.dp
+                                        ) {
+                                            BasicText(
+                                                getString(R.string.recording_detail_prev),
+                                                Modifier.padding(horizontal = 14.dp),
+                                                style = TextStyle(
+                                                    color = if (canPrev) colors.textPrimary else colors.textTertiary,
+                                                    fontSize = 13.sp
+                                                )
+                                            )
+                                        }
+                                        BasicText(
+                                            if (loadingPage) "…" else getString(
+                                                R.string.recording_detail_page,
+                                                pageIndex + 1,
+                                                totalPages
+                                            ),
+                                            Modifier.padding(horizontal = 14.dp),
+                                            style = TextStyle(
+                                                color = colors.textSecondary,
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                        GlassPill(
+                                            onClick = { if (canNext) loadPage(pageIndex + 1) },
+                                            backdrop = backdrop,
+                                            selected = false,
+                                            containerColor = colors.bgTertiary.copy(
+                                                alpha = if (canNext) 0.4f else 0.12f
+                                            ),
+                                            height = 34.dp
+                                        ) {
+                                            BasicText(
+                                                getString(R.string.recording_detail_next),
+                                                Modifier.padding(horizontal = 14.dp),
+                                                style = TextStyle(
+                                                    color = if (canNext) colors.textPrimary else colors.textTertiary,
+                                                    fontSize = 13.sp
+                                                )
                                             )
                                         }
                                     }
@@ -289,24 +362,44 @@ class RecordingDetailActivity : ComponentActivity() {
 
     private fun loadFrames() {
         detailStatus = getString(R.string.recording_detail_loading)
+        loadPage(0)
+    }
+
+    /** 加载指定页（0 起）：每次只取一页帧，渲染与内存都不随总帧数线性膨胀。 */
+    private fun loadPage(index: Int) {
+        if (loadingPage || index < 0) return
+        loadingPage = true
+        val offset = index * pageSize
         executor.execute {
-            val result = ApiClient.getRecordingFrames(recordingId)
-            val arr = result.data?.optJSONArray("frames")
-            val loaded = mutableListOf<JSONObject>()
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let { loaded.add(it) }
-                }
-            }
+            val result = ApiClient.getRecordingFrames(recordingId, offset, pageSize)
             runOnUiThread {
-                frames.clear()
-                frames.addAll(loaded)
-                firstTs = loaded.firstOrNull()?.optLong("timestampMs", 0L) ?: 0L
-                val lastTs = loaded.lastOrNull()?.optLong("timestampMs", 0L) ?: firstTs
+                loadingPage = false
+                val data = result.data
+                val arr = data?.optJSONArray("frames")
+                val loaded = mutableListOf<JSONObject>()
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        arr.optJSONObject(i)?.let { loaded.add(it) }
+                    }
+                }
+                totalFrames = data?.optInt("total", loaded.size) ?: loaded.size
+                data?.optLong("firstTs", 0L)?.let { if (it > 0) firstTs = it }
+                val lastTs = data?.optLong("lastTs", 0L)
+                    ?: loaded.lastOrNull()?.optLong("timestampMs", 0L)
+                    ?: firstTs
+                // 帧数变化导致页码越界（如录像被清空）：回到最后一页
+                val maxIndex = ((totalFrames - 1) / pageSize).coerceAtLeast(0)
+                if (loaded.isEmpty() && totalFrames > 0 && index > maxIndex) {
+                    loadPage(maxIndex)
+                    return@runOnUiThread
+                }
+                pageIndex = index
+                pageFrames.clear()
+                pageFrames.addAll(loaded)
                 detailStatus = getString(
                     R.string.home_saved_meta_recording,
                     formatDuration(((lastTs - firstTs).coerceAtLeast(0L)) / 1000L),
-                    loaded.size
+                    totalFrames
                 )
             }
         }

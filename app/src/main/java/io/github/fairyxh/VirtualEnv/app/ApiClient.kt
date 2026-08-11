@@ -265,8 +265,13 @@ object ApiClient {
 
     fun listRecordings(): ApiResult = get("/api/recording/list")
 
-    fun getRecordingFrames(id: Long): ApiResult {
-        val body = JSONObject().apply { put("id", id) }
+    /** 取录像帧；传 offset/limit 时分页返回（响应带 total/firstTs/lastTs）。 */
+    fun getRecordingFrames(id: Long, offset: Int = -1, limit: Int = -1): ApiResult {
+        val body = JSONObject().apply {
+            put("id", id)
+            if (offset >= 0) put("offset", offset)
+            if (limit > 0) put("limit", limit)
+        }
         return post("/api/recording/get", body)
     }
 

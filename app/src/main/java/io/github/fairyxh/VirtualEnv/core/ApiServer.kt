@@ -535,9 +535,15 @@ class ApiServer(
     private fun recordingGet(body: String): ApiResult {
         val json = JSONObject(body)
         val id = json.optLong("id", -1)
-        val data = JSONObject()
-        data.put("frames", org.json.JSONArray(backend.getRecordingFrames(id)))
-        return ApiResult.ok("ok", data)
+        val offset = json.optInt("offset", -1)
+        val limit = json.optInt("limit", -1)
+        return if (offset >= 0 && limit > 0) {
+            ApiResult.ok("ok", backend.getRecordingFramesPaged(id, offset, limit))
+        } else {
+            val data = JSONObject()
+            data.put("frames", org.json.JSONArray(backend.getRecordingFrames(id)))
+            ApiResult.ok("ok", data)
+        }
     }
 
     private fun recordingDelete(body: String): ApiResult {
