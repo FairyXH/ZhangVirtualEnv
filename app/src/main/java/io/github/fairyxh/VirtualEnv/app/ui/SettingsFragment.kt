@@ -1243,12 +1243,9 @@ class SettingsFragment : Fragment() {
 
     private fun setWallpaperBackground(enabled: Boolean) {
         if (enabled) {
-            // ColorOS 读取壁纸位图需要图片权限；未授权时先请求，授权后再启用
-            val permission = if (Build.VERSION.SDK_INT >= 33) {
-                Manifest.permission.READ_MEDIA_IMAGES
-            } else {
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            }
+            // ColorOS 的 WallpaperManager 只检查 READ_EXTERNAL_STORAGE
+            // （targetSdk=32 时可授予）；READ_MEDIA_IMAGES 对壁纸读取无效
+            val permission = Manifest.permission.READ_EXTERNAL_STORAGE
             val granted = ContextCompat.checkSelfPermission(requireContext(), permission) ==
                 PackageManager.PERMISSION_GRANTED
             if (!granted) {

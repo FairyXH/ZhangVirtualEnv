@@ -11,7 +11,9 @@ android {
     defaultConfig {
         applicationId = "io.github.fairyxh.VirtualEnv"
         minSdk = 26
-        targetSdk = 36
+        // targetSdk 32：ColorOS 的 WallpaperManager 读取壁纸位图检查
+        // READ_EXTERNAL_STORAGE，targetSdk >= 33 时该权限不可授予（死路）
+        targetSdk = 32
         versionCode = 1
         versionName = "1.0"
     }

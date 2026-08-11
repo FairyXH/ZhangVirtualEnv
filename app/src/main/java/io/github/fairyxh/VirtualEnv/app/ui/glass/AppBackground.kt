@@ -67,6 +67,10 @@ object AppBackground {
     var wallpaperBitmap by mutableStateOf<ImageBitmap?>(null)
         private set
 
+    /** 壁纸 Drawable（fastDrawable 优先）：避免 toBitmap 触发 ColorOS 权限检查。 */
+    var wallpaperDrawable by mutableStateOf<android.graphics.drawable.Drawable?>(null)
+        private set
+
     fun load(context: Context) {
         val app = context.applicationContext
         useWallpaper = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -88,7 +92,10 @@ object AppBackground {
     @android.annotation.SuppressLint("MissingPermission")
     fun refreshWallpaper(context: Context) {
         val app = context.applicationContext
-        wallpaperBitmap = try {
+        // 先拿 Drawable：fastDrawable（API 31+ 系统快速壁纸）不触发
+        // READ_EXTERNAL_STORAGE 权限检查；toBitmap() 在 ColorOS 上会被拒绝，
+        // 因此由 GlassBackdropHost 直接用 drawDrawable 绘制。
+        val drawable = try {
             val wm = WallpaperManager.getInstance(app)
             val d = if (Build.VERSION.SDK_INT >= 31) {
                 try {
@@ -100,11 +107,21 @@ object AppBackground {
             } else {
                 null
             } ?: wm.drawable
-            val bmp = d?.toBitmap()
-            ZLog.i("ZVirtualEnv", "wallpaper drawable=${d?.javaClass?.simpleName} size=${bmp?.width}x${bmp?.height}")
-            bmp?.asImageBitmap()
+            ZLog.i("ZVirtualEnv", "wallpaper drawable=${d?.javaClass?.simpleName}")
+            d
         } catch (e: Throwable) {
             ZLog.e("ZVirtualEnv", "wallpaper load failed: $e")
+            null
+        }
+        wallpaperDrawable = drawable
+        wallpaperBitmap = try {
+            val bmp = drawable?.toBitmap()
+            ZLog.i("ZVirtualEnv", "wallpaper bitmap=${bmp?.width}x${bmp?.height}")
+            bmp?.asImageBitmap()
+        } catch (e: Throwable) {
+            // ColorOS: toBitmap 需要 READ_EXTERNAL_STORAGE（targetSdk 36 不可授予），
+            // 仅作为优化路径，失败时退回 Drawable 直绘
+            ZLog.w("ZVirtualEnv", "wallpaper toBitmap failed: $e")
             null
         }
     }

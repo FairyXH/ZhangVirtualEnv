@@ -31,10 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -82,6 +84,7 @@ fun GlassBottomTabs(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val colors = glassColors()
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
@@ -303,11 +306,21 @@ fun GlassBottomTabs(
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
-                        // 常态画一层完整胶囊底色：Oplus 上 blur 采样可能只覆盖下半部分，
-                        // 这层底色保证玻璃滑块上半部分也完整可见（液态高光由 highlight 提供）
-                        drawRect(
-                            if (isLightTheme) Color.White.copy(alpha = 0.22f)
-                            else Color.Black.copy(alpha = 0.25f)
+                        // 与悬浮圆形返回按钮同款材质：半透明深色底 + 顶部径向
+                        // 高光 + 白色描边；常态画一层完整胶囊底色，保证玻璃滑块
+                        // 上半部分也完整可见（液态高光由 highlight 提供）
+                        drawRect(colors.bgTertiary.copy(alpha = 0.45f))
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.22f),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width * 0.32f, size.height * 0.24f),
+                                radius = size.maxDimension * 0.9f
+                            ),
+                            radius = size.maxDimension * 0.9f,
+                            center = Offset(size.width * 0.32f, size.height * 0.24f)
                         )
                         val progress = dampedDragAnimation.pressProgress
                         // 拖动放大时 Oplus 上半部分采样丢失、顶部看起来被切平；
@@ -329,9 +342,11 @@ fun GlassBottomTabs(
                                 center = arcCenter
                             )
                         }
-                        drawRect(
-                            if (isLightTheme) Color.Black.copy(0.1f)
-                            else Color.White.copy(0.1f),
+                        // 透明按钮同款白色描边（胶囊形），按压时淡出
+                        drawRoundRect(
+                            color = Color.White.copy(alpha = 0.18f),
+                            style = Stroke(width = 1.dp.toPx()),
+                            cornerRadius = CornerRadius(size.height / 2f),
                             alpha = 1f - progress
                         )
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))

@@ -7,16 +7,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
- * 页面级 Backdrop 宿主（黑底阶段）。
+ * 页面级 Backdrop 宿主（黑底 + 可选壁纸）。
  *
- * 不绘制任何背景：窗口/根视图为纯黑色，卡片直接浮在黑色之上。
- * 保留 LayerBackdrop 导出层（透明），供 GlassCard / GlassButton /
- * GlassBottomTabs 采样自身高光/内阴影效果。
+ * 默认不绘制背景（窗口/根视图纯黑，卡片直接浮在黑色之上）；设置里开启
+ * “用桌面背景”后，读取壁纸位图全屏自绘（绕过 ColorOS FLAG_SHOW_WALLPAPER
+ * 曲面左缘黑遮罩），并叠暗化层保证浅色文字/玻璃卡片对比度 + 极淡雾化
+ * 模拟轻微磨砂。通过 [LayerBackdrop] 把背景层导出给所有 GlassCard /
+ * GlassButton / GlassBottomTabs 采样。
  */
 @Composable
 fun GlassBackdropHost(
@@ -26,14 +38,56 @@ fun GlassBackdropHost(
     val backdrop = rememberLayerBackdrop()
 
     Box(modifier.fillMaxSize()) {
-        // 背景层：完全透明（不绘制任何底色）
+        // 背景层：默认透明（黑底透出）；壁纸模式全屏自绘壁纸
         Box(
             Modifier
                 .layerBackdrop(backdrop)
                 .fillMaxSize()
+                .drawBehind {
+                    if (AppBackground.useWallpaper) {
+                        val wallpaper = AppBackground.wallpaperBitmap
+                        if (wallpaper != null) {
+                            // bitmap 裁剪铺满全屏（cover）：无系统左缘黑遮罩
+                            val scale = max(
+                                size.width / wallpaper.width,
+                                size.height / wallpaper.height
+                            )
+                            val dstW = wallpaper.width * scale
+                            val dstH = wallpaper.height * scale
+                            drawImage(
+                                image = wallpaper,
+                                dstOffset = IntOffset(
+                                    ((size.width - dstW) / 2f).roundToInt(),
+                                    ((size.height - dstH) / 2f).roundToInt()
+                                ),
+                                dstSize = IntSize(dstW.roundToInt(), dstH.roundToInt())
+                            )
+                        }
+                        // 黑底基础上：暗化保证对比度 + 极淡雾化模拟磨砂
+                        drawRect(Color.Black.copy(alpha = 0.25f))
+                        drawRect(Color.White.copy(alpha = 0.03f))
+                    }
+                    // ColorOS 曲面屏左缘安全区（约 56px）由系统强制绘制黑色，
+                    // 应用内容无法渲染到该区域；画一条黑→透明的横向渐变让交界柔和
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Black,
+                                Color.Black.copy(alpha = 0.75f),
+                                Color.Black.copy(alpha = 0.35f),
+                                Color.Transparent
+                            ),
+                            startX = 0f,
+                            endX = 112.dp.toPx()
+                        ),
+                        topLeft = Offset.Zero,
+                        size = Size(112.dp.toPx(), size.height)
+                    )
+                }
         )
 
-        // 内容层：避开状态栏/导航栏（insets 缓存来自 AppInsets.attachConsume）
+        // 内容层：避开状态栏/导航栏（insets 缓存来自 AppInsets.attachConsume），
+        // 背景层仍全屏
         Box(
             Modifier
                 .fillMaxSize()
