@@ -69,12 +69,15 @@ private fun envTitleRes(type: String): Int = when (type) {
  * 环境子页面（基站 / WiFi / 蓝牙 / 传感器 / GNSS 详细管理）。
  *
  * 已从独立 Activity 迁移为 EnvFragment 的子页面：由 EnvFragment 切换显示，
- * 黑底阶段继承主界面黑底；返回按钮为悬浮圆形液态玻璃按钮，滚动时永远可见。
+ * 复用父级 GlassBackdropHost 的 backdrop（不再嵌套第二层 host，避免
+ * 双层 systemBars padding + 双层采样层导致顶部出现异常亮条/空白）；
+ * 返回按钮为悬浮圆形液态玻璃按钮，滚动时永远可见。
  */
 @Composable
 fun EnvDetailPanel(
     fragment: EnvFragment,
     type: String,
+    backdrop: Backdrop,
     onBack: () -> Unit
 ) {
     val context = fragment.requireContext()
@@ -492,11 +495,8 @@ fun EnvDetailPanel(
     }
 
     // ---------- UI ----------
-    GlassBackdropHost(
-        modifier = Modifier.fillMaxSize()
-    ) { backdrop ->
-        Box(Modifier.fillMaxSize()) {
-            Column(
+    Box(Modifier.fillMaxSize()) {
+        Column(
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
@@ -751,13 +751,12 @@ fun EnvDetailPanel(
             )
         }
 
-        detailDialog?.let { item ->
-            GlassTextDialog(
-                title = fragment.getString(R.string.env_detail_data_title) + " · " + item.optString("name", ""),
-                text = formatConfigData(item.optJSONObject("data")),
-                onDismiss = { detailDialog = null }
-            )
-        }
+    detailDialog?.let { item ->
+        GlassTextDialog(
+            title = fragment.getString(R.string.env_detail_data_title) + " · " + item.optString("name", ""),
+            text = formatConfigData(item.optJSONObject("data")),
+            onDismiss = { detailDialog = null }
+        )
     }
 }
 

@@ -56,6 +56,9 @@ class EnvFragment : Fragment() {
         val summary: String
     )
 
+    /** 当前展开的环境子页面类型（null = 五大功能列表）。 */
+    private var detailType by mutableStateOf<String?>(null)
+
     private var items by mutableStateOf(
         listOf(
             EnvItem(TYPE_CELL, R.string.env_cell_title, false, ""),
@@ -99,15 +102,23 @@ class EnvFragment : Fragment() {
         GlassBackdropHost(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
         ) { backdrop ->
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            val detail = detailType
+            if (detail != null) {
+                EnvDetailPanel(
+                    fragment = fragment,
+                    type = detail,
+                    backdrop = backdrop,
+                    onBack = { detailType = null }
+                )
+            } else {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                 val colors = glassColors()
                 BasicText(
                     getString(R.string.env_title),
@@ -127,12 +138,14 @@ class EnvFragment : Fragment() {
                         item = item,
                         backdrop = backdrop,
                         onCardClick = {
-                            EnvDetailActivity.start(requireContext(), item.type)
+                            // 环境子页面：不启动独立 Activity，直接切换为子页面
+                            detailType = item.type
                         },
                         onToggle = { checked -> fragment.toggleEnv(item.type, checked) }
                     )
                 }
-            }
+                } // Column
+            } // else
         }
     }
 
@@ -180,6 +193,15 @@ class EnvFragment : Fragment() {
     /** 快捷开关：关闭时 Hook 放行真实数据（数据保留），开启时恢复。 */
     private fun toggleEnv(type: String, enabled: Boolean) {
         if (updatingSwitch) return
+        // 乐观更新本地状态：点击立即反馈，避免二次点击仍读旧值
+        val current = items
+        items = current.map { item ->
+            if (item.type == type) {
+                item.copy(switchState = enabled)
+            } else {
+                item
+            }
+        }
         executor.execute {
             val result = ApiClient.setEnvEnabled(type, enabled)
             requireActivity().runOnUiThread {
