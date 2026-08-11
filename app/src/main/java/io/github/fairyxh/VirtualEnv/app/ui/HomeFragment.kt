@@ -746,6 +746,7 @@ class HomeFragment : Fragment() {
         onDelete: () -> Unit
     ) {
         val colors = glassColors()
+        // 选中态不显示蓝色：仅提高中性色亮度区分，保留玻璃质感且不干扰视觉
         GlassPill(
             onClick = onSelect,
             backdrop = backdrop,
@@ -753,7 +754,8 @@ class HomeFragment : Fragment() {
                 .padding(top = 8.dp)
                 .fillMaxWidth(),
             selected = selected,
-            containerColor = if (selected) colors.accent.copy(alpha = 0.82f) else colors.bgTertiary.copy(alpha = 0.4f),
+            containerColor = if (selected) colors.bgTertiary.copy(alpha = 0.75f)
+            else colors.bgTertiary.copy(alpha = 0.4f),
             height = 56.dp
         ) {
             Row(
