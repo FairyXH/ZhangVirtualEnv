@@ -864,7 +864,7 @@ fun EnvDetailPanel(
                                         simCountryIso = iso
                                         simMcc = mcc
                                         simMnc = mnc
-                                        if (simOperatorName.isBlank() || simOperatorName == "中国移动") {
+                                        if (carrier.isNotBlank()) {
                                             simOperatorName = carrier
                                             simNetworkOperatorName = carrier
                                         }

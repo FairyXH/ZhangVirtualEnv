@@ -255,6 +255,9 @@ io.github.fairyxh.VirEnvDetector
 | `GnssStatus$Builder.addSatellite` | Oplus 只暴露 **12 参**版本（AOSP 8 参被隐藏），且 `hasBasebandCn0/basebandCn0` 顺序与 AOSP 不同 |
 | `SensorEvent` | 本 ROM 提供 public 4 参构造；否则用隐藏构造 + 反射字段 |
 | `ScanResult` / `BluetoothDevice` | public 构造与 `getRemoteDevice` |
+| `SignalStrength` | 是否 public `(CellSignalStrength[])` 构造；无则用无参 + `mCellSignalStrengths` 字段（`VirtualSignalFactory` 已双方案回退） |
+| `PhoneInterfaceManager` / `PhoneSubInfoController` | SIM 身份方法（getSimOperator 等）的参数个数/顺序：AOSP 是 `(String callingPackage, String callingFeatureId)`，老版本可能只有 1 参 |
+| `SubscriptionManagerService` / `SubscriptionController` | system_server 里 ISub 实现类名：Android 12+ 为 `SubscriptionManagerService`，旧版为 `SubscriptionController`（`SimSubscriptionHookAdapter` 已按 Profile 多候选） |
 
 真机反射枚举示例（模块日志）：
 
@@ -268,7 +271,9 @@ io.github.fairyxh.VirEnvDetector
 - `hook/VirtualCellFactory.kt`：如构造器不同，调整参数顺序/增加对应分支
 - `hook/FrameworkEnvHookAdapter.kt`：如 `GnssStatus$Builder` 方法签名不同，修改反射参数列表
 - `hook/StepSensorInjector.kt`：如 SensorEvent 构造不同，修改 buildEvent
-- `profile/`：建议为不同系统版本建立 Profile，将签名差异收口到 Profile 配置
+- `hook/SimTelephonyHookAdapter.kt`：SIM 身份方法按“方法名 + 返回类型”查找，参数个数变化自动兼容（1~4 参均可命中）；`VirtualSignalFactory` 对 SignalStrength 构造提供数组构造/字段反射双回退
+- `hook/SimSubscriptionHookAdapter.kt`：ISub 实现类名与 SubscriptionInfo 字段名均可经 Profile 调整
+- `profile/`：建议为不同系统版本建立 Profile，将签名差异收口到 Profile 配置；SIM 相关可配置 `sim.phoneInterfaceClasses` / `sim.phoneSubInfoClasses` / `sim.subscriptionClasses`
 
 ### 5.4 真机验证
 
