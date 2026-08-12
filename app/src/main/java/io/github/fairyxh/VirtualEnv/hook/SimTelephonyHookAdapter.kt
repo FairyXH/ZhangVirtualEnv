@@ -269,7 +269,9 @@ class SimTelephonyHookAdapter(
     private fun resolveString(name: String, chain: Any, original: Any?): String? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            val value = when (name) {
+            // Android 15 ForSubscriber 后缀与旧名统一映射到同一字段
+            val base = name.removeSuffix("ForSubscriber")
+            val value = when (base) {
                 "getSimOperator" -> {
                     val mcc = slot.optString("mcc", "")
                     val mnc = slot.optString("mnc", "")
@@ -304,7 +306,8 @@ class SimTelephonyHookAdapter(
     private fun resolveInt(name: String, chain: Any, original: Any?): Int? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            when (name) {
+            val base = name.removeSuffix("ForSubscriber")
+            when (base) {
                 "getSimState" -> {
                     val v = slot.optInt("simState", -1)
                     if (v >= 0) v else null
