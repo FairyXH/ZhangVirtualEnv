@@ -154,8 +154,10 @@ class SimSubscriptionHookAdapter(
         if (item == null) return
         val slot = resolveSlotFor(item, data) ?: return
         try {
+            var changed = false
             FIELDS_STRING.forEach { (fieldName, key) ->
-                setStringField(item, fieldName, slot.optString(key, ""))
+                val value = slot.optString(key, "")
+                if (value.isNotEmpty() && setStringFieldSmart(item, fieldName, value)) changed = true
             }
             FIELDS_INT.forEach { (fieldName, key) ->
                 val v = when (key) {
@@ -163,11 +165,117 @@ class SimSubscriptionHookAdapter(
                     "mnc" -> slot.optString("mnc", "").toIntOrNull() ?: slot.optInt("mnc", -1)
                     else -> slot.optInt(key, -1)
                 }
-                if (v >= 0) setIntField(item, fieldName, v)
+                if (v >= 0 && setIntFieldSmart(item, fieldName, v)) changed = true
             }
-            ZLog.d(TAG_SCOPE, "SubscriptionInfo rewritten for slot=${slot.optInt("slotIndex", -1)}")
+            ZLog.d(TAG_SCOPE, "SubscriptionInfo rewritten for slot=${slot.optInt("slotIndex", -1)} changed=$changed")
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "SubscriptionInfo rewrite failed", t)
+        }
+    }
+
+    /** 字段名优先；找不到时按当前真实值 + 类型启发式定位（Oplus 混淆字段名兼容）。 */
+    private fun setStringFieldSmart(target: Any, name: String, value: String): Boolean {
+        val f = findField(target, name)
+        if (f != null) {
+            setStringField(target, name, value)
+            return true
+        }
+        // 启发式：找当前值=真实物理值 的 String 字段（名字含 iso/carrier/name/mcc/mnc/number 的优先）
+        val real = realStringValue(target, name) ?: return false
+        val candidates = mutableListOf<Field>()
+        var clazz: Class<*>? = target.javaClass
+        while (clazz != null) {
+            clazz.declaredFields.forEach { field ->
+                if (Modifier.isStatic(field.modifiers)) return@forEach
+                if (field.type != String::class.java && field.type != java.lang.CharSequence::class.java) return@forEach
+                val cur = try { field.isAccessible = true; field.get(target)?.toString() } catch (t: Throwable) { null }
+                if (cur == real) candidates.add(field)
+            }
+            clazz = clazz.superclass
+        }
+        if (candidates.isEmpty()) return false
+        // 偏好名字包含关键字的字段
+        val hint = name.removePrefix("m").lowercase()
+        val best = candidates.firstOrNull { it.name.lowercase().contains(hint) } ?: candidates.first()
+        return try {
+            best.isAccessible = true
+            if (best.type == String::class.java) best.set(target, value) else best.set(target, value)
+            true
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "smart set string $name failed", t)
+            false
+        }
+    }
+
+    private fun setIntFieldSmart(target: Any, name: String, value: Int): Boolean {
+        val f = findField(target, name)
+        if (f != null) {
+            setIntField(target, name, value)
+            return true
+        }
+        val real = realIntValue(target, name) ?: return false
+        val candidates = mutableListOf<Field>()
+        var clazz: Class<*>? = target.javaClass
+        while (clazz != null) {
+            clazz.declaredFields.forEach { field ->
+                if (Modifier.isStatic(field.modifiers)) return@forEach
+                if (field.type != Int::class.javaPrimitiveType && field.type != Integer::class.java) return@forEach
+                val cur = try { field.isAccessible = true; field.getInt(target) } catch (t: Throwable) { Int.MIN_VALUE }
+                if (cur == real) candidates.add(field)
+            }
+            clazz = clazz.superclass
+        }
+        if (candidates.isEmpty()) return false
+        val hint = name.removePrefix("m").lowercase()
+        val best = candidates.firstOrNull { it.name.lowercase().contains(hint) } ?: candidates.first()
+        return try {
+            best.isAccessible = true
+            best.setInt(target, value)
+            true
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "smart set int $name failed", t)
+            false
+        }
+    }
+
+    /** 用保留的 getter 名读真实物理值，辅助字段定位。 */
+    private fun realStringValue(target: Any, name: String): String? {
+        val getter = when (name) {
+            "mIccId" -> "getIccId"
+            "mCarrierName" -> "getCarrierName"
+            "mDisplayName" -> "getDisplayName"
+            "mCountryIso", "mIso" -> "getCountryIso"
+            "mNumber" -> "getNumber"
+            else -> null
+        } ?: return null
+        return try {
+            val m = target.javaClass.getMethod(getter)
+            m.isAccessible = true
+            m.invoke(target)?.toString()
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun realIntValue(target: Any, name: String): Int? {
+        val getter = when (name) {
+            "mMcc" -> "getMccString"
+            "mMnc" -> "getMncString"
+            "mSimSlotIndex" -> "getSimSlotIndex"
+            "mSubscriptionId" -> "getSubscriptionId"
+            else -> null
+        } ?: return null
+        return try {
+            val m = target.javaClass.getMethod(getter)
+            m.isAccessible = true
+            when (val r = m.invoke(target)) {
+                is Int -> r
+                is Number -> r.toInt()
+                is String -> r.toIntOrNull()
+                else -> null
+            }
+        } catch (t: Throwable) {
+            null
         }
     }
 
@@ -177,8 +285,8 @@ class SimSubscriptionHookAdapter(
         var subId = -1
         var slotIndex = -1
         try {
-            subId = getIntField(item, "mSubscriptionId") ?: -1
-            slotIndex = getIntField(item, "mSimSlotIndex") ?: -1
+            subId = getIntField(item, "mSubscriptionId") ?: getterInt(item, "getSubscriptionId") ?: -1
+            slotIndex = getIntField(item, "mSimSlotIndex") ?: getterInt(item, "getSimSlotIndex") ?: -1
         } catch (t: Throwable) {
         }
         for (i in 0 until slots.length()) {
@@ -190,6 +298,20 @@ class SimSubscriptionHookAdapter(
             if (s.optBoolean("enabled", true)) return s
         }
         return slots.optJSONObject(0)
+    }
+
+    private fun getterInt(target: Any, name: String): Int? {
+        return try {
+            val m = target.javaClass.getMethod(name)
+            m.isAccessible = true
+            when (val r = m.invoke(target)) {
+                is Int -> r
+                is Number -> r.toInt()
+                else -> null
+            }
+        } catch (t: Throwable) {
+            null
+        }
     }
 
     /** 当前启用 SIM 配置；未启用返回 null。 */
