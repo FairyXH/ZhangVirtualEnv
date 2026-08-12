@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Zhang虚拟环境</string>
+    <string name="app_name">虚拟环境</string>
     <string name="module_description">虚拟环境模块·强力隐私保护</string>
 
     <!-- Bottom bar -->
@@ -11,7 +11,7 @@
     <string name="tab_settings">设置</string>
 
     <!-- Home -->
-    <string name="home_subtitle">虚拟环境模块·强力隐私保护</string>
+    <string name="home_subtitle">虚拟环境模块，为您提供强力隐私保护。模块永久免费，禁止倒卖。如果你是买来的请立即退款并举报。</string>
     <string name="home_status_title">模块状态</string>
     <string name="home_status_checking">正在检测…</string>
     <string name="home_status_ok">模块已激活，Backend 运行中</string>
@@ -181,7 +181,7 @@
     <string name="settings_launcher_show_toast">桌面图标已恢复显示</string>
     <string name="settings_amap_key_empty">请输入 API Key</string>
     <string name="settings_env_test_title">环境实时测试</string>
-    <string name="settings_env_test_desc">以普通App 的 视角持续读取位置、基站、蓝牙、WiFi、传感器、GNSS，结合虚拟配置判定是否符合预期，点击结束停止</string>
+    <string name="settings_env_test_desc">以普通App 的 视角持续读取位置、基站、蓝牙、WiFi、传感器、GNSS，结合虚拟配置判定是否符合预期，点击结束停止。由于模块无法作用于自身，传感器数据请使用独立检测器进行测试。</string>
     <string name="settings_env_test_start">开始</string>
     <string name="settings_env_test_stop">结束</string>
     <string name="settings_env_test_idle">未开始</string>
