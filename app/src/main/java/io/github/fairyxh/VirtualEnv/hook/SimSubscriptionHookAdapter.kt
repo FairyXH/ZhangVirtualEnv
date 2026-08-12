@@ -47,6 +47,7 @@ class SimSubscriptionHookAdapter(
             "getActiveSubscriptionInfoForSimSlotIndex",
             "getSubscriptionInfo",
             "getSubscriptionInfoForIccId",
+            "getSubscriptionInfoStreamAsUser",
         )
         private val INT_METHOD_NAMES = listOf(
             "getDefaultSubscriptionId",
@@ -55,6 +56,10 @@ class SimSubscriptionHookAdapter(
             "getDefaultSmsSubscriptionId",
             "getActiveDataSubscriptionId",
         )
+
+        /** SubscriptionInfoInternal.toSubscriptionInfo()：内部订阅 → App 可见对象的唯一构造点。 */
+        private const val CLASS_SUB_INTERNAL = "com.android.internal.telephony.subscription.SubscriptionInfoInternal"
+        private const val METHOD_TO_SUB_INFO = "toSubscriptionInfo"
 
         // SubscriptionInfo 字段候选名（AOSP 字段 + Oplus 变体）
         private val FIELDS_STRING = mapOf(
@@ -80,6 +85,34 @@ class SimSubscriptionHookAdapter(
             val clazz = HookSupport.findClass(classLoader, className) ?: continue
             hooked += installOnClass(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim subscription hooks active on $className")
+        }
+        // SubscriptionInfoInternal.toSubscriptionInfo()：Oplus 子类 override 也无法绕过的构造点
+        HookSupport.findClass(classLoader, CLASS_SUB_INTERNAL)?.let { clazz ->
+            hooked += hookToSubscriptionInfo(clazz)
+        }
+        return hooked
+    }
+
+    /** hook SubscriptionInfoInternal.toSubscriptionInfo()：返回 App 可见对象前改写字段。 */
+    private fun hookToSubscriptionInfo(clazz: Class<*>): Int {
+        var hooked = 0
+        HookSupport.findMethods(clazz, METHOD_TO_SUB_INFO).forEach { method ->
+            val ok = registrar.register(method) { chain ->
+                val result = chain.proceed()
+                try {
+                    val virtual = currentSimData()
+                    if (virtual != null && result != null) {
+                        rewriteOne(result, virtual)
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "toSubscriptionInfo rewrite failed, fallback", t)
+                }
+                result
+            }
+            if (ok) {
+                hooked++
+                ZLog.i(TAG_SCOPE, "hooked $CLASS_SUB_INTERNAL.$METHOD_TO_SUB_INFO")
+            }
         }
         return hooked
     }
