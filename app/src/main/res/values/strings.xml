@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">虚拟环境</string>
-    <string name="module_description">虚拟环境模块·强力隐私保护</string>
+    <string name="module_description">集成虚拟位置、线路模拟、基站模拟、WiFi模拟、蓝牙模拟、传感器模拟、GNSS模拟为一体的虚拟环境隐私保护利器。有摇杆、能采集当前环境信息(快照或持续录像采集模式)，可回放采集的信息。</string>
 
     <!-- Bottom bar -->
     <string name="tab_home">主页</string>
