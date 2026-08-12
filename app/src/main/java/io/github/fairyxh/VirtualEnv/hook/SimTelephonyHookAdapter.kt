@@ -51,50 +51,68 @@ class SimTelephonyHookAdapter(
             "com.android.phone.PhoneSubInfoController",
         )
 
-        /** 字符串返回型 SIM 身份方法（Binder 服务端方法名，含 Android 15 ForSubscriber 变体）。 */
+        /** 字符串返回型 SIM 身份方法（Binder 服务端方法名，含 Android 15 ForSubscriber/WithFeature 变体）。 */
         private val STRING_METHODS = listOf(
             "getSimOperator",
             "getSimOperatorForSubscriber",
+            "getSimOperatorWithFeature",
             "getSimOperatorName",
             "getSimOperatorNameForSubscriber",
+            "getSimOperatorNameWithFeature",
             "getSimCountryIso",
             "getSimCountryIsoForSubscriber",
+            "getSimCountryIsoWithFeature",
             "getSimSerialNumber",
             "getSubscriberId",
             "getSubscriberIdForSubscriber",
+            "getSubscriberIdWithFeature",
             "getIccSerialNumber",
             "getIccSerialNumberForSubscriber",
+            "getIccSerialNumberWithFeature",
             "getLine1Number",
             "getLine1NumberForSubscriber",
+            "getLine1NumberWithFeature",
             "getDeviceId",
             "getDeviceIdForSubscriber",
+            "getDeviceIdWithFeature",
             "getImei",
             "getImeiForSubscriber",
+            "getImeiWithFeature",
             "getMeid",
             "getMeidForSubscriber",
+            "getMeidWithFeature",
             "getNetworkOperator",
             "getNetworkOperatorForSubscriber",
+            "getNetworkOperatorWithFeature",
             "getNetworkOperatorName",
             "getNetworkOperatorNameForSubscriber",
+            "getNetworkOperatorNameWithFeature",
             "getNetworkCountryIso",
             "getNetworkCountryIsoForSubscriber",
+            "getNetworkCountryIsoWithFeature",
             "getMsisdn",
             "getMsisdnForSubscriber",
+            "getMsisdnWithFeature",
             "getVoiceMailNumber",
             "getVoiceMailNumberForSubscriber",
+            "getVoiceMailNumberWithFeature",
         )
 
-        /** 整型返回型方法（含 ForSubscriber 变体）。 */
+        /** 整型返回型方法（含 ForSubscriber/WithFeature 变体）。 */
         private val INT_METHODS = listOf(
             "getSimState",
             "getSimStateForSubscriber",
+            "getSimStateWithFeature",
             "getPhoneType",
             "getPhoneTypeForSubscriber",
+            "getPhoneTypeWithFeature",
             "getPhoneCount",
             "getDataNetworkType",
             "getDataNetworkTypeForSubscriber",
+            "getDataNetworkTypeWithFeature",
             "getVoiceNetworkType",
             "getVoiceNetworkTypeForSubscriber",
+            "getVoiceNetworkTypeWithFeature",
         )
     }
 
@@ -126,13 +144,13 @@ class SimTelephonyHookAdapter(
                 .filter { it.returnType == String::class.java }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
-                        val original = chain.proceed()
-                        val virtual = resolveString(name, chain, original)
+                        // 先解析虚拟值：命中直接返回，避免 proceed() 触发的权限拒绝
+                        val virtual = resolveString(name, chain, null)
                         if (virtual != null) {
                             ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.$name -> virtual")
                             virtual
                         } else {
-                            original
+                            chain.proceed()
                         }
                     }
                     if (ok) {
@@ -150,13 +168,12 @@ class SimTelephonyHookAdapter(
             .filter { it.parameterCount in 0..3 }
             .forEach { method ->
                 val ok = registrar.register(method) { chain ->
-                    val original = chain.proceed()
                     val virtual = VirtualSignalFactory.build(currentSimData())
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getSignalStrength -> virtual")
                         virtual
                     } else {
-                        original
+                        chain.proceed()
                     }
                 }
                 if (ok) {
@@ -177,13 +194,12 @@ class SimTelephonyHookAdapter(
                 .filter { it.returnType == String::class.java }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
-                        val original = chain.proceed()
-                        val virtual = resolveString(name, chain, original)
+                        val virtual = resolveString(name, chain, null)
                         if (virtual != null) {
                             ZLog.d(TAG_SCOPE, "PhoneSubInfoController.$name -> virtual")
                             virtual
                         } else {
-                            original
+                            chain.proceed()
                         }
                     }
                     if (ok) {
@@ -197,13 +213,12 @@ class SimTelephonyHookAdapter(
             .filter { it.parameterCount in 0..4 }
             .forEach { method ->
                 val ok = registrar.register(method) { chain ->
-                    val original = chain.proceed()
                     val virtual = VirtualSignalFactory.build(currentSimData())
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneSubInfoController.getSignalStrength -> virtual")
                         virtual
                     } else {
-                        original
+                        chain.proceed()
                     }
                 }
                 if (ok) {
@@ -222,13 +237,12 @@ class SimTelephonyHookAdapter(
             .filter { it.returnType == Int::class.javaPrimitiveType || it.returnType == Integer::class.java }
             .forEach { method ->
                 val ok = registrar.register(method) { chain ->
-                    val original = chain.proceed()
-                    val virtual = resolveInt(name, chain, original)
+                    val virtual = resolveInt(name, chain, null)
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.$name -> virtual")
                         virtual
                     } else {
-                        original
+                        chain.proceed()
                     }
                 }
                 if (ok) {
@@ -269,8 +283,8 @@ class SimTelephonyHookAdapter(
     private fun resolveString(name: String, chain: Any, original: Any?): String? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            // Android 15 ForSubscriber 后缀与旧名统一映射到同一字段
-            val base = name.removeSuffix("ForSubscriber")
+            // Android 15 ForSubscriber/WithFeature 后缀与旧名统一映射到同一字段
+            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature")
             val value = when (base) {
                 "getSimOperator" -> {
                     val mcc = slot.optString("mcc", "")
@@ -306,7 +320,7 @@ class SimTelephonyHookAdapter(
     private fun resolveInt(name: String, chain: Any, original: Any?): Int? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            val base = name.removeSuffix("ForSubscriber")
+            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature")
             when (base) {
                 "getSimState" -> {
                     val v = slot.optInt("simState", -1)
