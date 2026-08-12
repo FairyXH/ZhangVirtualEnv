@@ -130,7 +130,7 @@ class FloatControlService : Service() {
         freqStepValue = view.findViewById(R.id.freqStepValue)
 
         setupJoystick()
-        setupHeaderDrag(view)
+        setupPanelDrag(view)
         setupSpeed()
         setupRouteControls(view)
         // 二合一：路线面板始终可见，进入即加载路线列表
@@ -549,13 +549,19 @@ class FloatControlService : Service() {
 
     // ---------- 拖拽 ----------
 
-    private fun setupHeaderDrag(view: View) {
-        val header = view.findViewById<View>(R.id.floatHeader)
+    /**
+     * 整个面板空白区域可拖动：触摸监听挂在根视图上。
+     *
+     * Android 事件分发保证：可交互子控件（摇杆/按钮/输入框/加减钮）会先消费
+     * ACTION_DOWN，根监听器不会收到；只有落在空白区域（标题、标签、留白）的
+     * 事件才落到这里，因此无需手动命中测试即可实现“空白可拖、控件可点”。
+     */
+    private fun setupPanelDrag(view: View) {
         var initialX = 0
         var initialY = 0
         var touchX = 0f
         var touchY = 0f
-        header.setOnTouchListener { _, event ->
+        view.setOnTouchListener { _, event ->
             val params = layoutParams ?: return@setOnTouchListener false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -574,6 +580,7 @@ class FloatControlService : Service() {
                     }
                     true
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
                 else -> false
             }
         }

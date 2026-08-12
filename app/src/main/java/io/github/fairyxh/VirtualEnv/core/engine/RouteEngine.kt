@@ -35,6 +35,12 @@ class RouteEngine : LocationEngine {
         val stepCount: Double = 0.0,
         val segmentIndex: Int = 0,
         val progress: Double = 0.0,
+        /** 到达终点后自动回到起点开始新一轮。 */
+        val loop: Boolean = false,
+        /** 循环时：到达终点以设定速度沿原路返回起点，再开始新一轮（不回程时直接跳回起点）。 */
+        val smoothReturn: Boolean = false,
+        /** 当前推进方向：true=正向（起点→终点），false=平滑回程（终点→起点）。 */
+        val forward: Boolean = true,
         val lastTime: Long = 0L,
         val updateTime: Long = 0L,
     )
@@ -54,7 +60,13 @@ class RouteEngine : LocationEngine {
     }
 
     /** 加载路线并开始播放。 */
-    fun start(pointsJson: String, speedKmh: Double, stepFrequency: Int = 120) {
+    fun start(
+        pointsJson: String,
+        speedKmh: Double,
+        stepFrequency: Int = 120,
+        loop: Boolean = false,
+        smoothReturn: Boolean = false
+    ) {
         val points = parsePoints(pointsJson)
         if (points.size < 2) {
             ZLog.w("Core", "RouteEngine.start ignored, need at least 2 points")
@@ -68,11 +80,13 @@ class RouteEngine : LocationEngine {
                 points = points,
                 speedMps = (speedKmh / 3.6).coerceAtLeast(0.1),
                 stepFrequency = stepFrequency.coerceIn(0, 600),
+                loop = loop,
+                smoothReturn = smoothReturn,
                 lastTime = now,
                 updateTime = now
             )
         )
-        ZLog.i("Core", "RouteEngine started points=${points.size} speedKmh=$speedKmh stepFrequency=$stepFrequency")
+        ZLog.i("Core", "RouteEngine started points=${points.size} speedKmh=$speedKmh stepFrequency=$stepFrequency loop=$loop smoothReturn=$smoothReturn")
     }
 
     fun pause() {
@@ -101,6 +115,7 @@ class RouteEngine : LocationEngine {
                 segmentIndex = 0,
                 progress = 0.0,
                 stepCount = 0.0,
+                forward = true,
                 lastTime = now,
                 updateTime = now
             )
@@ -108,17 +123,24 @@ class RouteEngine : LocationEngine {
         ZLog.i("Core", "RouteEngine reset to start")
     }
 
-    /** 运行时更新速度（km/h）与步频（steps/min）；传 0 表示不修改。 */
-    fun config(speedKmh: Double, stepFrequency: Int) {
+    /** 运行时更新速度（km/h）与步频（steps/min）；传 0 表示不修改；loop/smoothReturn 传 null 表示不修改。 */
+    fun config(
+        speedKmh: Double,
+        stepFrequency: Int,
+        loop: Boolean? = null,
+        smoothReturn: Boolean? = null
+    ) {
         val s = state.get()
         if (!s.enabled) return
         state.set(
             s.copy(
                 speedMps = if (speedKmh > 0) (speedKmh / 3.6).coerceAtLeast(0.1) else s.speedMps,
-                stepFrequency = if (stepFrequency > 0) stepFrequency.coerceIn(0, 600) else s.stepFrequency
+                stepFrequency = if (stepFrequency > 0) stepFrequency.coerceIn(0, 600) else s.stepFrequency,
+                loop = loop ?: s.loop,
+                smoothReturn = smoothReturn ?: s.smoothReturn
             )
         )
-        ZLog.i("Core", "RouteEngine config speedKmh=$speedKmh stepFrequency=$stepFrequency")
+        ZLog.i("Core", "RouteEngine config speedKmh=$speedKmh stepFrequency=$stepFrequency loop=${loop ?: s.loop} smoothReturn=${smoothReturn ?: s.smoothReturn}")
     }
 
     fun stop() {
@@ -145,28 +167,78 @@ class RouteEngine : LocationEngine {
         var remaining = s.speedMps * deltaSec
         var seg = s.segmentIndex
         var progress = s.progress
-        while (remaining > 0 && seg < s.points.size - 1) {
-            val segLen = distanceMeters(s.points[seg], s.points[seg + 1])
-            if (segLen <= 0) {
-                seg++
-                progress = 0.0
-                continue
-            }
-            val segRemaining = (1.0 - progress) * segLen
-            if (remaining < segRemaining) {
-                progress += remaining / segLen
-                remaining = 0.0
+        var forward = s.forward
+        val lastIdx = s.points.size - 1
+
+        while (remaining > 0) {
+            if (forward) {
+                if (seg >= lastIdx) {
+                    // 到达终点
+                    if (!s.loop) break
+                    if (s.smoothReturn) {
+                        // 平滑过渡：沿原路反向返回起点（从最后一段终点开始往回走）
+                        forward = false
+                        seg = (lastIdx - 1).coerceAtLeast(0)
+                        progress = 1.0
+                    } else {
+                        // 直接跳回起点开始新一轮
+                        seg = 0
+                        progress = 0.0
+                    }
+                    continue
+                }
+                val segLen = distanceMeters(s.points[seg], s.points[seg + 1])
+                if (segLen <= 0) {
+                    seg++
+                    progress = 0.0
+                    continue
+                }
+                val segRemaining = (1.0 - progress) * segLen
+                if (remaining < segRemaining) {
+                    progress += remaining / segLen
+                    remaining = 0.0
+                } else {
+                    remaining -= segRemaining
+                    seg++
+                    progress = 0.0
+                }
             } else {
-                remaining -= segRemaining
-                seg++
-                progress = 0.0
+                if (seg < 0) {
+                    // 已回到起点：开始新一轮正向
+                    forward = true
+                    seg = 0
+                    progress = 0.0
+                    continue
+                }
+                val segLen = distanceMeters(s.points[seg], s.points[seg + 1])
+                if (segLen <= 0) {
+                    seg--
+                    progress = 1.0
+                    continue
+                }
+                val segRemaining = progress * segLen
+                if (remaining < segRemaining) {
+                    progress -= remaining / segLen
+                    remaining = 0.0
+                } else {
+                    remaining -= segRemaining
+                    seg--
+                    progress = 1.0
+                }
             }
         }
-        val finished = seg >= s.points.size - 1
+        // 平滑回程恰好走完最后一段时归位为正向前进（位于起点）
+        if (!forward && seg < 0) {
+            forward = true
+            seg = 0
+            progress = 0.0
+        }
+        val finished = !s.loop && seg >= lastIdx
         val stepDelta = if (!finished) s.stepFrequency * deltaSec / 60.0 else 0.0
         return s.copy(
-            segmentIndex = if (finished) s.points.size - 1 else seg,
-            progress = if (finished) 1.0 else progress,
+            segmentIndex = seg.coerceIn(0, lastIdx),
+            progress = progress.coerceIn(0.0, 1.0),
+            forward = forward,
             running = !finished,
             stepCount = s.stepCount + stepDelta.coerceAtLeast(0.0),
             lastTime = now,
@@ -174,13 +246,21 @@ class RouteEngine : LocationEngine {
         )
     }
 
+    /** 人体跑步 GPS 抖动：速度越快抖动越大（经纬度各自独立取值）。 */
+    private fun jitterFor(speedMps: Double): Double {
+        val baseDeg = 0.000006 // ≈ ±0.67m
+        val speedFactor = (speedMps / 4.0).coerceIn(0.0, 1.0)
+        val maxDeg = baseDeg + speedFactor * 0.000014 // 上限 ≈ ±2.2m
+        return java.util.concurrent.ThreadLocalRandom.current().nextDouble(-maxDeg, maxDeg)
+    }
+
     private fun buildLocation(s: RouteState): Location {
         val p = interpolate(s.points, s.segmentIndex, s.progress)
         val location = Location("gps")
-        // 随机抖动 ±0.000005°（约 ±0.5m），模拟真实 GPS 噪声
-        val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
-        location.latitude = p.first + jitter
-        location.longitude = p.second + jitter
+        // 运动随机抖动：经纬度各自独立，幅度随速度接近人体跑步 GPS 噪声
+        // （低速约 ±0.7m，跑步速度 ≥4m/s 时约 ±2.2m，1°≈111.32km）
+        location.latitude = p.first + jitterFor(s.speedMps)
+        location.longitude = p.second + jitterFor(s.speedMps)
         location.accuracy = 5f
         location.speed = s.speedMps.toFloat()
         location.bearing = bearingAt(s).toFloat()
@@ -198,8 +278,8 @@ class RouteEngine : LocationEngine {
         val p = interpolate(s.points, s.segmentIndex, s.progress)
         return LocationState(
             enabled = true,
-            latitude = p.first,
-            longitude = p.second,
+            latitude = p.first + jitterFor(s.speedMps),
+            longitude = p.second + jitterFor(s.speedMps),
             speed = s.speedMps.toFloat(),
             bearing = bearingAt(s).toFloat(),
             accuracy = 5f,
@@ -218,6 +298,9 @@ class RouteEngine : LocationEngine {
             put("stepCount", s.stepCount.toLong())
             put("points", s.points.size)
             put("segmentIndex", s.segmentIndex)
+            put("loop", s.loop)
+            put("smoothReturn", s.smoothReturn)
+            put("returning", s.running && !s.forward)
         }
     }
 
@@ -240,6 +323,9 @@ class RouteEngine : LocationEngine {
             put("stepCount", s.stepCount)
             put("segmentIndex", s.segmentIndex)
             put("progress", s.progress)
+            put("loop", s.loop)
+            put("smoothReturn", s.smoothReturn)
+            put("forward", s.forward)
         }
     }
 
@@ -266,6 +352,9 @@ class RouteEngine : LocationEngine {
                 stepCount = json.optDouble("stepCount", 0.0),
                 segmentIndex = json.optInt("segmentIndex", 0).coerceIn(0, points.size - 1),
                 progress = json.optDouble("progress", 0.0).coerceIn(0.0, 1.0),
+                loop = json.optBoolean("loop", false),
+                smoothReturn = json.optBoolean("smoothReturn", false),
+                forward = json.optBoolean("forward", true),
                 lastTime = SystemClock.elapsedRealtime(),
                 updateTime = SystemClock.elapsedRealtime()
             )
@@ -309,7 +398,9 @@ class RouteEngine : LocationEngine {
         val idx = s.segmentIndex.coerceAtMost(s.points.size - 2).coerceAtLeast(0)
         val a = s.points[idx]
         val b = s.points[idx + 1]
-        return bearing(a, b)
+        val bDeg = bearing(a, b)
+        // 平滑回程时朝向相反
+        return if (s.forward) bDeg else (bDeg + 180.0) % 360.0
     }
 
     companion object {

@@ -491,8 +491,21 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- 路线模拟控制 ----------
 
-    /** 一键启动路线模拟：加载路线点并按速度开始播放。与单点虚拟定位互斥。 */
-    fun startRoute(id: Long, speedKmh: Double, stepFrequency: Int = 0): org.json.JSONObject? {
+    /** 悬浮窗/App 最近一次使用的路线循环配置（start 未传时沿用，避免悬浮窗启动丢失循环设置）。 */
+    @Volatile
+    private var lastRouteLoop = false
+
+    @Volatile
+    private var lastRouteSmoothReturn = false
+
+    /** 一键启动路线模拟：加载路线点并按速度开始播放。与单点虚拟定位互斥。loop/smoothReturn 传 null 时沿用上次配置。 */
+    fun startRoute(
+        id: Long,
+        speedKmh: Double,
+        stepFrequency: Int = 0,
+        loop: Boolean? = null,
+        smoothReturn: Boolean? = null
+    ): org.json.JSONObject? {
         val route = databaseManager.getRoute(id) ?: return null
         // 互斥：启动路线模拟时关闭单点虚拟定位
         if (locationEngine.isEnabled()) {
@@ -501,8 +514,12 @@ class Backend private constructor(private val dataDir: File) {
         val points = route.optString("points", "")
         val speed = if (speedKmh > 0) speedKmh else route.optDouble("speed", 3.5)
         val stepFreq = if (stepFrequency > 0) stepFrequency else route.optInt("stepFrequency", 120)
-        routeEngine.start(points, speed, stepFreq)
-        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed stepFrequency=$stepFreq")
+        val useLoop = loop ?: lastRouteLoop
+        val useSmooth = smoothReturn ?: lastRouteSmoothReturn
+        lastRouteLoop = useLoop
+        lastRouteSmoothReturn = useSmooth
+        routeEngine.start(points, speed, stepFreq, useLoop, useSmooth)
+        ZLog.i(TAG_SCOPE, "route started id=$id speed=$speed stepFrequency=$stepFreq loop=$useLoop smoothReturn=$useSmooth")
         return route
     }
 
@@ -520,10 +537,17 @@ class Backend private constructor(private val dataDir: File) {
         routeEngine.reset()
     }
 
-    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改。 */
-    fun configRoute(speedKmh: Double, stepFrequency: Int) {
-        routeEngine.config(speedKmh, stepFrequency)
-        ZLog.i(TAG_SCOPE, "route config speedKmh=$speedKmh stepFrequency=$stepFrequency")
+    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改；loop/smoothReturn 传 null 表示不修改。 */
+    fun configRoute(
+        speedKmh: Double,
+        stepFrequency: Int,
+        loop: Boolean? = null,
+        smoothReturn: Boolean? = null
+    ) {
+        routeEngine.config(speedKmh, stepFrequency, loop, smoothReturn)
+        if (loop != null) lastRouteLoop = loop
+        if (smoothReturn != null) lastRouteSmoothReturn = smoothReturn
+        ZLog.i(TAG_SCOPE, "route config speedKmh=$speedKmh stepFrequency=$stepFrequency loop=${loop ?: lastRouteLoop} smoothReturn=${smoothReturn ?: lastRouteSmoothReturn}")
     }
 
     fun stopRoute() {

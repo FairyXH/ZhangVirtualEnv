@@ -124,6 +124,10 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private var drawHint by mutableStateOf("")
     private var statusText by mutableStateOf("")
     private var switchChecked by mutableStateOf(false)
+    /** 循环播放：到达终点自动回到起点开始新一轮。 */
+    private var loopChecked by mutableStateOf(false)
+    /** 平滑回程：循环时到达终点以设定速度沿原路返回起点再开始新一轮。 */
+    private var smoothReturnChecked by mutableStateOf(false)
     private var searchText by mutableStateOf("")
     private var mapCollapsed by mutableStateOf(false)
     private var mapSatellite by mutableStateOf(false)
@@ -518,6 +522,56 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                             Modifier.padding(top = 10.dp),
                             style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                         )
+                        // 循环播放：到达终点自动回到起点开始新一轮
+                        Row(
+                            Modifier.padding(top = 12.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.route_loop_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.route_loop_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { fragment.loopChecked },
+                                onSelect = { checked ->
+                                    fragment.loopChecked = checked
+                                    fragment.applyRouteLoopOptions()
+                                },
+                                backdrop = backdrop
+                            )
+                        }
+                        // 平滑回程：循环时到达终点以设定速度沿原路返回起点再开始新一轮
+                        Row(
+                            Modifier.padding(top = 12.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.route_smooth_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.route_smooth_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { fragment.smoothReturnChecked },
+                                onSelect = { checked ->
+                                    fragment.smoothReturnChecked = checked
+                                    fragment.applyRouteLoopOptions()
+                                },
+                                backdrop = backdrop
+                            )
+                        }
                     }
                 }
 
@@ -958,6 +1012,13 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         return speed to freq
     }
 
+    /** 循环/平滑过渡开关变化：路线运行中立即生效；未运行时作为下次启动配置。 */
+    private fun applyRouteLoopOptions() {
+        executor.execute {
+            ApiClient.configRoute(0.0, 0, loopChecked, smoothReturnChecked)
+        }
+    }
+
     /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
     private fun enableRouteSimulation() {
         if (currentRouteId <= 0) {
@@ -967,7 +1028,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         }
         val (speed, freq) = readSpeedFreq()
         executor.execute {
-            val result = ApiClient.startRoute(currentRouteId, speed, freq)
+            val result = ApiClient.startRoute(currentRouteId, speed, freq, loopChecked, smoothReturnChecked)
             requireActivity().runOnUiThread {
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(
@@ -1010,10 +1071,14 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                 }
                 val running = data.optBoolean("running", false)
                 updateSwitchState(running)
-                statusText = if (running) {
-                    getString(R.string.route_status_running, data.optInt("points", 0))
-                } else {
-                    getString(R.string.route_status_idle)
+                loopChecked = data.optBoolean("loop", false)
+                smoothReturnChecked = data.optBoolean("smoothReturn", false)
+                statusText = when {
+                    running && data.optBoolean("returning", false) ->
+                        getString(R.string.route_status_returning, data.optInt("points", 0))
+                    running ->
+                        getString(R.string.route_status_running, data.optInt("points", 0))
+                    else -> getString(R.string.route_status_idle)
                 }
             }
         }
@@ -1060,7 +1125,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         currentRouteName = route.name
         val (speed, freq) = readSpeedFreq()
         executor.execute {
-            val result = ApiClient.startRoute(route.id, speed, freq)
+            val result = ApiClient.startRoute(route.id, speed, freq, loopChecked, smoothReturnChecked)
             requireActivity().runOnUiThread {
                 if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(

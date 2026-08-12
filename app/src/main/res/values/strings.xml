@@ -209,6 +209,11 @@
     <string name="route_status_idle">路线未运行</string>
     <string name="route_status_running">路线运行中 · %1$d 个路径点</string>
     <string name="route_status_offline">Backend 未连接</string>
+    <string name="route_status_returning">路线回程中 · %1$d 个路径点</string>
+    <string name="route_loop_title">循环播放</string>
+    <string name="route_loop_desc">到达终点后自动回到起点开始新一轮</string>
+    <string name="route_smooth_title">终点→起点平滑过渡</string>
+    <string name="route_smooth_desc">循环开启时生效：到达终点以设定速度沿原路返回起点，再开始新一轮</string>
     <string name="route_select_first">请先加载或保存一条路线</string>
     <string name="route_config_title">速度 / 步频</string>
     <string name="route_speed_hint">速度 km/h</string>

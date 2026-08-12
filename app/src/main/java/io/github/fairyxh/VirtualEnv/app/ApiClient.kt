@@ -99,12 +99,23 @@ object ApiClient {
 
     // ---------- 路线模拟控制 ----------
 
-    /** 一键启动路线模拟。speed 为 km/h，<=0 时使用路线默认速度；stepFrequency<=0 用路线默认步频。 */
-    fun startRoute(id: Long, speedKmh: Double = 0.0, stepFrequency: Int = 0): ApiResult {
+    /**
+     * 一键启动路线模拟。speed 为 km/h，<=0 时使用路线默认速度；stepFrequency<=0 用路线默认步频。
+     * loop/smoothReturn 为 null 时后端沿用上次配置（悬浮窗启动不丢循环设置）。
+     */
+    fun startRoute(
+        id: Long,
+        speedKmh: Double = 0.0,
+        stepFrequency: Int = 0,
+        loop: Boolean? = null,
+        smoothReturn: Boolean? = null
+    ): ApiResult {
         val body = JSONObject().apply {
             put("id", id)
             put("speed", speedKmh)
             put("stepFrequency", stepFrequency)
+            if (loop != null) put("loop", loop)
+            if (smoothReturn != null) put("smoothReturn", smoothReturn)
         }
         return post("/api/route/start", body)
     }
@@ -115,11 +126,18 @@ object ApiClient {
 
     fun resetRoute(): ApiResult = post("/api/route/reset", JSONObject())
 
-    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改。 */
-    fun configRoute(speedKmh: Double = 0.0, stepFrequency: Int = 0): ApiResult {
+    /** 更新路线运行参数：speedKmh/stepFrequency 传 0 表示不修改；loop/smoothReturn 传 null 表示不修改。 */
+    fun configRoute(
+        speedKmh: Double = 0.0,
+        stepFrequency: Int = 0,
+        loop: Boolean? = null,
+        smoothReturn: Boolean? = null
+    ): ApiResult {
         val body = JSONObject().apply {
             put("speed", speedKmh)
             put("stepFrequency", stepFrequency)
+            if (loop != null) put("loop", loop)
+            if (smoothReturn != null) put("smoothReturn", smoothReturn)
         }
         return post("/api/route/config", body)
     }

@@ -271,9 +271,12 @@ class ApiServer(
         val id = json.optLong("id", -1)
         val speed = json.optDouble("speed", 0.0)
         val stepFrequency = json.optInt("stepFrequency", 0)
-        val route = backend.startRoute(id, speed, stepFrequency)
+        // 循环选项缺省时走 Backend 上次配置（悬浮窗启动不丢设置）
+        val loop = if (json.has("loop")) json.optBoolean("loop", false) else null
+        val smoothReturn = if (json.has("smoothReturn")) json.optBoolean("smoothReturn", false) else null
+        val route = backend.startRoute(id, speed, stepFrequency, loop, smoothReturn)
             ?: return ApiResult.error("route not found: $id")
-        ZLog.i(TAG_SCOPE, "route start id=$id name=${route.optString("name")} stepFrequency=$stepFrequency")
+        ZLog.i(TAG_SCOPE, "route start id=$id name=${route.optString("name")} stepFrequency=$stepFrequency loop=$loop smoothReturn=$smoothReturn")
         return ApiResult.ok("started", route)
     }
 
@@ -296,8 +299,10 @@ class ApiServer(
         val json = JSONObject(body)
         val speed = json.optDouble("speed", 0.0)
         val stepFrequency = json.optInt("stepFrequency", 0)
-        backend.configRoute(speed, stepFrequency)
-        ZLog.i(TAG_SCOPE, "route config speed=$speed stepFrequency=$stepFrequency")
+        val loop = if (json.has("loop")) json.optBoolean("loop", false) else null
+        val smoothReturn = if (json.has("smoothReturn")) json.optBoolean("smoothReturn", false) else null
+        backend.configRoute(speed, stepFrequency, loop, smoothReturn)
+        ZLog.i(TAG_SCOPE, "route config speed=$speed stepFrequency=$stepFrequency loop=$loop smoothReturn=$smoothReturn")
         return ApiResult.ok("ok", backend.routeStatusJson())
     }
 
