@@ -210,6 +210,7 @@ class Backend private constructor(private val dataDir: File) {
             gnssEngine.clear()
             sensorEngine.clear()
             simEngine.clear()
+            CarrierConfigPersister.resetAll()
             activeEnvSnapshotIds.keys.removeAll(
                 setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
             )
@@ -303,8 +304,10 @@ class Backend private constructor(private val dataDir: File) {
         val data = status.optJSONObject("data")
         if (status.optBoolean("enabled", false) && data != null) {
             engine.update(data)
+            if (key == "sim") persistSimConfig(data)
         } else {
             engine.clear()
+            if (key == "sim") CarrierConfigPersister.resetAll()
         }
     }
 
@@ -426,6 +429,7 @@ class Backend private constructor(private val dataDir: File) {
                 gnssEngine.clear()
                 sensorEngine.clear()
                 simEngine.clear()
+                CarrierConfigPersister.resetAll()
                 ZLog.i(TAG_SCOPE, "env suspended")
             }
             return first
@@ -459,7 +463,13 @@ class Backend private constructor(private val dataDir: File) {
     private fun restoreEngine(snap: org.json.JSONObject, key: String, engine: EnvStateEngine) {
         val status = snap.optJSONObject(key) ?: return
         val data = status.optJSONObject("data")
-        if (status.optBoolean("enabled", false) && data != null) engine.update(data) else engine.clear()
+        if (status.optBoolean("enabled", false) && data != null) {
+            engine.update(data)
+            if (key == "sim") persistSimConfig(data)
+        } else {
+            engine.clear()
+            if (key == "sim") CarrierConfigPersister.resetAll()
+        }
     }
 
     /** 启动 HTTP API 服务。token 为空时拒绝所有请求（fail-closed）。 */
@@ -657,6 +667,8 @@ class Backend private constructor(private val dataDir: File) {
              "sim" -> {
                  simEngine.update(data)
                  activeEnvSnapshotIds["sim"] = id
+                 // Nrfr 同款固化：CarrierConfig 持久化覆盖（禁用框架后仍生效）
+                 persistSimConfig(data)
              }
              "collect" -> {
                  loadCollectSnapshot(data)
@@ -722,11 +734,24 @@ class Backend private constructor(private val dataDir: File) {
             "ble" -> bleEngine.update(data)
             "gnss" -> gnssEngine.update(data)
             "sensor" -> sensorEngine.update(data)
-            "sim" -> simEngine.update(data)
+            "sim" -> {
+                simEngine.update(data)
+                // Nrfr 同款固化：CarrierConfig 持久化覆盖（禁用框架后仍生效）
+                persistSimConfig(data)
+            }
             else -> return false
         }
         ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
         return true
+    }
+
+    /** 将 SIM 配置的每个卡槽固化到 CarrierConfig（Nrfr 接口：ICarrierConfigLoader.overrideConfig）。 */
+    private fun persistSimConfig(data: org.json.JSONObject) {
+        val slots = data.optJSONArray("slots") ?: return
+        for (i in 0 until slots.length()) {
+            val slot = slots.optJSONObject(i) ?: continue
+            CarrierConfigPersister.applySlot(slot)
+        }
     }
 
     /** 单类型开关：关闭时 Hook 放行真实数据，数据保留；开启时恢复。 */
@@ -737,7 +762,16 @@ class Backend private constructor(private val dataDir: File) {
             "ble" -> bleEngine.setEnabled(enabled)
             "gnss" -> gnssEngine.setEnabled(enabled)
             "sensor" -> sensorEngine.setEnabled(enabled)
-            "sim" -> simEngine.setEnabled(enabled)
+            "sim" -> {
+                simEngine.setEnabled(enabled)
+                if (enabled) {
+                    // 重新启用时恢复持久化固化（数据仍保留在引擎内）
+                    simEngine.currentData()?.let { persistSimConfig(it) }
+                } else {
+                    // 关闭 = Hook 放行真实数据，同时还原 CarrierConfig 持久化覆盖
+                    CarrierConfigPersister.resetAll()
+                }
+            }
             else -> return false
         }
         ZLog.i(TAG_SCOPE, "env type=$type enabled=$enabled")
@@ -940,6 +974,8 @@ class Backend private constructor(private val dataDir: File) {
             "sim" -> {
                 simEngine.clear()
                 activeEnvSnapshotIds.remove("sim")
+                // 清除虚拟 SIM 时同时还原 CarrierConfig 持久化覆盖
+                CarrierConfigPersister.resetAll()
             }
             "collect" -> {
                 wifiEngine.clear()
@@ -948,6 +984,7 @@ class Backend private constructor(private val dataDir: File) {
                 gnssEngine.clear()
                 sensorEngine.clear()
                 simEngine.clear()
+                CarrierConfigPersister.resetAll()
                 activeEnvSnapshotIds.keys.removeAll(
                     setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
                 )
