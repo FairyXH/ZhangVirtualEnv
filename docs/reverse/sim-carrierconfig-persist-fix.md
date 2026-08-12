@@ -77,6 +77,11 @@ private fun overrideCarrierConfig(subId: Int, bundle: PersistableBundle?) {
 - `resetAll()`：对本模块固化过的 subId 调用 `overrideConfig(subId, null, true)`
   还原（清除虚拟 SIM 时调用）。
 - 全部反射、fail-open：任一失败只记日志，不影响主流程。
+- **Binder 获取兜底**：Oplus ROM 上
+  `TelephonyServiceManager.carrierConfigServiceRegisterer` 反射可能 404
+  （实测 logcat `NoSuchMethodException: android.os.TelephonyServiceManager
+  .carrierConfigServiceRegisterer`），因此先尝试 Nrfr 同款入口，失败回退
+  `ServiceManager.getService("carrier_config")`（system_server 内可靠，实测成功）。
 
 接入点（`core/Backend.kt`）：
 

@@ -78,12 +78,23 @@ object CarrierConfigPersister {
      */
     private fun overrideConfig(subId: Int, bundle: PersistableBundle?): Boolean {
         return try {
-            val registerer = Class.forName("android.telephony.TelephonyFrameworkInitializer")
-                .getMethod("getTelephonyServiceManager").invoke(null)
-            val carrierConfigRegisterer = registerer.javaClass
-                .getMethod("carrierConfigServiceRegisterer").invoke(registerer)
-            val binder = carrierConfigRegisterer.javaClass
-                .getMethod("get").invoke(carrierConfigRegisterer) as IBinder
+            // 优先 TelephonyFrameworkInitializer（Nrfr 同款入口），失败回退 ServiceManager。
+            // 注意：Oplus ROM 上 TelephonyServiceManager.carrierConfigServiceRegisterer
+            // 可能被移除/混淆导致 getMethod 404，因此 ServiceManager 兜底最稳。
+            val binder: IBinder = try {
+                // 优先 TelephonyFrameworkInitializer（Nrfr 同款入口），
+                // Oplus ROM 可能移除 carrierConfigServiceRegisterer，失败回退 ServiceManager。
+                val tsm = Class.forName("android.telephony.TelephonyFrameworkInitializer")
+                    .getMethod("getTelephonyServiceManager").invoke(null)
+                val registerer = tsm.javaClass
+                    .getMethod("carrierConfigServiceRegisterer").invoke(tsm)
+                registerer.javaClass.getMethod("get").invoke(registerer) as IBinder
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "TelephonyServiceManager registerer unavailable, fallback ServiceManager", t)
+                Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String::class.java)
+                    .invoke(null, "carrier_config") as IBinder
+            }
             val stub = Class.forName("com.android.internal.telephony.ICarrierConfigLoader\$Stub")
                 .getMethod("asInterface", IBinder::class.java)
                 .invoke(null, binder)
