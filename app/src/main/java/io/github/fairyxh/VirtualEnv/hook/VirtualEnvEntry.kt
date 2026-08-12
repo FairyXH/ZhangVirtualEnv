@@ -95,7 +95,8 @@ class VirtualEnvEntry : XposedModule() {
                     cache,
                     registrar,
                     simCfg.first,
-                    simCfg.second
+                    simCfg.second,
+                    simCfg.third
                 ).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] sim telephony hooks installed pkg=$pkg hooked=$simHooked loader=${hostClassLoader}")
             }
@@ -118,9 +119,10 @@ class VirtualEnvEntry : XposedModule() {
     }
 
     /** 从模块 APK assets 读取 sim profile 配置（phone 进程无 Backend，直接读文件）。 */
-    private fun readSimProfileConfig(hostClassLoader: ClassLoader): Pair<List<String>, List<String>> {
+    private fun readSimProfileConfig(hostClassLoader: ClassLoader): Triple<List<String>, List<String>, List<String>> {
         val phoneInterface = mutableListOf<String>()
         val phoneSubInfo = mutableListOf<String>()
+        val phoneObj = mutableListOf<String>()
         try {
             val assets = hostClassLoader.getResourceAsStream("assets/profiles/android15.json")
                 ?: hostClassLoader.getResourceAsStream("assets/profiles/default.json")
@@ -135,12 +137,13 @@ class VirtualEnvEntry : XposedModule() {
                     }
                     phoneInterface.addAll(parseArr("phoneInterfaceClasses"))
                     phoneSubInfo.addAll(parseArr("phoneSubInfoClasses"))
+                    phoneObj.addAll(parseArr("phoneClasses"))
                 }
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "read sim profile config failed, fallback defaults", t)
         }
-        return phoneInterface to phoneSubInfo
+        return Triple(phoneInterface, phoneSubInfo, phoneObj)
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {

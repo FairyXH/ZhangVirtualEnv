@@ -24,6 +24,10 @@
         "com.android.internal.telephony.PhoneSubInfoController",
         "com.android.phone.PhoneSubInfoController"
       ],
+      "phoneClasses": [
+        "com.android.internal.telephony.GsmCdmaPhone",
+        "com.android.internal.telephony.Phone"
+      ],
       "subscriptionClasses": [
         "com.android.internal.telephony.subscription.SubscriptionManagerService",
         "com.android.server.telephony.SubscriptionController",

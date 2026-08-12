@@ -56,12 +56,13 @@ class SimSubscriptionHookAdapter(
             "getActiveDataSubscriptionId",
         )
 
-        // SubscriptionInfo 字段候选名（AOSP 字段）
+        // SubscriptionInfo 字段候选名（AOSP 字段 + Oplus 变体）
         private val FIELDS_STRING = mapOf(
             "mIccId" to "simSerialNumber",
             "mCarrierName" to "operatorName",
             "mDisplayName" to "operatorName",
             "mCountryIso" to "countryIso",
+            "mIso" to "countryIso",
             "mNumber" to "line1Number",
         )
         private val FIELDS_INT = mapOf(

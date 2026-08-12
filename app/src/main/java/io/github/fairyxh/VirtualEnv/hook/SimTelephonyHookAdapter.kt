@@ -32,6 +32,7 @@ class SimTelephonyHookAdapter(
     private val registrar: HookRegistrar,
     private val phoneInterfaceClasses: List<String> = DEFAULT_PHONE_INTERFACE_CLASSES,
     private val phoneSubInfoClasses: List<String> = DEFAULT_PHONE_SUB_INFO_CLASSES,
+    private val phoneClasses: List<String> = DEFAULT_PHONE_CLASSES,
 ) {
 
     companion object {
@@ -49,6 +50,12 @@ class SimTelephonyHookAdapter(
         val DEFAULT_PHONE_SUB_INFO_CLASSES = listOf(
             "com.android.internal.telephony.PhoneSubInfoController",
             "com.android.phone.PhoneSubInfoController",
+        )
+
+        /** SIM 数据最终来源（Phone 对象，VirtualRegion 的 com_android_internal_telephony_Phone_* 对应层）。 */
+        val DEFAULT_PHONE_CLASSES = listOf(
+            "com.android.internal.telephony.GsmCdmaPhone",
+            "com.android.internal.telephony.Phone",
         )
 
         /** 字符串返回型 SIM 身份方法（Binder 服务端方法名，含 Android 15 ForSubscriber/WithFeature 变体）。 */
@@ -129,6 +136,13 @@ class SimTelephonyHookAdapter(
             val clazz = HookSupport.findClass(classLoader, className) ?: continue
             hooked += hookPhoneSubInfoController(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim sub-info hooks active on $className")
+        }
+        // Phone 对象层：getSimOperator/getSimCountryIso 等最终数据源
+        val phones = phoneClasses.ifEmpty { DEFAULT_PHONE_CLASSES }
+        for (className in phones) {
+            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            hooked += hookPhoneObject(clazz)
+            if (hooked > 0) ZLog.i(TAG_SCOPE, "sim phone-object hooks active on $className")
         }
         return hooked
     }
@@ -224,6 +238,75 @@ class SimTelephonyHookAdapter(
                 if (ok) {
                     hooked++
                     ZLog.i(TAG_SCOPE, "hooked PhoneSubInfoController.getSignalStrength(${method.parameterCount} params)")
+                }
+            }
+        return hooked
+    }
+
+    // ---------- Phone 对象（SIM 数据最终来源） ----------
+
+    private fun hookPhoneObject(clazz: Class<*>): Int {
+        var hooked = 0
+        // 字符串身份方法（Phone 层多为 0 参：getSimOperator() 等）
+        STRING_METHODS.forEach { name ->
+            HookSupport.findMethods(clazz, name)
+                .filter { it.returnType == String::class.java && it.parameterCount <= 1 }
+                .forEach { method ->
+                    val ok = registrar.register(method) { chain ->
+                        val virtual = resolveString(name, chain, null)
+                        if (virtual != null) {
+                            ZLog.d(TAG_SCOPE, "Phone.$name -> virtual")
+                            virtual
+                        } else {
+                            chain.proceed()
+                        }
+                    }
+                    if (ok) {
+                        hooked++
+                        ZLog.i(TAG_SCOPE, "hooked Phone.$name(${method.parameterCount} params)")
+                    }
+                }
+        }
+        // 整型方法
+        INT_METHODS.forEach { name -> hooked += hookPhoneIntMethods(clazz, name) }
+        // 信号强度
+        HookSupport.findMethods(clazz, "getSignalStrength")
+            .filter { it.parameterCount <= 1 }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val virtual = VirtualSignalFactory.build(currentSimData())
+                    if (virtual != null) {
+                        ZLog.d(TAG_SCOPE, "Phone.getSignalStrength -> virtual")
+                        virtual
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked Phone.getSignalStrength(${method.parameterCount} params)")
+                }
+            }
+        return hooked
+    }
+
+    private fun hookPhoneIntMethods(clazz: Class<*>, name: String): Int {
+        var hooked = 0
+        HookSupport.findMethods(clazz, name)
+            .filter { (it.returnType == Int::class.javaPrimitiveType || it.returnType == Integer::class.java) && it.parameterCount <= 1 }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val virtual = resolveInt(name, chain, null)
+                    if (virtual != null) {
+                        ZLog.d(TAG_SCOPE, "Phone.$name -> virtual")
+                        virtual
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked Phone.$name(${method.parameterCount} params)")
                 }
             }
         return hooked
