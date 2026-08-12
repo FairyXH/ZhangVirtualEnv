@@ -47,6 +47,7 @@ class EnvFragment : Fragment() {
         private const val TYPE_BLE = "ble"
         private const val TYPE_SENSOR = "sensor"
         private const val TYPE_GNSS = "gnss"
+        private const val TYPE_SIM = "sim"
     }
 
     private data class EnvItem(
@@ -66,6 +67,7 @@ class EnvFragment : Fragment() {
             EnvItem(TYPE_BLE, R.string.env_ble_title, false, ""),
             EnvItem(TYPE_SENSOR, R.string.env_sensor_title, false, ""),
             EnvItem(TYPE_GNSS, R.string.env_gnss_title, false, ""),
+            EnvItem(TYPE_SIM, R.string.env_sim_title, false, ""),
         )
     )
     private var updatingSwitch = false
@@ -219,7 +221,8 @@ class EnvFragment : Fragment() {
             TYPE_WIFI to R.string.env_wifi_title,
             TYPE_BLE to R.string.env_ble_title,
             TYPE_SENSOR to R.string.env_sensor_title,
-            TYPE_GNSS to R.string.env_gnss_title
+            TYPE_GNSS to R.string.env_gnss_title,
+            TYPE_SIM to R.string.env_sim_title
         ).forEach { (type, titleRes) ->
             executor.execute {
                 val result = ApiClient.getEnvStatus(type)
@@ -290,6 +293,17 @@ class EnvFragment : Fragment() {
                 val count = data.optInt("satelliteCount", -1)
                 if (count <= 0) none else {
                     getString(R.string.env_card_config_summary_gnss, count, data.optInt("usedInFix", 0))
+                }
+            }
+            TYPE_SIM -> {
+                val arr = data.optJSONArray("slots") ?: org.json.JSONArray()
+                if (arr.length() == 0) none else {
+                    val e = arr.optJSONObject(0)
+                    val first = e?.let {
+                        "${it.optString("simOperatorName", "").ifEmpty { it.optString("carrier", "") }}"
+                            .ifEmpty { "${it.optString("mcc", "")}/${it.optString("mnc", "")}" }
+                    } ?: ""
+                    getString(R.string.env_card_config_summary_sim, arr.length(), first)
                 }
             }
             else -> none

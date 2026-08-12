@@ -15,6 +15,7 @@
 |---|---|
 | 定位（GPS） | 单点虚拟定位、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
 | 基站（Cell） | LTE / NR 虚拟小区（mcc/mnc/tac/ci/pci），可采集真实小区后模拟 |
+| SIM | SIM 卡身份 / 运营商 / 国家地区 / 信号强度全局虚拟化，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
 | BLE | 虚拟 Beacon 扫描结果，可采集真实设备后模拟 |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），完全屏蔽真实卫星回调 |
@@ -25,7 +26,7 @@
 ### 设计原则
 
 - **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
-- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、GMS）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得虚拟环境。
+- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、GMS）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得虚拟环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。
 - **API 保密**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开，不暴露接口存在。
 - **fail-open**：任何 Hook 点异常时放行原始逻辑，避免影响宿主稳定性。
 
@@ -58,7 +59,9 @@
 - `core/Backend.kt` — system_server 内的核心服务，持有各 Engine 与持久化
 - `core/EnvStateCache.kt` — App 进程侧 500ms 轮询缓存，Hook 层读取快照
 - `hook/FrameworkEnvHookAdapter.kt` — 普通 App 进程内的框架 API Hook
-- `hook/PhoneInterfaceManagerHookAdapter.kt` — phone 进程 Binder 层 Hook
+- `hook/PhoneInterfaceManagerHookAdapter.kt` — phone 进程 Binder 层基站 Hook
+- `hook/SimTelephonyHookAdapter.kt` — phone 进程 ITelephony / IPhoneSubInfo SIM 身份与信号 Hook
+- `hook/SimSubscriptionHookAdapter.kt` — system_server ISub SubscriptionInfo 全局改写
 - `hook/StepSensorInjector.kt` — 传感器连续模拟注入器（pending + refresh）
 - `profile/` — 不同系统版本的适配 Profile
 
@@ -113,7 +116,8 @@ adb reboot
 控制端主界面分为：
 
 - **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿原路返回起点，再开始新一轮）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）
-- **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 配置与启用，支持采集真实环境保存为快照
+- **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照
+  - **SIM 模拟**：自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），可修改国家地区（内置 28 个国家模板，含 MCC/MNC/IMSI/ICCID 前缀与区号）、运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度，保存后全局生效
 - **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
 - **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口
 
@@ -130,8 +134,8 @@ adb reboot
 | POST | `/api/location/enable` | 启用/关闭位置模拟 |
 | POST | `/api/route/create` / `start` / `stop` | 路线管理 |
 | POST | `/api/joystick/set` | 摇杆移动 |
-| GET | `/api/env/status` | 全部环境类型状态（wifi/cell/ble/sensor/gnss） |
-| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` | 设置各类型虚拟环境 |
+| GET | `/api/env/status` | 全部环境类型状态（wifi/cell/ble/sensor/gnss/sim） |
+| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` `/api/sim/set` | 设置各类型虚拟环境 |
 | POST | `/api/env/enable` `/api/env/clear` `/api/env/suspend` `/api/env/resume` | 环境开关与生命周期 |
 | POST | `/api/env-snapshot/create` `/list` `/delete` | 环境快照（采集/回放） |
 | POST | `/api/env/use` | 应用快照 |

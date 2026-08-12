@@ -2,6 +2,7 @@ package io.github.fairyxh.VirtualEnv.app.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
+import androidx.core.content.ContextCompat
 import com.kyant.backdrop.Backdrop
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
@@ -55,6 +62,7 @@ private const val TYPE_WIFI = "wifi"
 private const val TYPE_BLE = "ble"
 private const val TYPE_SENSOR = "sensor"
 private const val TYPE_GNSS = "gnss"
+private const val TYPE_SIM = "sim"
 
 private fun envTitleRes(type: String): Int = when (type) {
     TYPE_CELL -> R.string.env_cell_title
@@ -62,6 +70,7 @@ private fun envTitleRes(type: String): Int = when (type) {
     TYPE_BLE -> R.string.env_ble_title
     TYPE_SENSOR -> R.string.env_sensor_title
     TYPE_GNSS -> R.string.env_gnss_title
+    TYPE_SIM -> R.string.env_sim_title
     else -> R.string.env_title
 }
 
@@ -104,6 +113,25 @@ fun EnvDetailPanel(
     var gnssCount by remember { mutableStateOf("") }
     var gnssUsed by remember { mutableStateOf("") }
     var gnssCn0 by remember { mutableStateOf("") }
+    // SIM 卡槽编辑表单
+    var simSlot by remember { mutableStateOf("0") }
+    var simSubId by remember { mutableStateOf("1") }
+    var simCountryIso by remember { mutableStateOf("cn") }
+    var simMcc by remember { mutableStateOf("460") }
+    var simMnc by remember { mutableStateOf("00") }
+    var simOperatorName by remember { mutableStateOf("中国移动") }
+    var simNetworkOperatorName by remember { mutableStateOf("中国移动") }
+    var simSubscriberId by remember { mutableStateOf("") }
+    var simSerial by remember { mutableStateOf("") }
+    var simLine1 by remember { mutableStateOf("") }
+    var simDeviceId by remember { mutableStateOf("") }
+    var simImei by remember { mutableStateOf("") }
+    var simSimState by remember { mutableStateOf("5") }
+    var simPhoneType by remember { mutableStateOf("1") }
+    var simSignalGsm by remember { mutableStateOf("20") }
+    var simSignalLte by remember { mutableStateOf("-95") }
+    var simSignalNr by remember { mutableStateOf("-105") }
+    var simSignalLevel by remember { mutableStateOf("3") }
     var saveName by remember { mutableStateOf(DefaultNames.timeName(detailTitle)) }
     var saveRemark by remember { mutableStateOf("") }
 
@@ -166,6 +194,38 @@ fun EnvDetailPanel(
                     put("rssi", bleRssi.toIntOrNull() ?: -70)
                 }
             }
+            TYPE_SIM -> {
+                val slot = simSlot.toIntOrNull()
+                if (slot == null || slot < 0) {
+                    toast(fragment.getString(R.string.env_sim_slot_hint))
+                    return null
+                }
+                JSONObject().apply {
+                    put("slotIndex", slot)
+                    put("subId", simSubId.toIntOrNull() ?: (slot + 1))
+                    put("enabled", true)
+                    put("mcc", simMcc.trim().ifEmpty { "460" })
+                    put("mnc", simMnc.trim().ifEmpty { "00" })
+                    put("countryIso", simCountryIso.trim().lowercase().ifEmpty { "cn" })
+                    put("simCountryIso", simCountryIso.trim().lowercase().ifEmpty { "cn" })
+                    put("networkCountryIso", simCountryIso.trim().lowercase().ifEmpty { "cn" })
+                    put("simOperatorName", simOperatorName.trim())
+                    put("networkOperatorName", simNetworkOperatorName.trim().ifEmpty { simOperatorName.trim() })
+                    put("subscriberId", simSubscriberId.trim())
+                    put("simSerialNumber", simSerial.trim())
+                    put("line1Number", simLine1.trim())
+                    put("deviceId", simDeviceId.trim())
+                    put("imei", simImei.trim())
+                    put("simState", simSimState.toIntOrNull() ?: 5)
+                    put("phoneType", simPhoneType.toIntOrNull() ?: 1)
+                    put("signal", JSONObject().apply {
+                        put("gsm", simSignalGsm.toIntOrNull() ?: 20)
+                        put("lte", simSignalLte.toIntOrNull() ?: -95)
+                        put("nr", simSignalNr.toIntOrNull() ?: -105)
+                        put("level", simSignalLevel.toIntOrNull() ?: 3)
+                    })
+                }
+            }
             else -> null
         }
     }
@@ -192,6 +252,26 @@ fun EnvDetailPanel(
                 bleAddress = ""
                 bleRssi = ""
             }
+            TYPE_SIM -> {
+                simSlot = (entries.size).toString()
+                simSubId = (entries.size + 1).toString()
+                simCountryIso = "cn"
+                simMcc = "460"
+                simMnc = "00"
+                simOperatorName = "中国移动"
+                simNetworkOperatorName = "中国移动"
+                simSubscriberId = ""
+                simSerial = ""
+                simLine1 = ""
+                simDeviceId = ""
+                simImei = ""
+                simSimState = "5"
+                simPhoneType = "1"
+                simSignalGsm = "20"
+                simSignalLte = "-95"
+                simSignalNr = "-105"
+                simSignalLevel = "3"
+            }
         }
     }
 
@@ -217,6 +297,13 @@ fun EnvDetailPanel(
                 val rssi = entry.optInt("rssi", -70)
                 fragment.getString(R.string.env_ble_entry_format, name, address, rssi)
             }
+            TYPE_SIM -> {
+                val slot = entry.optInt("slotIndex", -1)
+                val operator = entry.optString("simOperatorName", "").ifEmpty { entry.optString("carrier", "") }
+                val mcc = entry.optString("mcc", "")
+                val mnc = entry.optString("mnc", "")
+                fragment.getString(R.string.env_sim_entry_format, slot, operator, mcc, mnc)
+            }
             else -> entry.toString()
         }
     }
@@ -225,6 +312,40 @@ fun EnvDetailPanel(
         val entry = readEntryForm() ?: return
         entries.add(entry)
         clearEntryForm()
+    }
+
+    /** 自动识别真实卡槽并填充表单 + 直接加入当前条目列表。 */
+    fun detectSimSlots() {
+        val detected = detectRealSimSlots(fragment)
+        if (detected.isEmpty()) return
+        detected.forEach { slot ->
+            // 已存在同 slotIndex 时更新，否则新增
+            val idx = entries.indexOfFirst { it.optInt("slotIndex", -1) == slot.optInt("slotIndex", -1) }
+            if (idx >= 0) entries[idx] = slot else entries.add(slot)
+        }
+        // 表单同步到最后一个识别槽，方便继续微调
+        val last = detected.last()
+        simSlot = last.optInt("slotIndex", 0).toString()
+        simSubId = last.optInt("subId", -1).let { if (it >= 0) it.toString() else (last.optInt("slotIndex", 0) + 1).toString() }
+        simCountryIso = last.optString("countryIso", "cn")
+        simMcc = last.optString("mcc", "460")
+        simMnc = last.optString("mnc", "00")
+        simOperatorName = last.optString("simOperatorName", "")
+        simNetworkOperatorName = last.optString("networkOperatorName", "")
+        simSubscriberId = last.optString("subscriberId", "")
+        simSerial = last.optString("simSerialNumber", "")
+        simLine1 = last.optString("line1Number", "")
+        simDeviceId = last.optString("deviceId", "")
+        simImei = last.optString("imei", "")
+        simSimState = last.optInt("simState", 5).toString()
+        simPhoneType = last.optInt("phoneType", 1).toString()
+        last.optJSONObject("signal")?.let { sig ->
+            simSignalGsm = sig.optInt("gsm", 20).toString()
+            simSignalLte = sig.optInt("lte", -95).toString()
+            simSignalNr = sig.optInt("nr", -105).toString()
+            simSignalLevel = sig.optInt("level", 3).toString()
+        }
+        toast(fragment.getString(R.string.env_sim_auto_detect_done, detected.size))
     }
 
     // ---------- 保存 / 使用 / 删除 ----------
@@ -245,6 +366,9 @@ fun EnvDetailPanel(
                 put("satelliteCount", gnssCount.toIntOrNull() ?: -1)
                 put("usedInFix", gnssUsed.toIntOrNull() ?: -1)
                 put("cn0", gnssCn0.toDoubleOrNull() ?: -1.0)
+            }
+            TYPE_SIM -> JSONObject().apply {
+                put("slots", JSONArray(entries.toList()))
             }
             else -> null
         }
@@ -336,6 +460,28 @@ fun EnvDetailPanel(
                 sb.append("卫星总数：").append(data.optInt("satelliteCount", -1)).append("\n")
                 sb.append("参与定位：").append(data.optInt("usedInFix", -1)).append("\n")
                 sb.append("平均信噪比：").append(data.optDouble("cn0", -1.0)).append(" dBHz\n")
+            }
+            TYPE_SIM -> {
+                val arr = data.optJSONArray("slots") ?: JSONArray()
+                sb.append("SIM 卡槽 ").append(arr.length()).append(" 个\n")
+                for (i in 0 until arr.length()) {
+                    val e = arr.optJSONObject(i) ?: continue
+                    sb.append("\n#").append(i + 1).append("  卡槽 ").append(e.optInt("slotIndex", -1))
+                        .append("  ").append(e.optString("simOperatorName", "").ifEmpty { e.optString("carrier", "") })
+                        .append("\n    MCC=").append(e.optString("mcc", ""))
+                        .append(" MNC=").append(e.optString("mnc", ""))
+                        .append(" 国家=").append(e.optString("countryIso", ""))
+                        .append("\n    IMSI=").append(e.optString("subscriberId", ""))
+                        .append("\n    ICCID=").append(e.optString("simSerialNumber", ""))
+                        .append("\n    号码=").append(e.optString("line1Number", ""))
+                        .append("\n    状态=").append(e.optInt("simState", -1))
+                    e.optJSONObject("signal")?.let { sig ->
+                        sb.append("\n    信号 GSM=").append(sig.optInt("gsm", -1))
+                            .append(" LTE=").append(sig.optInt("lte", -1))
+                            .append(" NR=").append(sig.optInt("nr", -1))
+                            .append(" 等级=").append(sig.optInt("level", -1))
+                    }
+                }
             }
             else -> sb.append(data.toString(2))
         }
@@ -671,7 +817,92 @@ fun EnvDetailPanel(
                                 )
                                 EntryFormField("count", gnssCount, { gnssCount = it }, fragment.getString(R.string.env_gnss_count_hint), backdrop)
                                 EntryFormField("used", gnssUsed, { gnssUsed = it }, fragment.getString(R.string.env_gnss_used_hint), backdrop)
-                                EntryFormField("cn0", gnssCn0, { gnssCn0 = it }, fragment.getString(R.string.env_gnss_cn0_hint), backdrop)
+                                EntryFormField("cn0", gnssCn0, { cn0 -> gnssCn0 = cn0 }, fragment.getString(R.string.env_gnss_cn0_hint), backdrop)
+                            }
+                        }
+                    }
+                    TYPE_SIM -> {
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    fragment.getString(R.string.env_sim_slots_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    fragment.getString(R.string.env_sim_slots_desc),
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                // 自动识别真实卡槽（借鉴 VirtualRegion B3.d.e 的识别链路）
+                                GlassButton(
+                                    onClick = { detectSimSlots() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        fragment.getString(R.string.env_sim_auto_detect),
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                BasicText(
+                                    fragment.getString(R.string.env_sim_auto_detect_desc),
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                                EntryFormField(fragment.getString(R.string.env_sim_slot_hint), simSlot, { simSlot = it }, fragment.getString(R.string.env_sim_slot_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_sub_id_hint), simSubId, { simSubId = it }, fragment.getString(R.string.env_sim_sub_id_hint), backdrop)
+                                SimCountrySelect(
+                                    fragment = fragment,
+                                    backdrop = backdrop,
+                                    countryIso = simCountryIso,
+                                    onCountry = { iso, mcc, mnc, carrier ->
+                                        simCountryIso = iso
+                                        simMcc = mcc
+                                        simMnc = mnc
+                                        if (simOperatorName.isBlank() || simOperatorName == "中国移动") {
+                                            simOperatorName = carrier
+                                            simNetworkOperatorName = carrier
+                                        }
+                                    }
+                                )
+                                EntryFormField(fragment.getString(R.string.env_sim_mcc_hint), simMcc, { simMcc = it }, fragment.getString(R.string.env_sim_mcc_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_mnc_hint), simMnc, { simMnc = it }, fragment.getString(R.string.env_sim_mnc_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_country_iso_hint), simCountryIso, { simCountryIso = it }, fragment.getString(R.string.env_sim_country_iso_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_operator_name_hint), simOperatorName, { simOperatorName = it }, fragment.getString(R.string.env_sim_operator_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_network_operator_name_hint), simNetworkOperatorName, { simNetworkOperatorName = it }, fragment.getString(R.string.env_sim_network_operator_name_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_subscriber_id_hint), simSubscriberId, { simSubscriberId = it }, fragment.getString(R.string.env_sim_subscriber_id_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_serial_hint), simSerial, { simSerial = it }, fragment.getString(R.string.env_sim_serial_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_line1_hint), simLine1, { simLine1 = it }, fragment.getString(R.string.env_sim_line1_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_device_id_hint), simDeviceId, { simDeviceId = it }, fragment.getString(R.string.env_sim_device_id_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_imei_hint), simImei, { simImei = it }, fragment.getString(R.string.env_sim_imei_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_sim_state_hint), simSimState, { simSimState = it }, fragment.getString(R.string.env_sim_sim_state_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_phone_type_hint), simPhoneType, { simPhoneType = it }, fragment.getString(R.string.env_sim_phone_type_hint), backdrop)
+                                BasicText(
+                                    fragment.getString(R.string.env_sim_signal_title),
+                                    Modifier.padding(top = 10.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                )
+                                EntryFormField(fragment.getString(R.string.env_sim_signal_gsm_hint), simSignalGsm, { simSignalGsm = it }, fragment.getString(R.string.env_sim_signal_gsm_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_signal_lte_hint), simSignalLte, { simSignalLte = it }, fragment.getString(R.string.env_sim_signal_lte_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_signal_nr_hint), simSignalNr, { simSignalNr = it }, fragment.getString(R.string.env_sim_signal_nr_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_sim_signal_level_hint), simSignalLevel, { simSignalLevel = it }, fragment.getString(R.string.env_sim_signal_level_hint), backdrop)
+                                GlassButton(
+                                    onClick = { addEntry() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        fragment.getString(R.string.env_sim_add_slot),
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                RenderEntriesLocal(backdrop)
                             }
                         }
                     }
@@ -781,6 +1012,182 @@ private fun EntryFormField(
             modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
             placeholder = placeholder
         )
+    }
+}
+
+/**
+ * SIM 国家/地区选择：从模块 assets/country_templates.json 读取模板，
+ * 选择国家后自动填充 iso/mcc/mnc/carrier（数据来源：Nrfr + 常见运营商模板）。
+ */
+@Composable
+private fun SimCountrySelect(
+    fragment: androidx.fragment.app.Fragment,
+    backdrop: Backdrop,
+    countryIso: String,
+    onCountry: (iso: String, mcc: String, mnc: String, carrier: String) -> Unit
+) {
+    val context = fragment.requireContext()
+    val countries = remember {
+        val list = mutableListOf<JSONObject>()
+        try {
+            val text = context.assets.open("country_templates.json")
+                .bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val arr = JSONArray(text)
+            for (i in 0 until arr.length()) list.add(arr.optJSONObject(i) ?: continue)
+        } catch (t: Throwable) {
+            // assets 缺失时返回空列表
+        }
+        list
+    }
+    val colors = glassColors()
+    val current = countries.firstOrNull { it.optString("iso", "").equals(countryIso, ignoreCase = true) }
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+        BasicText(
+            fragment.getString(R.string.env_sim_country),
+            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+        )
+        // 简化的横向滚动国家列表（保持现有 GlassPill 风格）
+        Row(
+            Modifier
+                .padding(top = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            countries.forEach { c ->
+                val iso = c.optString("iso", "")
+                GlassPill(
+                    onClick = {
+                        onCountry(
+                            iso.lowercase(),
+                            c.optString("mcc", "460"),
+                            c.optString("defaultMnc", "00"),
+                            c.optString("carrier", "")
+                        )
+                    },
+                    backdrop = backdrop,
+                    selected = iso.equals(countryIso, ignoreCase = true),
+                    containerColor = if (iso.equals(countryIso, ignoreCase = true)) {
+                        colors.accent.copy(alpha = 0.25f)
+                    } else {
+                        colors.bgTertiary.copy(alpha = 0.35f)
+                    },
+                    height = 34.dp
+                ) {
+                    BasicText(
+                        c.optString("nameZh", iso) + " " + c.optString("mcc", ""),
+                        Modifier.padding(horizontal = 10.dp),
+                        style = TextStyle(
+                            color = if (iso.equals(countryIso, ignoreCase = true)) colors.accent else colors.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    )
+                }
+            }
+        }
+        if (current != null) {
+            BasicText(
+                "IMSI 前缀 ${current.optString("imsiPrefix", "-")} · ICCID 前缀 ${current.optString("iccidPrefix", "-")} · 国际区号 +${current.optString("callingCode", "-")}",
+                Modifier.padding(top = 4.dp),
+                style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+            )
+        }
+    }
+}
+
+/**
+ * 自动识别真实 SIM 卡槽（借鉴 VirtualRegion B3.d.e 的链路）：
+ * SubscriptionManager.getActiveSubscriptionInfoList → createForSubscriptionId →
+ * getSimOperator 切分 mcc/mnc → getSimCountryIso / getSimOperatorName /
+ * getNetworkOperatorName → getSimState。返回识别到的槽位列表（JSON 配置结构）。
+ */
+private fun detectRealSimSlots(fragment: androidx.fragment.app.Fragment): List<JSONObject> {
+    val context = fragment.requireContext()
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+        Toast.makeText(context, fragment.getString(R.string.env_sim_auto_detect_perm), Toast.LENGTH_SHORT).show()
+        return emptyList()
+    }
+    return try {
+        val tm = context.getSystemService(TelephonyManager::class.java)
+        val sm = context.getSystemService(SubscriptionManager::class.java)
+        if (tm == null || sm == null) {
+            Toast.makeText(context, fragment.getString(R.string.env_sim_auto_detect_empty), Toast.LENGTH_SHORT).show()
+            return emptyList()
+        }
+        val detected = mutableListOf<JSONObject>()
+        val seenSlots = HashSet<Int>()
+        sm.activeSubscriptionInfoList?.forEach { info ->
+            if (info.simSlotIndex < 0) return@forEach
+            seenSlots.add(info.simSlotIndex)
+            val subTm = tm.createForSubscriptionId(info.subscriptionId)
+            var mcc = ""
+            var mnc = ""
+            if (Build.VERSION.SDK_INT >= 29) {
+                mcc = info.mccString.orEmpty()
+                mnc = info.mncString.orEmpty()
+            } else {
+                if (info.mcc > 0) mcc = String.format(java.util.Locale.ROOT, "%03d", info.mcc)
+                if (info.mnc >= 0) mnc = String.format(java.util.Locale.ROOT, "%02d", info.mnc)
+            }
+            val operator = try { subTm.simOperator.orEmpty() } catch (t: Throwable) { "" }
+            if (mcc.isEmpty() && operator.matches(Regex("\\d{5,6}"))) {
+                mcc = operator.substring(0, 3)
+                mnc = operator.substring(3)
+            }
+            var countryIso = try { info.countryIso.orEmpty() } catch (t: Throwable) { "" }
+            if (!countryIso.matches(Regex("[A-Za-z]{2}"))) {
+                countryIso = try { subTm.simCountryIso.orEmpty() } catch (t: Throwable) { "" }
+            }
+            var carrierName = try { info.carrierName?.toString()?.trim().orEmpty() } catch (t: Throwable) { "" }
+            if (carrierName.isEmpty()) {
+                carrierName = try { subTm.simOperatorName.orEmpty() } catch (t: Throwable) { "" }
+            }
+            var displayName = try { info.displayName?.toString()?.trim().orEmpty() } catch (t: Throwable) { "" }
+            if (displayName.isEmpty()) displayName = carrierName
+            if (displayName.isEmpty()) displayName = "SIM ${info.simSlotIndex + 1}"
+            var networkOperatorName = ""
+            try { networkOperatorName = subTm.networkOperatorName.orEmpty() } catch (t: Throwable) { }
+            val simState = try { tm.getSimState(info.simSlotIndex) } catch (t: Throwable) { 0 }
+            detected.add(JSONObject().apply {
+                put("slotIndex", info.simSlotIndex)
+                put("subId", info.subscriptionId)
+                put("enabled", true)
+                put("mcc", mcc)
+                put("mnc", mnc)
+                put("countryIso", countryIso.lowercase(java.util.Locale.ROOT))
+                put("simCountryIso", countryIso.lowercase(java.util.Locale.ROOT))
+                put("networkCountryIso", countryIso.lowercase(java.util.Locale.ROOT))
+                put("simOperatorName", displayName)
+                put("networkOperatorName", networkOperatorName.ifEmpty { displayName })
+                put("simState", simState)
+            })
+        }
+        // 未出现在订阅列表但 simState 有效的槽位（eSIM / 未激活槽）
+        val modemCount = try {
+            if (Build.VERSION.SDK_INT >= 30) tm.activeModemCount else tm.phoneCount
+        } catch (t: Throwable) {
+            try { tm.phoneCount } catch (t2: Throwable) { 0 }
+        }
+        for (i in 0 until modemCount.coerceIn(0, 8)) {
+            if (i in seenSlots) continue
+            val st = try { tm.getSimState(i) } catch (t: Throwable) { 0 }
+            if (st != 0 && st != 1) {
+                detected.add(JSONObject().apply {
+                    put("slotIndex", i)
+                    put("subId", -1)
+                    put("enabled", true)
+                    put("mcc", "460")
+                    put("mnc", "00")
+                    put("countryIso", "cn")
+                    put("simOperatorName", "SIM ${i + 1}")
+                    put("simState", st)
+                })
+            }
+        }
+        detected.sortBy { it.optInt("slotIndex", -1) }
+        detected
+    } catch (t: Throwable) {
+        Toast.makeText(context, fragment.getString(R.string.env_sim_auto_detect_empty), Toast.LENGTH_SHORT).show()
+        emptyList()
     }
 }
 

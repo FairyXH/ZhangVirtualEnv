@@ -15,6 +15,20 @@
       "managerReportLocation": "onReportLocation",
       "injectProviders": ["gps", "passive"],
       "injectIntervalMs": 1000
+    },
+    "sim": {
+      "phoneInterfaceClasses": [
+        "com.android.phone.PhoneInterfaceManager",
+        "com.android.phone.PhoneInterfaceManager$Stub"
+      ],
+      "phoneSubInfoClasses": [
+        "com.android.phone.PhoneSubInfoController"
+      ],
+      "subscriptionClasses": [
+        "com.android.server.telephony.SubscriptionManagerService",
+        "com.android.server.telephony.SubscriptionController",
+        "com.android.internal.telephony.SubscriptionController"
+      ]
     }
   }
 }

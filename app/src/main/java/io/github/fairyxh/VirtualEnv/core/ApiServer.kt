@@ -191,6 +191,8 @@ class ApiServer(
                 path == "/api/sensor/set" && method == "POST" -> envSet("sensor", body)
                 path == "/api/gnss/status" && method == "GET" -> envStatus("gnss")
                 path == "/api/gnss/set" && method == "POST" -> envSet("gnss", body)
+                path == "/api/sim/status" && method == "GET" -> envStatus("sim")
+                path == "/api/sim/set" && method == "POST" -> envSet("sim", body)
                 path == "/api/profile/status" && method == "GET" -> profileStatus()
                 path == "/api/debug/random-env" && method == "POST" -> randomEnv()
                 path == "/api/test/report" && method == "POST" -> testReportSet(body)

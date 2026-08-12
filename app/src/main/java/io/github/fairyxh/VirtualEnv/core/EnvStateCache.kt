@@ -35,6 +35,7 @@ class EnvStateCache(
     private var ble: JSONObject? = null
     private var sensor: JSONObject? = null
     private var gnss: JSONObject? = null
+    private var sim: JSONObject? = null
     private var locationEnabled: Boolean = false
     private var locationLat: Double = 0.0
     private var locationLon: Double = 0.0
@@ -79,6 +80,9 @@ class EnvStateCache(
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
                 gnss = data.optJSONObject("gnss")
+                    ?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optJSONObject("data")
+                sim = data.optJSONObject("sim")
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
             }
@@ -145,6 +149,9 @@ class EnvStateCache(
 
     /** 当前虚拟 GNSS 数据；未启用时 null。 */
     fun currentGnss(): JSONObject? = synchronized(lock) { gnss }
+
+    /** 当前虚拟 SIM 数据；未启用时 null。 */
+    fun currentSim(): JSONObject? = synchronized(lock) { sim }
 
     /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
     fun isSensorStreamActive(): Boolean = synchronized(lock) {

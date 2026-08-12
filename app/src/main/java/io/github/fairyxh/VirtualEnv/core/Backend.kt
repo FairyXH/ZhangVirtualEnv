@@ -85,6 +85,9 @@ class Backend private constructor(private val dataDir: File) {
     val gnssEngine = EnvStateEngine("gnss")
     val sensorEngine = EnvStateEngine("sensor")
 
+    /** 虚拟 SIM 卡身份 / 信号状态（com.android.phone / system_server Hook 读取）。 */
+    val simEngine = EnvStateEngine("sim")
+
     /** 环境录制与回放引擎。 */
     lateinit var recordingEngine: RecordingEngine
         private set
@@ -206,8 +209,9 @@ class Backend private constructor(private val dataDir: File) {
             bleEngine.clear()
             gnssEngine.clear()
             sensorEngine.clear()
+            simEngine.clear()
             activeEnvSnapshotIds.keys.removeAll(
-                setOf("wifi", "cell", "ble", "gnss", "sensor")
+                setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
             )
             ZLog.i(TAG_SCOPE, "recording playback env stopped (location + env cleared)")
         }
@@ -240,6 +244,7 @@ class Backend private constructor(private val dataDir: File) {
             put("ble", bleEngine.statusJson())
             put("gnss", gnssEngine.statusJson())
             put("sensor", sensorEngine.statusJson())
+            put("sim", simEngine.statusJson())
         }
     }
 
@@ -288,6 +293,7 @@ class Backend private constructor(private val dataDir: File) {
             applyEnvSnapshotEngine(snap, "ble", bleEngine)
             applyEnvSnapshotEngine(snap, "gnss", gnssEngine)
             applyEnvSnapshotEngine(snap, "sensor", sensorEngine)
+            applyEnvSnapshotEngine(snap, "sim", simEngine)
             ZLog.i(TAG_SCOPE, "env state snapshot applied (${snap.length()} groups)")
         }
     }
@@ -409,6 +415,7 @@ class Backend private constructor(private val dataDir: File) {
                     put("ble", bleEngine.statusJson())
                     put("gnss", gnssEngine.statusJson())
                     put("sensor", sensorEngine.statusJson())
+                    put("sim", simEngine.statusJson())
                 }
                 // 停止所有虚拟输出，Hook 层立即放行真实数据
                 setLocationEnabled(false)
@@ -418,6 +425,7 @@ class Backend private constructor(private val dataDir: File) {
                 bleEngine.clear()
                 gnssEngine.clear()
                 sensorEngine.clear()
+                simEngine.clear()
                 ZLog.i(TAG_SCOPE, "env suspended")
             }
             return first
@@ -439,6 +447,7 @@ class Backend private constructor(private val dataDir: File) {
                     restoreEngine(snap, "ble", bleEngine)
                     restoreEngine(snap, "gnss", gnssEngine)
                     restoreEngine(snap, "sensor", sensorEngine)
+                    restoreEngine(snap, "sim", simEngine)
                 }
                 envSnapshot = null
                 ZLog.i(TAG_SCOPE, "env resumed")
@@ -709,6 +718,7 @@ class Backend private constructor(private val dataDir: File) {
             "ble" -> bleEngine.update(data)
             "gnss" -> gnssEngine.update(data)
             "sensor" -> sensorEngine.update(data)
+            "sim" -> simEngine.update(data)
             else -> return false
         }
         ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
@@ -723,6 +733,7 @@ class Backend private constructor(private val dataDir: File) {
             "ble" -> bleEngine.setEnabled(enabled)
             "gnss" -> gnssEngine.setEnabled(enabled)
             "sensor" -> sensorEngine.setEnabled(enabled)
+            "sim" -> simEngine.setEnabled(enabled)
             else -> return false
         }
         ZLog.i(TAG_SCOPE, "env type=$type enabled=$enabled")
@@ -737,6 +748,7 @@ class Backend private constructor(private val dataDir: File) {
             "ble" -> bleEngine.statusJson()
             "gnss" -> gnssEngine.statusJson()
             "sensor" -> sensorEngine.statusJson()
+            "sim" -> simEngine.statusJson()
             else -> return null
         }
         status.put("activeSnapshotId", activeEnvSnapshotIds[type] ?: -1L)
@@ -833,6 +845,51 @@ class Backend private constructor(private val dataDir: File) {
         })
         setEnvEnabled("gnss", true)
 
+        // SIM：随机国家模板（默认中国）生成虚拟 SIM 身份 + 信号
+        val simCountry = org.json.JSONObject().apply {
+            put("iso", "CN")
+            put("nameZh", "中国")
+            put("mcc", "460")
+            put("defaultMnc", "00")
+            put("carrier", "中国移动")
+            put("imsiPrefix", "46000")
+            put("iccidPrefix", "898600")
+        }
+        val simMnc = rnd.nextInt(2) * 11 + rnd.nextInt(10)
+        val simMcc = simCountry.optString("mcc", "460")
+        val simMncStr = String.format("%02d", simMnc)
+        val imsi = simCountry.optString("imsiPrefix", "46000") + rnd.nextLong(100000000, 999999999)
+        val iccid = simCountry.optString("iccidPrefix", "898600") + rnd.nextLong(100000000000L, 999999999999L)
+        val slots = org.json.JSONArray().put(
+            org.json.JSONObject().apply {
+                put("slotIndex", 0)
+                put("subId", 1)
+                put("enabled", true)
+                put("simState", 5) // SIM_STATE_READY
+                put("phoneType", 1) // PHONE_TYPE_GSM
+                put("mcc", simMcc)
+                put("mnc", simMncStr)
+                put("countryIso", "cn")
+                put("simCountryIso", "cn")
+                put("networkCountryIso", "cn")
+                put("simOperatorName", simCountry.optString("carrier", "China Mobile"))
+                put("networkOperatorName", simCountry.optString("carrier", "China Mobile"))
+                put("subscriberId", imsi)
+                put("simSerialNumber", iccid)
+                put("line1Number", "+86138" + String.format("%08d", rnd.nextInt(100000000)))
+                put("deviceId", imsi)
+                put("imei", String.format("%015d", rnd.nextLong(100000000000000L, 999999999999999L)))
+                put("signal", org.json.JSONObject().apply {
+                    put("gsm", 18 + rnd.nextInt(10))
+                    put("lte", -100 + rnd.nextInt(20))
+                    put("nr", -115 + rnd.nextInt(20))
+                    put("level", 2 + rnd.nextInt(3))
+                })
+            }
+        )
+        setEnvData("sim", org.json.JSONObject().apply { put("slots", slots) })
+        setEnvEnabled("sim", true)
+
         val result = org.json.JSONObject().apply {
             put("location", org.json.JSONObject().apply {
                 put("latitude", baseLat)
@@ -847,8 +904,9 @@ class Backend private constructor(private val dataDir: File) {
                 put("satelliteCount", satelliteCount)
                 put("usedInFix", usedInFix)
             })
+            put("sim", org.json.JSONObject().apply { put("slots", slots) })
         }
-        ZLog.i(TAG_SCOPE, "random env generated lat=$baseLat lon=$baseLon cell=${cellEntries.length()} wifi=${wifiNetworks.length()} ble=${bleDevices.length()}")
+        ZLog.i(TAG_SCOPE, "random env generated lat=$baseLat lon=$baseLon cell=${cellEntries.length()} wifi=${wifiNetworks.length()} ble=${bleDevices.length()} sim=1")
         return result
     }
 
@@ -875,14 +933,19 @@ class Backend private constructor(private val dataDir: File) {
                 sensorEngine.clear()
                 activeEnvSnapshotIds.remove("sensor")
             }
+            "sim" -> {
+                simEngine.clear()
+                activeEnvSnapshotIds.remove("sim")
+            }
             "collect" -> {
                 wifiEngine.clear()
                 cellEngine.clear()
                 bleEngine.clear()
                 gnssEngine.clear()
                 sensorEngine.clear()
+                simEngine.clear()
                 activeEnvSnapshotIds.keys.removeAll(
-                    setOf("wifi", "cell", "ble", "gnss", "sensor")
+                    setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
                 )
             }
         }
@@ -897,6 +960,7 @@ class Backend private constructor(private val dataDir: File) {
             put("ble", bleEngine.statusJson())
             put("gnss", gnssEngine.statusJson())
             put("sensor", sensorEngine.statusJson())
+            put("sim", simEngine.statusJson())
         }
     }
 

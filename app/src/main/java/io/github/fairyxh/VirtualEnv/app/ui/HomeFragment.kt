@@ -941,7 +941,8 @@ class HomeFragment : Fragment() {
             "wifi" to getString(R.string.env_wifi_title),
             "ble" to getString(R.string.env_ble_title),
             "gnss" to getString(R.string.env_gnss_title),
-            "sensor" to getString(R.string.env_sensor_title)
+            "sensor" to getString(R.string.env_sensor_title),
+            "sim" to getString(R.string.env_sim_title)
         ).forEach { (key, label) ->
             val enabled = envData?.optJSONObject(key)?.optBoolean("enabled", false) == true
             featureStatusRows.add(

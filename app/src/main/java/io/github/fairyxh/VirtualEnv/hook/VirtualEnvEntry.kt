@@ -89,6 +89,9 @@ class VirtualEnvEntry : XposedModule() {
             if (processName == "com.android.phone" && phoneHooksInstalled.compareAndSet(false, true)) {
                 val hooked = PhoneInterfaceManagerHookAdapter(cache, registrar).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] phone interface manager hooks installed pkg=$pkg hooked=$hooked loader=${hostClassLoader}")
+                // SIM 卡身份 / 信号全局虚拟化（Binder 服务端，对任意 App 生效）
+                val simHooked = SimTelephonyHookAdapter(cache, registrar).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] sim telephony hooks installed pkg=$pkg hooked=$simHooked loader=${hostClassLoader}")
             }
             // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
             if (processName == "com.android.bluetooth" && bleHooksInstalled.compareAndSet(false, true)) {
@@ -142,6 +145,17 @@ class VirtualEnvEntry : XposedModule() {
             WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
             // 虚拟 fix 主动注入：百度/微信 gps 无 fix 时主动上报，GMS fused passive 缓存刷新
             VirtualFixInjector(backend, registrar).install(param.classLoader)
+            // SubscriptionInfo 全局虚拟化（system_server 的 ISub.Stub 返回点，对任意 App 生效）
+            val simCfg = backend.profileManager.envHookConfig("sim")
+            val subscriptionClasses = simCfg.optJSONArray("subscriptionClasses")
+                ?.let { arr -> (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() } }
+                ?: emptyList()
+            val simSubHooked = SimSubscriptionHookAdapter(
+                { backend.simEngine.currentData() },
+                registrar,
+                subscriptionClasses
+            ).install(param.classLoader)
+            log(Log.INFO, TAG, "[$TAG_SCOPE] sim subscription hooks installed hooked=$simSubHooked")
 
             log(Log.INFO, TAG, "[$TAG_SCOPE] system server hook install done")
         } catch (t: Throwable) {
