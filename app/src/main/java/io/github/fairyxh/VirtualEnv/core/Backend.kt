@@ -654,6 +654,10 @@ class Backend private constructor(private val dataDir: File) {
                  sensorEngine.update(data)
                  activeEnvSnapshotIds["sensor"] = id
              }
+             "sim" -> {
+                 simEngine.update(data)
+                 activeEnvSnapshotIds["sim"] = id
+             }
              "collect" -> {
                  loadCollectSnapshot(data)
                  // 轨道化回放：同名+来源标记的轨道快照存在则用轨道数据覆盖，
