@@ -37,7 +37,7 @@ class RouteEngine : LocationEngine {
         val progress: Double = 0.0,
         /** 到达终点后自动回到起点开始新一轮。 */
         val loop: Boolean = false,
-        /** 循环时：到达终点以设定速度沿原路返回起点，再开始新一轮（不回程时直接跳回起点）。 */
+        /** 循环时：到达终点沿“终点→起点”连线平滑回到起点，再开始新一轮（不回程时直接跳回起点）。 */
         val smoothReturn: Boolean = false,
         /** 当前推进方向：true=正向（起点→终点），false=平滑回程（终点→起点）。 */
         val forward: Boolean = true,
@@ -176,10 +176,10 @@ class RouteEngine : LocationEngine {
                     // 到达终点
                     if (!s.loop) break
                     if (s.smoothReturn) {
-                        // 平滑过渡：沿原路反向返回起点（从最后一段终点开始往回走）
+                        // 平滑过渡：从终点沿“终点→起点”连线直线回程（progress=0 表示在终点）
                         forward = false
-                        seg = (lastIdx - 1).coerceAtLeast(0)
-                        progress = 1.0
+                        seg = 0
+                        progress = 0.0
                     } else {
                         // 直接跳回起点开始新一轮
                         seg = 0
@@ -203,35 +203,27 @@ class RouteEngine : LocationEngine {
                     progress = 0.0
                 }
             } else {
-                if (seg < 0) {
-                    // 已回到起点：开始新一轮正向
+                // 直线回程：沿 终点→起点 连线移动（seg 固定 0，progress 0=终点 → 1=起点）
+                val returnLen = distanceMeters(s.points[lastIdx], s.points[0])
+                if (returnLen <= 0) {
+                    // 终点与起点重合：直接开始新一轮正向
                     forward = true
                     seg = 0
                     progress = 0.0
                     continue
                 }
-                val segLen = distanceMeters(s.points[seg], s.points[seg + 1])
-                if (segLen <= 0) {
-                    seg--
-                    progress = 1.0
-                    continue
-                }
-                val segRemaining = progress * segLen
+                val segRemaining = (1.0 - progress) * returnLen
                 if (remaining < segRemaining) {
-                    progress -= remaining / segLen
+                    progress += remaining / returnLen
                     remaining = 0.0
                 } else {
                     remaining -= segRemaining
-                    seg--
-                    progress = 1.0
+                    // 已回到起点：开始新一轮正向
+                    forward = true
+                    seg = 0
+                    progress = 0.0
                 }
             }
-        }
-        // 平滑回程恰好走完最后一段时归位为正向前进（位于起点）
-        if (!forward && seg < 0) {
-            forward = true
-            seg = 0
-            progress = 0.0
         }
         val finished = !s.loop && seg >= lastIdx
         val stepDelta = if (!finished) s.stepFrequency * deltaSec / 60.0 else 0.0
@@ -255,7 +247,7 @@ class RouteEngine : LocationEngine {
     }
 
     private fun buildLocation(s: RouteState): Location {
-        val p = interpolate(s.points, s.segmentIndex, s.progress)
+        val p = interpolateCurrent(s)
         val location = Location("gps")
         // 运动随机抖动：经纬度各自独立，幅度随速度接近人体跑步 GPS 噪声
         // （低速约 ±0.7m，跑步速度 ≥4m/s 时约 ±2.2m，1°≈111.32km）
@@ -275,7 +267,7 @@ class RouteEngine : LocationEngine {
         if (!s.enabled || !s.running || s.points.isEmpty()) {
             return LocationState(enabled = false, updateTime = System.currentTimeMillis())
         }
-        val p = interpolate(s.points, s.segmentIndex, s.progress)
+        val p = interpolateCurrent(s)
         return LocationState(
             enabled = true,
             latitude = p.first + jitterFor(s.speedMps),
@@ -393,14 +385,33 @@ class RouteEngine : LocationEngine {
         )
     }
 
+    /** 当前状态插值：正向沿段插值；直线回程时沿“终点→起点”连线插值。 */
+    private fun interpolateCurrent(s: RouteState): Pair<Double, Double> {
+        return if (s.forward) {
+            interpolate(s.points, s.segmentIndex, s.progress)
+        } else {
+            val last = s.points.last()
+            val first = s.points.first()
+            val t = s.progress.coerceIn(0.0, 1.0)
+            Pair(
+                last.first + (first.first - last.first) * t,
+                last.second + (first.second - last.second) * t
+            )
+        }
+    }
+
     private fun bearingAt(s: RouteState): Double {
         if (s.points.isEmpty()) return 0.0
+        if (!s.forward) {
+            // 直线回程：朝向为 终点→起点
+            val last = s.points.last()
+            val first = s.points.first()
+            return bearing(last, first)
+        }
         val idx = s.segmentIndex.coerceAtMost(s.points.size - 2).coerceAtLeast(0)
         val a = s.points[idx]
         val b = s.points[idx + 1]
-        val bDeg = bearing(a, b)
-        // 平滑回程时朝向相反
-        return if (s.forward) bDeg else (bDeg + 180.0) % 360.0
+        return bearing(a, b)
     }
 
     companion object {

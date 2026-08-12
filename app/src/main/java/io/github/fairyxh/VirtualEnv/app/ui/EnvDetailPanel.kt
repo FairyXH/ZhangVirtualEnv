@@ -2,13 +2,13 @@ package io.github.fairyxh.VirtualEnv.app.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -132,6 +132,13 @@ fun EnvDetailPanel(
     var simSignalLte by remember { mutableStateOf("-95") }
     var simSignalNr by remember { mutableStateOf("-105") }
     var simSignalLevel by remember { mutableStateOf("3") }
+    // SIM 卡槽选择：识别出的卡槽列表 + 当前选中卡槽 + 下拉展开状态
+    val simDetectedSlots = remember { mutableStateListOf<JSONObject>() }
+    var simSelectedSlotIndex by remember { mutableStateOf(-1) }
+    var simCountryExpanded by remember { mutableStateOf(false) }
+    var simCarrierExpanded by remember { mutableStateOf(false) }
+    var simCustomCountry by remember { mutableStateOf("") }
+    var simCustomCarrier by remember { mutableStateOf("") }
     var saveName by remember { mutableStateOf(DefaultNames.timeName(detailTitle)) }
     var saveRemark by remember { mutableStateOf("") }
 
@@ -314,37 +321,57 @@ fun EnvDetailPanel(
         clearEntryForm()
     }
 
-    /** 自动识别真实卡槽并填充表单 + 直接加入当前条目列表。 */
-    fun detectSimSlots() {
-        val detected = detectRealSimSlots(fragment)
-        if (detected.isEmpty()) return
-        detected.forEach { slot ->
-            // 已存在同 slotIndex 时更新，否则新增
-            val idx = entries.indexOfFirst { it.optInt("slotIndex", -1) == slot.optInt("slotIndex", -1) }
-            if (idx >= 0) entries[idx] = slot else entries.add(slot)
-        }
-        // 表单同步到最后一个识别槽，方便继续微调
-        val last = detected.last()
-        simSlot = last.optInt("slotIndex", 0).toString()
-        simSubId = last.optInt("subId", -1).let { if (it >= 0) it.toString() else (last.optInt("slotIndex", 0) + 1).toString() }
-        simCountryIso = last.optString("countryIso", "cn")
-        simMcc = last.optString("mcc", "460")
-        simMnc = last.optString("mnc", "00")
-        simOperatorName = last.optString("simOperatorName", "")
-        simNetworkOperatorName = last.optString("networkOperatorName", "")
-        simSubscriberId = last.optString("subscriberId", "")
-        simSerial = last.optString("simSerialNumber", "")
-        simLine1 = last.optString("line1Number", "")
-        simDeviceId = last.optString("deviceId", "")
-        simImei = last.optString("imei", "")
-        simSimState = last.optInt("simState", 5).toString()
-        simPhoneType = last.optInt("phoneType", 1).toString()
-        last.optJSONObject("signal")?.let { sig ->
+    /** 把选中卡槽的信息加载到编辑表单。 */
+    fun loadSimSlot(slot: JSONObject) {
+        simSelectedSlotIndex = slot.optInt("slotIndex", -1)
+        simSlot = slot.optInt("slotIndex", 0).toString()
+        simSubId = slot.optInt("subId", -1).let { if (it >= 0) it.toString() else (slot.optInt("slotIndex", 0) + 1).toString() }
+        simCountryIso = slot.optString("countryIso", "cn")
+        simMcc = slot.optString("mcc", "460")
+        simMnc = slot.optString("mnc", "00")
+        simOperatorName = slot.optString("simOperatorName", "")
+        simNetworkOperatorName = slot.optString("networkOperatorName", "")
+        simSubscriberId = slot.optString("subscriberId", "")
+        simSerial = slot.optString("simSerialNumber", "")
+        simLine1 = slot.optString("line1Number", "")
+        simDeviceId = slot.optString("deviceId", "")
+        simImei = slot.optString("imei", "")
+        simSimState = slot.optInt("simState", 5).toString()
+        simPhoneType = slot.optInt("phoneType", 1).toString()
+        slot.optJSONObject("signal")?.let { sig ->
             simSignalGsm = sig.optInt("gsm", 20).toString()
             simSignalLte = sig.optInt("lte", -95).toString()
             simSignalNr = sig.optInt("nr", -105).toString()
             simSignalLevel = sig.optInt("level", 3).toString()
         }
+        // 重置自定义选择状态：当前国家/运营商有预设则取消自定义
+        simCustomCountry = ""
+        simCustomCarrier = ""
+        simCountryExpanded = false
+        simCarrierExpanded = false
+    }
+
+    /** 把当前表单作为卡槽配置写入 entries（同 slotIndex 覆盖，否则追加）。 */
+    fun applySimSlot() {
+        val entry = readEntryForm() ?: return
+        val slotIndex = entry.optInt("slotIndex", -1)
+        if (slotIndex < 0) return
+        val idx = entries.indexOfFirst { it.optInt("slotIndex", -1) == slotIndex }
+        if (idx >= 0) entries[idx] = entry else entries.add(entry)
+        // 同步识别列表里的显示名（用户修改了运营商后列表摘要即时更新）
+        val detectIdx = simDetectedSlots.indexOfFirst { it.optInt("slotIndex", -1) == slotIndex }
+        if (detectIdx >= 0) simDetectedSlots[detectIdx] = entry
+        toast(fragment.getString(R.string.env_sim_applied, slotIndex))
+    }
+
+    /** 自动识别真实卡槽并填充下拉列表；自动选中第一个识别卡槽并加载表单。 */
+    fun detectSimSlots() {
+        val detected = detectRealSimSlots(fragment)
+        if (detected.isEmpty()) return
+        simDetectedSlots.clear()
+        simDetectedSlots.addAll(detected)
+        val first = detected.first()
+        loadSimSlot(first)
         toast(fragment.getString(R.string.env_sim_auto_detect_done, detected.size))
     }
 
@@ -822,6 +849,7 @@ fun EnvDetailPanel(
                         }
                     }
                     TYPE_SIM -> {
+                        // 第一段：选择目标卡槽（自动识别 + 下拉选择）
                         GlassCard(
                             backdrop = backdrop,
                             modifier = Modifier.fillMaxWidth(),
@@ -829,15 +857,14 @@ fun EnvDetailPanel(
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 BasicText(
-                                    fragment.getString(R.string.env_sim_slots_title),
+                                    fragment.getString(R.string.env_sim_slot_select_title),
                                     style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                                 )
                                 BasicText(
-                                    fragment.getString(R.string.env_sim_slots_desc),
+                                    fragment.getString(R.string.env_sim_slot_select_desc),
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
-                                // 自动识别真实卡槽（借鉴 VirtualRegion B3.d.e 的识别链路）
                                 GlassButton(
                                     onClick = { detectSimSlots() },
                                     backdrop = backdrop,
@@ -849,25 +876,76 @@ fun EnvDetailPanel(
                                         style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                     )
                                 }
-                                BasicText(
-                                    fragment.getString(R.string.env_sim_auto_detect_desc),
-                                    Modifier.padding(top = 4.dp),
-                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                // 卡槽下拉选择：识别结果优先，也允许手动输入 slot/subId
+                                SimSlotDropdown(
+                                    fragment = fragment,
+                                    backdrop = backdrop,
+                                    slots = simDetectedSlots,
+                                    selectedSlotIndex = simSelectedSlotIndex,
+                                    manualSlot = simSlot,
+                                    manualSubId = simSubId,
+                                    onSlotClick = { slot -> loadSimSlot(slot) },
+                                    onManualSlotChange = { simSlot = it; simSelectedSlotIndex = it.toIntOrNull() ?: -1 },
+                                    onManualSubIdChange = { simSubId = it }
                                 )
-                                EntryFormField(fragment.getString(R.string.env_sim_slot_hint), simSlot, { simSlot = it }, fragment.getString(R.string.env_sim_slot_hint), backdrop)
-                                EntryFormField(fragment.getString(R.string.env_sim_sub_id_hint), simSubId, { simSubId = it }, fragment.getString(R.string.env_sim_sub_id_hint), backdrop)
-                                SimCountrySelect(
+                            }
+                        }
+                        // 第二段：详细参数（选择卡槽后设置）
+                        GlassCard(
+                            backdrop = backdrop,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                BasicText(
+                                    fragment.getString(R.string.env_sim_detail_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    if (simSelectedSlotIndex >= 0) {
+                                        fragment.getString(R.string.env_sim_slot_item, simSelectedSlotIndex, simOperatorName)
+                                    } else {
+                                        fragment.getString(R.string.env_sim_no_slot_selected)
+                                    },
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                // 国家 / 运营商双下拉（预设 + 自定义，类似 Nrfr 交互）
+                                SimCountryCarrierSelect(
                                     fragment = fragment,
                                     backdrop = backdrop,
                                     countryIso = simCountryIso,
+                                    carrierName = simOperatorName,
+                                    customCountry = simCustomCountry,
+                                    customCarrier = simCustomCarrier,
+                                    countryExpanded = simCountryExpanded,
+                                    carrierExpanded = simCarrierExpanded,
+                                    onCountryExpanded = { simCountryExpanded = it; if (it) simCarrierExpanded = false },
+                                    onCarrierExpanded = { simCarrierExpanded = it; if (it) simCountryExpanded = false },
                                     onCountry = { iso, mcc, mnc, carrier ->
                                         simCountryIso = iso
                                         simMcc = mcc
                                         simMnc = mnc
+                                        simCustomCountry = ""
                                         if (carrier.isNotBlank()) {
                                             simOperatorName = carrier
                                             simNetworkOperatorName = carrier
+                                            simCustomCarrier = ""
                                         }
+                                    },
+                                    onCountryCustom = { value ->
+                                        simCustomCountry = value
+                                        simCountryIso = value.lowercase()
+                                    },
+                                    onCarrier = { carrier ->
+                                        simOperatorName = carrier
+                                        simNetworkOperatorName = carrier
+                                        simCustomCarrier = ""
+                                    },
+                                    onCarrierCustom = { value ->
+                                        simCustomCarrier = value
+                                        simOperatorName = value
+                                        simNetworkOperatorName = value
                                     }
                                 )
                                 EntryFormField(fragment.getString(R.string.env_sim_mcc_hint), simMcc, { simMcc = it }, fragment.getString(R.string.env_sim_mcc_hint), backdrop)
@@ -892,13 +970,13 @@ fun EnvDetailPanel(
                                 EntryFormField(fragment.getString(R.string.env_sim_signal_nr_hint), simSignalNr, { simSignalNr = it }, fragment.getString(R.string.env_sim_signal_nr_hint), backdrop)
                                 EntryFormField(fragment.getString(R.string.env_sim_signal_level_hint), simSignalLevel, { simSignalLevel = it }, fragment.getString(R.string.env_sim_signal_level_hint), backdrop)
                                 GlassButton(
-                                    onClick = { addEntry() },
+                                    onClick = { applySimSlot() },
                                     backdrop = backdrop,
                                     modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
                                     surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
                                 ) {
                                     BasicText(
-                                        fragment.getString(R.string.env_sim_add_slot),
+                                        fragment.getString(R.string.env_sim_apply_slot),
                                         style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                     )
                                 }
@@ -1016,15 +1094,109 @@ private fun EntryFormField(
 }
 
 /**
- * SIM 国家/地区选择：从模块 assets/country_templates.json 读取模板，
- * 选择国家后自动填充 iso/mcc/mnc/carrier（数据来源：Nrfr + 常见运营商模板）。
+ * SIM 卡槽下拉选择：显示识别出的卡槽列表，点击选择后加载表单；
+ * 未识别/手动场景可手动输入 slot/subId。
  */
 @Composable
-private fun SimCountrySelect(
+private fun SimSlotDropdown(
+    fragment: androidx.fragment.app.Fragment,
+    backdrop: Backdrop,
+    slots: List<JSONObject>,
+    selectedSlotIndex: Int,
+    manualSlot: String,
+    manualSubId: String,
+    onSlotClick: (JSONObject) -> Unit,
+    onManualSlotChange: (String) -> Unit,
+    onManualSubIdChange: (String) -> Unit
+) {
+    val colors = glassColors()
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+        BasicText(
+            fragment.getString(R.string.env_sim_slot_hint),
+            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+        )
+        // 识别结果选择区（无结果时提示手动输入）
+        if (slots.isEmpty()) {
+            BasicText(
+                fragment.getString(R.string.env_sim_auto_detect_empty),
+                Modifier.padding(top = 4.dp),
+                style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+            )
+        } else {
+            slots.forEach { slot ->
+                val slotIdx = slot.optInt("slotIndex", -1)
+                val label = slot.optString("simOperatorName", "")
+                    .ifEmpty { slot.optString("mcc", "") + "/" + slot.optString("mnc", "") }
+                    .ifEmpty { "SIM ${slotIdx + 1}" }
+                Row(
+                    Modifier
+                        .padding(top = 6.dp)
+                        .fillMaxWidth()
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                        .clickable { onSlotClick(slot) }
+                        .then(
+                            if (slotIdx == selectedSlotIndex) {
+                                Modifier.drawBehind {
+                                    drawRect(colors.accent.copy(alpha = 0.14f))
+                                }
+                            } else Modifier
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicText(
+                        fragment.getString(R.string.env_sim_slot_item, slotIdx, label),
+                        Modifier.weight(1f),
+                        style = TextStyle(
+                            color = if (slotIdx == selectedSlotIndex) colors.accent else colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = if (slotIdx == selectedSlotIndex) FontWeight.Bold else FontWeight.Normal
+                        )
+                    )
+                }
+            }
+        }
+        // 手动输入（未识别时使用；选择识别卡槽后自动同步）
+        EntryFormField(
+            fragment.getString(R.string.env_sim_slot_hint) + " (ID)",
+            manualSlot,
+            onManualSlotChange,
+            fragment.getString(R.string.env_sim_slot_hint),
+            backdrop
+        )
+        EntryFormField(
+            fragment.getString(R.string.env_sim_sub_id_hint),
+            manualSubId,
+            onManualSubIdChange,
+            fragment.getString(R.string.env_sim_sub_id_hint),
+            backdrop
+        )
+    }
+}
+
+/**
+ * SIM 国家/运营商双下拉（预设 + 自定义）。
+ *
+ * 国家来源：assets/country_templates.json（28 个国家，含 mcc/mnc/carrier/前缀）；
+ * 运营商来源：assets/carrier_presets.json（按 iso 分组，借鉴 Nrfr 预设）。
+ * 均带「自定义」选项，选择自定义时显示输入框。
+ */
+@Composable
+private fun SimCountryCarrierSelect(
     fragment: androidx.fragment.app.Fragment,
     backdrop: Backdrop,
     countryIso: String,
-    onCountry: (iso: String, mcc: String, mnc: String, carrier: String) -> Unit
+    carrierName: String,
+    customCountry: String,
+    customCarrier: String,
+    countryExpanded: Boolean,
+    carrierExpanded: Boolean,
+    onCountryExpanded: (Boolean) -> Unit,
+    onCarrierExpanded: (Boolean) -> Unit,
+    onCountry: (iso: String, mcc: String, mnc: String, carrier: String) -> Unit,
+    onCountryCustom: (String) -> Unit,
+    onCarrier: (String) -> Unit,
+    onCarrierCustom: (String) -> Unit
 ) {
     val context = fragment.requireContext()
     val countries = remember {
@@ -1039,58 +1211,221 @@ private fun SimCountrySelect(
         }
         list
     }
+    val carriersByIso = remember {
+        val map = HashMap<String, List<String>>()
+        try {
+            val text = context.assets.open("carrier_presets.json")
+                .bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val arr = JSONArray(text)
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val iso = obj.optString("iso", "").uppercase()
+                val carriers = mutableListOf<String>()
+                val ca = obj.optJSONArray("carriers")
+                if (ca != null) for (j in 0 until ca.length()) carriers.add(ca.optString(j))
+                if (carriers.isNotEmpty()) map[iso] = carriers
+            }
+        } catch (t: Throwable) {
+        }
+        map
+    }
     val colors = glassColors()
-    val current = countries.firstOrNull { it.optString("iso", "").equals(countryIso, ignoreCase = true) }
+    val customLabel = fragment.getString(R.string.env_sim_custom)
+    val currentCountry = countries.firstOrNull { it.optString("iso", "").equals(countryIso, ignoreCase = true) }
+
+    // ---------- 国家下拉 ----------
     Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
         BasicText(
             fragment.getString(R.string.env_sim_country),
             style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
         )
-        // 简化的横向滚动国家列表（保持现有 GlassPill 风格）
-        Row(
-            Modifier
-                .padding(top = 6.dp)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
+            cornerRadius = 12.dp,
+            containerColor = colors.bgSecondary.copy(alpha = 0.45f),
+            contentPadding = 0.dp
         ) {
-            countries.forEach { c ->
-                val iso = c.optString("iso", "")
-                GlassPill(
-                    onClick = {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onCountryExpanded(!countryExpanded) }
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicText(
+                    currentCountry?.let { "${it.optString("nameZh", "")} (${it.optString("iso", "")})" }
+                        ?: customCountry.ifEmpty { countryIso.ifEmpty { fragment.getString(R.string.env_sim_no_slot_selected) } },
+                    Modifier.weight(1f),
+                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp)
+                )
+                BasicText(
+                    if (countryExpanded) "▲" else "▼",
+                    style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                )
+            }
+        }
+        if (countryExpanded) {
+            Column(
+                Modifier
+                    .padding(top = 4.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .drawBehind { drawRect(colors.bgTertiary.copy(alpha = 0.35f)) }
+                    .padding(4.dp)
+            ) {
+                countries.forEach { c ->
+                    val iso = c.optString("iso", "")
+                    OptionRow(
+                        label = "${c.optString("nameZh", "")} (${iso}) · MCC ${c.optString("mcc", "")}",
+                        selected = iso.equals(countryIso, ignoreCase = true),
+                        colors = colors
+                    ) {
                         onCountry(
                             iso.lowercase(),
                             c.optString("mcc", "460"),
                             c.optString("defaultMnc", "00"),
                             c.optString("carrier", "")
                         )
-                    },
-                    backdrop = backdrop,
-                    selected = iso.equals(countryIso, ignoreCase = true),
-                    containerColor = if (iso.equals(countryIso, ignoreCase = true)) {
-                        colors.accent.copy(alpha = 0.25f)
-                    } else {
-                        colors.bgTertiary.copy(alpha = 0.35f)
-                    },
-                    height = 34.dp
+                        onCountryExpanded(false)
+                    }
+                }
+                OptionRow(
+                    label = customLabel,
+                    selected = customCountry.isNotEmpty(),
+                    colors = colors
                 ) {
-                    BasicText(
-                        c.optString("nameZh", iso) + " " + c.optString("mcc", ""),
-                        Modifier.padding(horizontal = 10.dp),
-                        style = TextStyle(
-                            color = if (iso.equals(countryIso, ignoreCase = true)) colors.accent else colors.textSecondary,
-                            fontSize = 12.sp
-                        )
-                    )
+                    onCountryExpanded(false)
                 }
             }
+            if (customCountry.isNotEmpty()) {
+                GlassField(
+                    value = customCountry,
+                    onValueChange = onCountryCustom,
+                    backdrop = backdrop,
+                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                    placeholder = fragment.getString(R.string.env_sim_country_custom_hint)
+                )
+            }
         }
-        if (current != null) {
-            BasicText(
-                "IMSI 前缀 ${current.optString("imsiPrefix", "-")} · ICCID 前缀 ${current.optString("iccidPrefix", "-")} · 国际区号 +${current.optString("callingCode", "-")}",
-                Modifier.padding(top = 4.dp),
-                style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+    }
+
+    // ---------- 运营商下拉 ----------
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+        BasicText(
+            fragment.getString(R.string.env_sim_carrier),
+            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+        )
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
+            cornerRadius = 12.dp,
+            containerColor = colors.bgSecondary.copy(alpha = 0.45f),
+            contentPadding = 0.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onCarrierExpanded(!carrierExpanded) }
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicText(
+                    carrierName.ifEmpty { fragment.getString(R.string.env_sim_no_slot_selected) },
+                    Modifier.weight(1f),
+                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp)
+                )
+                BasicText(
+                    if (carrierExpanded) "▲" else "▼",
+                    style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                )
+            }
+        }
+        if (carrierExpanded) {
+            val options = carriersByIso[countryIso.uppercase()] ?: emptyList()
+            Column(
+                Modifier
+                    .padding(top = 4.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .drawBehind { drawRect(colors.bgTertiary.copy(alpha = 0.35f)) }
+                    .padding(4.dp)
+            ) {
+                if (options.isEmpty()) {
+                    BasicText(
+                        fragment.getString(R.string.env_sim_no_slot_selected),
+                        Modifier.padding(10.dp),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                    )
+                } else {
+                    options.forEach { carrier ->
+                        OptionRow(
+                            label = carrier,
+                            selected = carrier == carrierName,
+                            colors = colors
+                        ) {
+                            onCarrier(carrier)
+                            onCarrierExpanded(false)
+                        }
+                    }
+                }
+                OptionRow(
+                    label = customLabel,
+                    selected = customCarrier.isNotEmpty(),
+                    colors = colors
+                ) {
+                    onCarrierExpanded(false)
+                }
+            }
+            if (customCarrier.isNotEmpty()) {
+                GlassField(
+                    value = customCarrier,
+                    onValueChange = onCarrierCustom,
+                    backdrop = backdrop,
+                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                    placeholder = fragment.getString(R.string.env_sim_carrier_custom_hint)
+                )
+            }
+        }
+    }
+    if (currentCountry != null) {
+        BasicText(
+            "IMSI 前缀 ${currentCountry.optString("imsiPrefix", "-")} · ICCID 前缀 ${currentCountry.optString("iccidPrefix", "-")} · 国际区号 +${currentCountry.optString("callingCode", "-")}",
+            Modifier.padding(top = 6.dp),
+            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+        )
+    }
+}
+
+/** 下拉选项行（选中高亮）。 */
+@Composable
+private fun OptionRow(
+    label: String,
+    selected: Boolean,
+    colors: io.github.fairyxh.VirtualEnv.app.ui.glass.GlassColors,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .then(if (selected) Modifier.drawBehind { drawRect(colors.accent.copy(alpha = 0.16f)) } else Modifier)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicText(
+            label,
+            Modifier.weight(1f),
+            style = TextStyle(
+                color = if (selected) colors.accent else colors.textPrimary,
+                fontSize = 14.sp
             )
-        }
+        )
     }
 }
 
