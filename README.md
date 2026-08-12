@@ -6,6 +6,7 @@
 
 > 设计思想：不是针对单个 App 的隐私保护工具，而是一个 **Android Environment Replay Framework**——真实环境采集 → 环境数据包 → 虚拟环境加载 → 应用认为处于真实环境。
 
+> 检测生效：可以通过一个独立设计的检测器来判断虚拟环境是否生效:[VirEnvDetector](https://github.com/FairyXH/VirEnvDetector)
 ---
 
 ## 1. 功能简介
