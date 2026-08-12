@@ -35,6 +35,7 @@ class SimSubscriptionHookAdapter(
 
         /** AOSP / 常见 ROM 的 ISub.Stub 实现类候选（可经 Profile sim.subscriptionClasses 覆盖）。 */
         val DEFAULT_SUBSCRIPTION_CLASSES = listOf(
+            "com.android.internal.telephony.subscription.SubscriptionManagerService",
             "com.android.server.telephony.SubscriptionManagerService",
             "com.android.server.telephony.SubscriptionController",
             "com.android.internal.telephony.SubscriptionController",

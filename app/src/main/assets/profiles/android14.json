@@ -21,9 +21,11 @@
         "com.android.phone.PhoneInterfaceManager"
       ],
       "phoneSubInfoClasses": [
+        "com.android.internal.telephony.PhoneSubInfoController",
         "com.android.phone.PhoneSubInfoController"
       ],
       "subscriptionClasses": [
+        "com.android.internal.telephony.subscription.SubscriptionManagerService",
         "com.android.server.telephony.SubscriptionController",
         "com.android.internal.telephony.SubscriptionController"
       ]

@@ -16,55 +16,108 @@ import org.json.JSONObject
  * 全部在 com.android.phone 进程的 Binder 服务端实现类上 Hook，任意 App 通过
  * ITelephony / IPhoneSubInfo Binder 调用时都会被替换，全局生效。
  *
- * 目标类（AOSP / Oplus 15，JADX 确认）：
- * - com.android.phone.PhoneInterfaceManager（ITelephony.Stub）
- * - com.android.phone.PhoneSubInfoController（IPhoneSubInfo.Stub）
+ * 目标类（Oplus 15 / Android 15，JADX 确认）：
+ * - com.android.phone.PhoneInterfaceManager（ITelephony.Stub，TeleService.apk）
+ * - com.android.internal.telephony.PhoneSubInfoController（IPhoneSubInfo.Stub，
+ *   telephony-common.jar；Oplus 15 把实现移到 framework 侧，而非 AOSP 的
+ *   com.android.phone.PhoneSubInfoController）
  *
- * 兼容策略：所有方法按“方法名 + 返回类型 + 参数个数”反射查找，找不到即跳过；
- * 方法回调异常时放行原始值（fail-open）。
+ * Android 15 方法名带 ForSubscriber 后缀（getSubscriberIdForSubscriber /
+ * getIccSerialNumberForSubscriber / getLine1NumberForSubscriber 等），
+ * 兼容策略：旧名 + ForSubscriber 新名都尝试，按“方法名 + 返回类型”反射查找，
+ * 找不到即跳过；方法回调异常时放行原始值（fail-open）。
  */
 class SimTelephonyHookAdapter(
     private val cache: EnvStateCache,
     private val registrar: HookRegistrar,
+    private val phoneInterfaceClasses: List<String> = DEFAULT_PHONE_INTERFACE_CLASSES,
+    private val phoneSubInfoClasses: List<String> = DEFAULT_PHONE_SUB_INFO_CLASSES,
 ) {
 
     companion object {
         private const val TAG_SCOPE = "Hook"
 
         private const val CLASS_PHONE_INTERFACE = "com.android.phone.PhoneInterfaceManager"
-        private const val CLASS_PHONE_SUB_INFO = "com.android.phone.PhoneSubInfoController"
+        private const val CLASS_PHONE_SUB_INFO = "com.android.internal.telephony.PhoneSubInfoController"
 
-        /** 字符串返回型 SIM 身份方法（Binder 服务端方法名）。 */
+        val DEFAULT_PHONE_INTERFACE_CLASSES = listOf(
+            "com.android.phone.PhoneInterfaceManager",
+            "com.android.phone.PhoneInterfaceManager\$Stub",
+        )
+
+        /** Oplus 15 的 IPhoneSubInfo.Stub 实现位于 telephony-common.jar。 */
+        val DEFAULT_PHONE_SUB_INFO_CLASSES = listOf(
+            "com.android.internal.telephony.PhoneSubInfoController",
+            "com.android.phone.PhoneSubInfoController",
+        )
+
+        /** 字符串返回型 SIM 身份方法（Binder 服务端方法名，含 Android 15 ForSubscriber 变体）。 */
         private val STRING_METHODS = listOf(
             "getSimOperator",
+            "getSimOperatorForSubscriber",
             "getSimOperatorName",
+            "getSimOperatorNameForSubscriber",
             "getSimCountryIso",
+            "getSimCountryIsoForSubscriber",
             "getSimSerialNumber",
             "getSubscriberId",
+            "getSubscriberIdForSubscriber",
             "getIccSerialNumber",
+            "getIccSerialNumberForSubscriber",
             "getLine1Number",
+            "getLine1NumberForSubscriber",
             "getDeviceId",
+            "getDeviceIdForSubscriber",
             "getImei",
+            "getImeiForSubscriber",
             "getMeid",
+            "getMeidForSubscriber",
             "getNetworkOperator",
+            "getNetworkOperatorForSubscriber",
             "getNetworkOperatorName",
+            "getNetworkOperatorNameForSubscriber",
             "getNetworkCountryIso",
+            "getNetworkCountryIsoForSubscriber",
             "getMsisdn",
+            "getMsisdnForSubscriber",
             "getVoiceMailNumber",
+            "getVoiceMailNumberForSubscriber",
+        )
+
+        /** 整型返回型方法（含 ForSubscriber 变体）。 */
+        private val INT_METHODS = listOf(
+            "getSimState",
+            "getSimStateForSubscriber",
+            "getPhoneType",
+            "getPhoneTypeForSubscriber",
+            "getPhoneCount",
+            "getDataNetworkType",
+            "getDataNetworkTypeForSubscriber",
+            "getVoiceNetworkType",
+            "getVoiceNetworkTypeForSubscriber",
         )
     }
 
     fun install(classLoader: ClassLoader): Int {
         var hooked = 0
-        hooked += hookPhoneInterfaceManager(classLoader)
-        hooked += hookPhoneSubInfoController(classLoader)
+        val interfaces = phoneInterfaceClasses.ifEmpty { DEFAULT_PHONE_INTERFACE_CLASSES }
+        for (className in interfaces) {
+            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            hooked += hookPhoneInterfaceManager(clazz)
+            if (hooked > 0) ZLog.i(TAG_SCOPE, "sim hooks active on $className")
+        }
+        val subInfo = phoneSubInfoClasses.ifEmpty { DEFAULT_PHONE_SUB_INFO_CLASSES }
+        for (className in subInfo) {
+            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            hooked += hookPhoneSubInfoController(clazz)
+            if (hooked > 0) ZLog.i(TAG_SCOPE, "sim sub-info hooks active on $className")
+        }
         return hooked
     }
 
     // ---------- PhoneInterfaceManager（ITelephony.Stub） ----------
 
-    private fun hookPhoneInterfaceManager(classLoader: ClassLoader): Int {
-        val clazz = HookSupport.findClass(classLoader, CLASS_PHONE_INTERFACE) ?: return 0
+    private fun hookPhoneInterfaceManager(clazz: Class<*>): Int {
         var hooked = 0
 
         // 字符串身份方法：getSimOperator 等（1~4 参，含 callingPackage / featureId / subId 变体）
@@ -90,11 +143,7 @@ class SimTelephonyHookAdapter(
         }
 
         // 整型身份/状态方法：getSimState / getPhoneType / getPhoneCount
-        hooked += hookIntMethods(clazz, "getSimState")
-        hooked += hookIntMethods(clazz, "getPhoneType")
-        hooked += hookIntMethods(clazz, "getPhoneCount")
-        hooked += hookIntMethods(clazz, "getDataNetworkType")
-        hooked += hookIntMethods(clazz, "getVoiceNetworkType")
+        INT_METHODS.forEach { name -> hooked += hookIntMethods(clazz, name) }
 
         // 信号状态：getSignalStrength() 返回 SignalStrength
         HookSupport.findMethods(clazz, "getSignalStrength")
@@ -121,8 +170,7 @@ class SimTelephonyHookAdapter(
 
     // ---------- PhoneSubInfoController（IPhoneSubInfo.Stub） ----------
 
-    private fun hookPhoneSubInfoController(classLoader: ClassLoader): Int {
-        val clazz = HookSupport.findClass(classLoader, CLASS_PHONE_SUB_INFO) ?: return 0
+    private fun hookPhoneSubInfoController(clazz: Class<*>): Int {
         var hooked = 0
         STRING_METHODS.forEach { name ->
             HookSupport.findMethods(clazz, name)
@@ -144,6 +192,25 @@ class SimTelephonyHookAdapter(
                     }
                 }
         }
+        // 信号强度（IPhoneSubInfo 也有 getSignalStrength 变体）
+        HookSupport.findMethods(clazz, "getSignalStrength")
+            .filter { it.parameterCount in 0..4 }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val original = chain.proceed()
+                    val virtual = VirtualSignalFactory.build(currentSimData())
+                    if (virtual != null) {
+                        ZLog.d(TAG_SCOPE, "PhoneSubInfoController.getSignalStrength -> virtual")
+                        virtual
+                    } else {
+                        original
+                    }
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked PhoneSubInfoController.getSignalStrength(${method.parameterCount} params)")
+                }
+            }
         return hooked
     }
 

@@ -30,6 +30,7 @@ import android.telephony.CellInfoGsm
 import android.telephony.CellInfoLte
 import android.telephony.CellInfoNr
 import android.telephony.CellInfoWcdma
+import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.view.LayoutInflater
@@ -1158,82 +1159,133 @@ class SettingsFragment : Fragment() {
     private fun buildSimText(): String {
         val tm = telephonyManager ?: return "TelephonyManager 不可用"
         val sb = StringBuilder()
-        try {
-            val subId = try { SubscriptionManager.getDefaultSubscriptionId() } catch (t: Throwable) { -1 }
-            val subTm = if (subId >= 0) tm.createForSubscriptionId(subId) else tm
-            sb.append("国家码: ").append(runCatching { subTm.simCountryIso }.getOrDefault("")).append("\n")
-            sb.append("运营商: ").append(runCatching { subTm.simOperatorName }.getOrDefault("")).append("\n")
-            sb.append("网络运营商: ").append(runCatching { subTm.networkOperatorName }.getOrDefault("")).append("\n")
-            sb.append("SIM 运营商代码: ").append(runCatching { subTm.simOperator }.getOrDefault("")).append("\n")
-            sb.append("网络代码: ").append(runCatching { subTm.networkOperator }.getOrDefault("")).append("\n")
-            sb.append("IMSI: ").append(runCatching { subTm.subscriberId }.getOrDefault("")).append("\n")
-            sb.append("ICCID: ").append(runCatching { subTm.simSerialNumber }.getOrDefault("")).append("\n")
-            sb.append("号码: ").append(runCatching { subTm.line1Number }.getOrDefault("")).append("\n")
-            sb.append("状态: ").append(runCatching { tm.simState }.getOrDefault(-1)).append("\n")
-            try {
-                val ss = tm.signalStrength
-                if (ss != null) {
-                    sb.append("信号 Lv:").append(runCatching { ss.level }.getOrDefault(-1))
-                    sb.append(" GSM:").append(runCatching { ss.gsmSignalStrength }.getOrDefault(Int.MIN_VALUE))
-                    if (Build.VERSION.SDK_INT >= 28) {
-                        val lte = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthLte::class.java)
-                        if (lte.isNotEmpty()) sb.append(" LTE rsrp:").append(lte[0].dbm)
-                    }
-                    if (Build.VERSION.SDK_INT >= 29) {
-                        val nr = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthNr::class.java)
-                        if (nr.isNotEmpty()) sb.append(" NR rsrp:").append(nr[0].dbm)
-                    }
-                    sb.append("\n")
-                }
-            } catch (_: Throwable) {
-            }
+        // 读取所有活跃卡槽（SubscriptionManager），逐个展示 SIM 身份/信号
+        val subs: List<SubscriptionInfo> = try {
+            val sm = requireContext().getSystemService(SubscriptionManager::class.java)
+            sm.activeSubscriptionInfoList ?: emptyList()
         } catch (t: Throwable) {
-            sb.append("读取失败: ").append(t.message).append("\n")
+            emptyList()
+        }
+        if (subs.isEmpty()) {
+            sb.append("无活跃订阅（无卡或权限不足）\n")
+        } else {
+            for (sub in subs) {
+                val slotIdx = try { sub.simSlotIndex } catch (t: Throwable) { -1 }
+                val subId = try { sub.subscriptionId } catch (t: Throwable) { -1 }
+                sb.append("== 卡槽 ").append(slotIdx).append(" (subId=").append(subId).append(") ==\n")
+                try {
+                    val subTm = tm.createForSubscriptionId(subId)
+                    sb.append("国家码: ").append(runCatching { subTm.simCountryIso }.getOrDefault("")).append("\n")
+                    sb.append("运营商: ").append(runCatching { subTm.simOperatorName }.getOrDefault("")).append("\n")
+                    sb.append("网络运营商: ").append(runCatching { subTm.networkOperatorName }.getOrDefault("")).append("\n")
+                    sb.append("SIM 运营商代码: ").append(runCatching { subTm.simOperator }.getOrDefault("")).append("\n")
+                    sb.append("网络代码: ").append(runCatching { subTm.networkOperator }.getOrDefault("")).append("\n")
+                    sb.append("IMSI: ").append(runCatching { subTm.subscriberId }.getOrDefault("")).append("\n")
+                    sb.append("ICCID: ").append(runCatching { subTm.simSerialNumber }.getOrDefault("")).append("\n")
+                    sb.append("号码: ").append(runCatching { subTm.line1Number }.getOrDefault("")).append("\n")
+                } catch (t: Throwable) {
+                    sb.append("卡槽读取失败: ").append(t.message).append("\n")
+                }
+            }
+        }
+        sb.append("状态: ").append(runCatching { tm.simState }.getOrDefault(-1)).append("\n")
+        try {
+            val ss = tm.signalStrength
+            if (ss != null) {
+                sb.append("信号 Lv:").append(runCatching { ss.level }.getOrDefault(-1))
+                sb.append(" GSM:").append(runCatching { ss.gsmSignalStrength }.getOrDefault(Int.MIN_VALUE))
+                if (Build.VERSION.SDK_INT >= 28) {
+                    val lte = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthLte::class.java)
+                    if (lte.isNotEmpty()) sb.append(" LTE rsrp:").append(lte[0].dbm)
+                }
+                if (Build.VERSION.SDK_INT >= 29) {
+                    val nr = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthNr::class.java)
+                    if (nr.isNotEmpty()) sb.append(" NR rsrp:").append(nr[0].dbm)
+                }
+                sb.append("\n")
+            }
+        } catch (_: Throwable) {
         }
         if (sb.isEmpty()) sb.append("无 SIM 数据（无卡或权限不足）")
         return sb.toString().trim()
     }
 
-    /** SIM 判定：配置任一卡槽的 mcc/mnc/运营商/IMSI 等出现在 App 读到文本中。 */
+    /** SIM 判定：对配置中每个设置了虚拟身份的卡槽，在其对应卡槽分段内比对 mcc/mnc/运营商/IMSI/ICCID。 */
     private fun judgeSim(): Verdict {
         val data = envData("sim") ?: return Verdict.NOT_ENABLED
         val slots = data.optJSONArray("slots") ?: return Verdict.FAIL
         if (slots.length() == 0) return Verdict.FAIL
-        if (lastSimText.isBlank()) return Verdict.FAIL
+        if (lastSimText.isBlank() || lastSimText.contains("无 SIM 数据")) return Verdict.FAIL
+        val segments = splitSimSegments(lastSimText)
+        var anyConfigured = false
         for (i in 0 until slots.length()) {
             val s = slots.optJSONObject(i) ?: continue
+            val slotIndex = s.optInt("slotIndex", -1)
+            val subId = s.optInt("subId", -1)
+            val segText = findSimSegment(segments, slotIndex, subId) ?: continue
             var hit = 0
             var total = 0
             val mcc = s.optString("mcc", "")
             if (mcc.isNotEmpty()) {
                 total++
-                if (lastSimText.contains(mcc)) hit++
+                if (segText.contains(mcc)) hit++
             }
             val mnc = s.optString("mnc", "")
             if (mnc.isNotEmpty()) {
                 total++
-                if (lastSimText.contains(mnc)) hit++
+                if (segText.contains(mnc)) hit++
             }
             val operator = s.optString("simOperatorName", "").ifEmpty { s.optString("carrier", "") }
             if (operator.isNotEmpty()) {
                 total++
-                if (lastSimText.contains(operator)) hit++
+                if (segText.contains(operator)) hit++
             }
             val imsi = s.optString("subscriberId", "")
             if (imsi.isNotEmpty()) {
                 total++
-                if (lastSimText.contains(imsi)) hit++
+                if (segText.contains(imsi)) hit++
             }
             val iccid = s.optString("simSerialNumber", "")
             if (iccid.isNotEmpty()) {
                 total++
-                if (lastSimText.contains(iccid)) hit++
+                if (segText.contains(iccid)) hit++
             }
+            if (total == 0) continue
+            anyConfigured = true
             // 至少 2 项命中视为生效（运营商名称可能被 ROM 截断）
             if (total >= 2 && hit >= 2) return Verdict.PASS
             if (total == 1 && hit == 1) return Verdict.PASS
         }
-        return Verdict.FAIL
+        return if (anyConfigured) Verdict.FAIL else Verdict.NOT_ENABLED
+    }
+
+    /** 按 "== 卡槽 N (subId=Y) ==" 分隔符拆分 SIM 文本段。 */
+    private fun splitSimSegments(text: String): List<String> {
+        val segments = mutableListOf<String>()
+        val lines = text.lines()
+        var current = StringBuilder()
+        for (line in lines) {
+            if (line.startsWith("== 卡槽")) {
+                if (current.isNotEmpty()) segments.add(current.toString())
+                current = StringBuilder()
+            }
+            if (current.isNotEmpty() || line.startsWith("== 卡槽")) current.append(line).append('\n')
+        }
+        if (current.isNotEmpty()) segments.add(current.toString())
+        return segments
+    }
+
+    /** 找到匹配 slotIndex 或 subId 的卡槽分段。 */
+    private fun findSimSegment(segments: List<String>, slotIndex: Int, subId: Int): String? {
+        if (segments.isEmpty()) return null
+        for (seg in segments) {
+            val head = seg.lineSequence().firstOrNull() ?: continue
+            val hasSlot = slotIndex >= 0 && head.contains("卡槽 $slotIndex")
+            val hasSub = subId >= 0 && head.contains("subId=$subId")
+            if (hasSlot || hasSub) return seg
+        }
+        if (slotIndex == 0 && segments.isNotEmpty()) return segments[0]
+        return null
     }
 
     @android.annotation.SuppressLint("MissingPermission")

@@ -90,7 +90,13 @@ class VirtualEnvEntry : XposedModule() {
                 val hooked = PhoneInterfaceManagerHookAdapter(cache, registrar).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] phone interface manager hooks installed pkg=$pkg hooked=$hooked loader=${hostClassLoader}")
                 // SIM 卡身份 / 信号全局虚拟化（Binder 服务端，对任意 App 生效）
-                val simHooked = SimTelephonyHookAdapter(cache, registrar).install(hostClassLoader)
+                val simCfg = readSimProfileConfig(hostClassLoader)
+                val simHooked = SimTelephonyHookAdapter(
+                    cache,
+                    registrar,
+                    simCfg.first,
+                    simCfg.second
+                ).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] sim telephony hooks installed pkg=$pkg hooked=$simHooked loader=${hostClassLoader}")
             }
             // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
@@ -109,6 +115,32 @@ class VirtualEnvEntry : XposedModule() {
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "[$TAG_SCOPE] onPackageReady hook install failed", t)
         }
+    }
+
+    /** 从模块 APK assets 读取 sim profile 配置（phone 进程无 Backend，直接读文件）。 */
+    private fun readSimProfileConfig(hostClassLoader: ClassLoader): Pair<List<String>, List<String>> {
+        val phoneInterface = mutableListOf<String>()
+        val phoneSubInfo = mutableListOf<String>()
+        try {
+            val assets = hostClassLoader.getResourceAsStream("assets/profiles/android15.json")
+                ?: hostClassLoader.getResourceAsStream("assets/profiles/default.json")
+            if (assets != null) {
+                val text = assets.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val json = org.json.JSONObject(text)
+                val sim = json.optJSONObject("hooks")?.optJSONObject("sim")
+                if (sim != null) {
+                    fun parseArr(name: String): List<String> {
+                        val arr = sim.optJSONArray(name) ?: return emptyList()
+                        return (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+                    }
+                    phoneInterface.addAll(parseArr("phoneInterfaceClasses"))
+                    phoneSubInfo.addAll(parseArr("phoneSubInfoClasses"))
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "read sim profile config failed, fallback defaults", t)
+        }
+        return phoneInterface to phoneSubInfo
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
