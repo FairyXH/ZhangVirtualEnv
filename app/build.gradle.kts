@@ -1,3 +1,5 @@
+import java.io.ByteArrayOutputStream
+
 plugins {
     alias(libs.plugins.agp.app)
     alias(libs.plugins.kotlin.compose)
@@ -7,15 +9,15 @@ android {
     namespace = "io.github.fairyxh.VirtualEnv"
     compileSdk = 37
     buildToolsVersion = "37.0.0"
-
+    val gitVersion = GitVersion.getVersion()
     defaultConfig {
         applicationId = "io.github.fairyxh.VirtualEnv"
         minSdk = 26
         // targetSdk 32：ColorOS 的 WallpaperManager 读取壁纸位图检查
         // READ_EXTERNAL_STORAGE，targetSdk >= 33 时该权限不可授予（死路）
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0.0"
+        versionName = gitVersion[0]
+        versionCode = gitVersion[1].toInt()
     }
 
     buildTypes {
@@ -55,6 +57,33 @@ android {
         abortOnError = true
         checkReleaseBuilds = false
     }
+}
+
+private fun getGitCommitCount(): Int {
+    return try {
+        val process = ProcessBuilder(
+            "git",
+            "rev-list",
+            "--count",
+            "HEAD"
+        )
+            .redirectErrorStream(true)
+            .start()
+        process.inputStream
+            .bufferedReader()
+            .readText()
+            .trim()
+            .toInt()
+    } catch (e: Exception) {
+        1
+    }
+}
+fun getGitVersion(): Array<String> {
+    val count = getGitCommitCount()
+    return arrayOf(
+        "1.0.$count",
+        count.toString()
+    )
 }
 
 kotlin {
