@@ -92,6 +92,8 @@ class SimSubscriptionHookAdapter(
             HookSupport.findMethods(clazz, name).forEach { method ->
                 val returnType = method.returnType
                 val isList = returnType.name == "java.util.List"
+                    || returnType.name.startsWith("java.util.List")
+                    || returnType.simpleName.contains("List")
                 if (!isList && returnType.simpleName != "SubscriptionInfo") return@forEach
                 val ok = registrar.register(method) { chain ->
                     val original = chain.proceed()
@@ -111,7 +113,7 @@ class SimSubscriptionHookAdapter(
                 }
                 if (ok) {
                     hooked++
-                    ZLog.i(TAG_SCOPE, "hooked ${clazz.name}.$name (list=$isList)")
+                    ZLog.i(TAG_SCOPE, "hooked ${clazz.name}.$name (list=$isList) rt=${returnType.name}")
                 }
             }
         }
