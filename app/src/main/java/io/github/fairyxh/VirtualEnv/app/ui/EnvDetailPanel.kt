@@ -137,6 +137,8 @@ fun EnvDetailPanel(
     var simSelectedSlotIndex by remember { mutableStateOf(-1) }
     var simCountryExpanded by remember { mutableStateOf(false) }
     var simCarrierExpanded by remember { mutableStateOf(false) }
+    var simCountryCustomMode by remember { mutableStateOf(false) }
+    var simCarrierCustomMode by remember { mutableStateOf(false) }
     var simCustomCountry by remember { mutableStateOf("") }
     var simCustomCarrier by remember { mutableStateOf("") }
     var saveName by remember { mutableStateOf(DefaultNames.timeName(detailTitle)) }
@@ -321,6 +323,83 @@ fun EnvDetailPanel(
         clearEntryForm()
     }
 
+    /** 读取国家模板（供随机填充复用，不触发重复 IO）。 */
+    fun rememberCountries(context: android.content.Context): List<JSONObject> {
+        val list = mutableListOf<JSONObject>()
+        try {
+            val text = context.assets.open("country_templates.json")
+                .bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val arr = JSONArray(text)
+            for (i in 0 until arr.length()) list.add(arr.optJSONObject(i) ?: continue)
+        } catch (t: Throwable) {
+        }
+        return list
+    }
+
+    /** 随机生成当前类型的合法配置并填入表单/选择框（供快速调试）。 */
+    fun randomFillForm() {
+        val rnd = java.util.concurrent.ThreadLocalRandom.current()
+        when (type) {
+            TYPE_CELL -> {
+                val netType = listOf("LTE", "NR", "GSM", "WCDMA")[rnd.nextInt(4)]
+                cellType = netType
+                cellMcc = (440 + rnd.nextInt(30)).toString()
+                cellMnc = rnd.nextInt(100).toString()
+                cellTac = rnd.nextInt(65536).toString()
+                cellCi = rnd.nextInt(1 shl 28).toString()
+                cellPci = rnd.nextInt(504).toString()
+                cellRsrp = (-130 + rnd.nextInt(40)).toString()
+            }
+            TYPE_WIFI -> {
+                wifiSsid = "ZVE-Rand-${rnd.nextInt(1000)}"
+                wifiBssid = String.format("AA:BB:CC:%02X:%02X:%02X", rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256))
+                wifiRssi = (-90 + rnd.nextInt(50)).toString()
+                wifiFrequency = (2412 + rnd.nextInt(10) * 5).toString()
+            }
+            TYPE_BLE -> {
+                bleName = "ZVE-Device-${rnd.nextInt(1000)}"
+                bleAddress = String.format("AA:BB:CC:%02X:%02X:%02X", rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256))
+                bleRssi = (-90 + rnd.nextInt(40)).toString()
+            }
+            TYPE_SENSOR -> {
+                sensorStep = (90 + rnd.nextInt(91)).toString()
+            }
+            TYPE_GNSS -> {
+                gnssCount = (12 + rnd.nextInt(13)).toString()
+                gnssUsed = (4 + rnd.nextInt(9)).toString()
+                gnssCn0 = String.format("%.1f", 25 + rnd.nextDouble(20.0))
+            }
+            TYPE_SIM -> {
+                // 随机国家模板（从 assets 读取失败时用默认中国）
+                val ctx = fragment.requireContext()
+                val countries = rememberCountries(ctx)
+                val c = if (countries.isNotEmpty()) countries[rnd.nextInt(countries.size)] else null
+                val iso = c?.optString("iso", "cn") ?: "cn"
+                simCountryIso = iso.lowercase()
+                simMcc = c?.optString("mcc", "460") ?: "460"
+                simMnc = c?.optString("defaultMnc", "00") ?: "00"
+                simCountryCustomMode = false
+                simCustomCountry = ""
+                simCarrierCustomMode = false
+                simCustomCarrier = ""
+                simOperatorName = c?.optString("carrier", "中国移动") ?: "中国移动"
+                simNetworkOperatorName = simOperatorName
+                simSubscriberId = (c?.optString("imsiPrefix", "46000") ?: "46000") + rnd.nextLong(100000000, 999999999)
+                simSerial = (c?.optString("iccidPrefix", "898600") ?: "898600") + rnd.nextLong(100000000000L, 999999999999L)
+                simLine1 = "+86" + rnd.nextLong(13000000000L, 19999999999L)
+                simDeviceId = simSubscriberId
+                simImei = String.format("%015d", rnd.nextLong(100000000000000L, 999999999999999L))
+                simSimState = "5"
+                simPhoneType = "1"
+                simSignalGsm = (15 + rnd.nextInt(16)).toString()
+                simSignalLte = (-110 + rnd.nextInt(25)).toString()
+                simSignalNr = (-120 + rnd.nextInt(25)).toString()
+                simSignalLevel = rnd.nextInt(5).toString()
+            }
+        }
+        toast(fragment.getString(R.string.env_random_filled))
+    }
+
     /** 把选中卡槽的信息加载到编辑表单。 */
     fun loadSimSlot(slot: JSONObject) {
         simSelectedSlotIndex = slot.optInt("slotIndex", -1)
@@ -347,6 +426,8 @@ fun EnvDetailPanel(
         // 重置自定义选择状态：当前国家/运营商有预设则取消自定义
         simCustomCountry = ""
         simCustomCarrier = ""
+        simCountryCustomMode = false
+        simCarrierCustomMode = false
         simCountryExpanded = false
         simCarrierExpanded = false
     }
@@ -725,6 +806,12 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    RandomButtonRow(fragment, backdrop) { randomFillForm() }
+                                }
                                 EntryFormField("type", cellType, { cellType = it }, fragment.getString(R.string.env_cell_type_hint), backdrop)
                                 EntryFormField("mcc", cellMcc, { cellMcc = it }, fragment.getString(R.string.env_cell_mcc_hint), backdrop)
                                 EntryFormField("mnc", cellMnc, { cellMnc = it }, fragment.getString(R.string.env_cell_mnc_hint), backdrop)
@@ -763,6 +850,7 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
+                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("ssid", wifiSsid, { wifiSsid = it }, fragment.getString(R.string.env_wifi_ssid_hint), backdrop)
                                 EntryFormField("bssid", wifiBssid, { wifiBssid = it }, fragment.getString(R.string.env_wifi_bssid_hint), backdrop)
                                 EntryFormField("rssi", wifiRssi, { wifiRssi = it }, fragment.getString(R.string.env_wifi_rssi_hint), backdrop)
@@ -798,6 +886,7 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
+                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("name", bleName, { bleName = it }, fragment.getString(R.string.env_ble_name_hint), backdrop)
                                 EntryFormField("address", bleAddress, { bleAddress = it }, fragment.getString(R.string.env_ble_address_hint), backdrop)
                                 EntryFormField("rssi", bleRssi, { bleRssi = it }, fragment.getString(R.string.env_ble_rssi_hint), backdrop)
@@ -827,6 +916,7 @@ fun EnvDetailPanel(
                                     fragment.getString(R.string.env_sensor_title),
                                     style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                                 )
+                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("step", sensorStep, { sensorStep = it }, fragment.getString(R.string.env_sensor_step_hint), backdrop)
                             }
                         }
@@ -842,6 +932,7 @@ fun EnvDetailPanel(
                                     fragment.getString(R.string.env_gnss_title),
                                     style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                                 )
+                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("count", gnssCount, { gnssCount = it }, fragment.getString(R.string.env_gnss_count_hint), backdrop)
                                 EntryFormField("used", gnssUsed, { gnssUsed = it }, fragment.getString(R.string.env_gnss_used_hint), backdrop)
                                 EntryFormField("cn0", gnssCn0, { cn0 -> gnssCn0 = cn0 }, fragment.getString(R.string.env_gnss_cn0_hint), backdrop)
@@ -910,12 +1001,15 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
+                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 // 国家 / 运营商双下拉（预设 + 自定义，类似 Nrfr 交互）
                                 SimCountryCarrierSelect(
                                     fragment = fragment,
                                     backdrop = backdrop,
                                     countryIso = simCountryIso,
                                     carrierName = simOperatorName,
+                                    countryCustomMode = simCountryCustomMode,
+                                    carrierCustomMode = simCarrierCustomMode,
                                     customCountry = simCustomCountry,
                                     customCarrier = simCustomCarrier,
                                     countryExpanded = simCountryExpanded,
@@ -926,12 +1020,18 @@ fun EnvDetailPanel(
                                         simCountryIso = iso
                                         simMcc = mcc
                                         simMnc = mnc
+                                        simCountryCustomMode = false
                                         simCustomCountry = ""
                                         if (carrier.isNotBlank()) {
                                             simOperatorName = carrier
                                             simNetworkOperatorName = carrier
+                                            simCarrierCustomMode = false
                                             simCustomCarrier = ""
                                         }
+                                    },
+                                    onCountryCustomMode = {
+                                        simCountryCustomMode = true
+                                        simCountryExpanded = false
                                     },
                                     onCountryCustom = { value ->
                                         simCustomCountry = value
@@ -940,7 +1040,12 @@ fun EnvDetailPanel(
                                     onCarrier = { carrier ->
                                         simOperatorName = carrier
                                         simNetworkOperatorName = carrier
+                                        simCarrierCustomMode = false
                                         simCustomCarrier = ""
+                                    },
+                                    onCarrierCustomMode = {
+                                        simCarrierCustomMode = true
+                                        simCarrierExpanded = false
                                     },
                                     onCarrierCustom = { value ->
                                         simCustomCarrier = value
@@ -1187,6 +1292,8 @@ private fun SimCountryCarrierSelect(
     backdrop: Backdrop,
     countryIso: String,
     carrierName: String,
+    countryCustomMode: Boolean,
+    carrierCustomMode: Boolean,
     customCountry: String,
     customCarrier: String,
     countryExpanded: Boolean,
@@ -1194,8 +1301,10 @@ private fun SimCountryCarrierSelect(
     onCountryExpanded: (Boolean) -> Unit,
     onCarrierExpanded: (Boolean) -> Unit,
     onCountry: (iso: String, mcc: String, mnc: String, carrier: String) -> Unit,
+    onCountryCustomMode: () -> Unit,
     onCountryCustom: (String) -> Unit,
     onCarrier: (String) -> Unit,
+    onCarrierCustomMode: () -> Unit,
     onCarrierCustom: (String) -> Unit
 ) {
     val context = fragment.requireContext()
@@ -1254,8 +1363,12 @@ private fun SimCountryCarrierSelect(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BasicText(
-                    currentCountry?.let { "${it.optString("nameZh", "")} (${it.optString("iso", "")})" }
-                        ?: customCountry.ifEmpty { countryIso.ifEmpty { fragment.getString(R.string.env_sim_no_slot_selected) } },
+                    when {
+                        countryCustomMode -> customCountry.ifEmpty { fragment.getString(R.string.env_sim_custom) }
+                        currentCountry != null -> "${currentCountry.optString("nameZh", "")} (${currentCountry.optString("iso", "")})"
+                        countryIso.isNotEmpty() -> countryIso
+                        else -> fragment.getString(R.string.env_sim_no_slot_selected)
+                    },
                     Modifier.weight(1f),
                     style = TextStyle(color = colors.textPrimary, fontSize = 15.sp)
                 )
@@ -1264,6 +1377,16 @@ private fun SimCountryCarrierSelect(
                     style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
                 )
             }
+        }
+        if (countryCustomMode) {
+            // 自定义国家：直接显示在下拉框下方（无论下拉是否展开）
+            GlassField(
+                value = customCountry,
+                onValueChange = onCountryCustom,
+                backdrop = backdrop,
+                modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                placeholder = fragment.getString(R.string.env_sim_country_custom_hint)
+            )
         }
         if (countryExpanded) {
             Column(
@@ -1280,7 +1403,7 @@ private fun SimCountryCarrierSelect(
                     val iso = c.optString("iso", "")
                     OptionRow(
                         label = "${c.optString("nameZh", "")} (${iso}) · MCC ${c.optString("mcc", "")}",
-                        selected = iso.equals(countryIso, ignoreCase = true),
+                        selected = !countryCustomMode && iso.equals(countryIso, ignoreCase = true),
                         colors = colors
                     ) {
                         onCountry(
@@ -1294,20 +1417,11 @@ private fun SimCountryCarrierSelect(
                 }
                 OptionRow(
                     label = customLabel,
-                    selected = customCountry.isNotEmpty(),
+                    selected = countryCustomMode,
                     colors = colors
                 ) {
-                    onCountryExpanded(false)
+                    onCountryCustomMode()
                 }
-            }
-            if (customCountry.isNotEmpty()) {
-                GlassField(
-                    value = customCountry,
-                    onValueChange = onCountryCustom,
-                    backdrop = backdrop,
-                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
-                    placeholder = fragment.getString(R.string.env_sim_country_custom_hint)
-                )
             }
         }
     }
@@ -1333,7 +1447,8 @@ private fun SimCountryCarrierSelect(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BasicText(
-                    carrierName.ifEmpty { fragment.getString(R.string.env_sim_no_slot_selected) },
+                    if (carrierCustomMode) customCarrier.ifEmpty { fragment.getString(R.string.env_sim_custom) }
+                    else carrierName.ifEmpty { fragment.getString(R.string.env_sim_no_slot_selected) },
                     Modifier.weight(1f),
                     style = TextStyle(color = colors.textPrimary, fontSize = 15.sp)
                 )
@@ -1342,6 +1457,16 @@ private fun SimCountryCarrierSelect(
                     style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
                 )
             }
+        }
+        if (carrierCustomMode) {
+            // 自定义运营商：直接显示在下拉框下方（无论下拉是否展开）
+            GlassField(
+                value = customCarrier,
+                onValueChange = onCarrierCustom,
+                backdrop = backdrop,
+                modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                placeholder = fragment.getString(R.string.env_sim_carrier_custom_hint)
+            )
         }
         if (carrierExpanded) {
             val options = carriersByIso[countryIso.uppercase()] ?: emptyList()
@@ -1365,7 +1490,7 @@ private fun SimCountryCarrierSelect(
                     options.forEach { carrier ->
                         OptionRow(
                             label = carrier,
-                            selected = carrier == carrierName,
+                            selected = !carrierCustomMode && carrier == carrierName,
                             colors = colors
                         ) {
                             onCarrier(carrier)
@@ -1375,20 +1500,11 @@ private fun SimCountryCarrierSelect(
                 }
                 OptionRow(
                     label = customLabel,
-                    selected = customCarrier.isNotEmpty(),
+                    selected = carrierCustomMode,
                     colors = colors
                 ) {
-                    onCarrierExpanded(false)
+                    onCarrierCustomMode()
                 }
-            }
-            if (customCarrier.isNotEmpty()) {
-                GlassField(
-                    value = customCarrier,
-                    onValueChange = onCarrierCustom,
-                    backdrop = backdrop,
-                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
-                    placeholder = fragment.getString(R.string.env_sim_carrier_custom_hint)
-                )
             }
         }
     }
@@ -1426,6 +1542,34 @@ private fun OptionRow(
                 fontSize = 14.sp
             )
         )
+    }
+}
+
+/** 环境条目表单右上角「随机」按钮：随机生成合法参数填入当前表单。 */
+@Composable
+private fun RandomButtonRow(
+    fragment: androidx.fragment.app.Fragment,
+    backdrop: Backdrop,
+    onClick: () -> Unit
+) {
+    val colors = glassColors()
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        GlassPill(
+            onClick = onClick,
+            backdrop = backdrop,
+            selected = false,
+            containerColor = colors.accent.copy(alpha = 0.18f),
+            height = 30.dp
+        ) {
+            BasicText(
+                fragment.getString(R.string.env_random_title),
+                Modifier.padding(horizontal = 12.dp),
+                style = TextStyle(color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            )
+        }
     }
 }
 

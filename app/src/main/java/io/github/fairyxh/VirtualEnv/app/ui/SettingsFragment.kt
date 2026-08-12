@@ -30,6 +30,7 @@ import android.telephony.CellInfoGsm
 import android.telephony.CellInfoLte
 import android.telephony.CellInfoNr
 import android.telephony.CellInfoWcdma
+import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.view.LayoutInflater
 import android.view.View
@@ -121,7 +122,8 @@ class SettingsFragment : Fragment() {
     private var envTestFields by mutableStateOf(
         listOf(
             EnvTestField("位置"), EnvTestField("基站"), EnvTestField("蓝牙"),
-            EnvTestField("WiFi"), EnvTestField("传感器"), EnvTestField("GNSS")
+            EnvTestField("WiFi"), EnvTestField("传感器"), EnvTestField("GNSS"),
+            EnvTestField("SIM")
         )
     )
 
@@ -193,6 +195,8 @@ class SettingsFragment : Fragment() {
     private var lastCellText: String = ""
     @Volatile
     private var lastWifiText: String = ""
+    @Volatile
+    private var lastSimText: String = ""
 
     @android.annotation.SuppressLint("MissingPermission")
     private val bleScanCallback = object : ScanCallback() {
@@ -236,7 +240,8 @@ class SettingsFragment : Fragment() {
             EnvTestField("蓝牙", idle, value = idle),
             EnvTestField("WiFi", idle, value = idle),
             EnvTestField("传感器", idle, value = idle),
-            EnvTestField("GNSS", idle, value = idle)
+            EnvTestField("GNSS", idle, value = idle),
+            EnvTestField("SIM", idle, value = idle)
         )
         loadAmapConfig()
         initLauncherHideToggle()
@@ -795,6 +800,18 @@ class SettingsFragment : Fragment() {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test gnss read failed", t)
         }
+        try {
+            val simText = buildSimText()
+            lastSimText = simText
+            val v = judgeSim()
+            report.put("sim", org.json.JSONObject().apply {
+                put("verdict", v.name)
+                put("data", simText)
+            })
+            updates["SIM"] = simText to v
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test sim read failed", t)
+        }
         // 上报报告（每轮一次；失败静默，Backend 保留上一份）
         try {
             io.github.fairyxh.VirtualEnv.app.ApiClient.postTestReport(report)
@@ -1135,6 +1152,88 @@ class SettingsFragment : Fragment() {
         }
         if (sb.isEmpty()) sb.append("无 GNSS 数据")
         return sb.toString().trim()
+    }
+
+    @android.annotation.SuppressLint("MissingPermission", "NewApi")
+    private fun buildSimText(): String {
+        val tm = telephonyManager ?: return "TelephonyManager 不可用"
+        val sb = StringBuilder()
+        try {
+            val subId = try { SubscriptionManager.getDefaultSubscriptionId() } catch (t: Throwable) { -1 }
+            val subTm = if (subId >= 0) tm.createForSubscriptionId(subId) else tm
+            sb.append("国家码: ").append(runCatching { subTm.simCountryIso }.getOrDefault("")).append("\n")
+            sb.append("运营商: ").append(runCatching { subTm.simOperatorName }.getOrDefault("")).append("\n")
+            sb.append("网络运营商: ").append(runCatching { subTm.networkOperatorName }.getOrDefault("")).append("\n")
+            sb.append("SIM 运营商代码: ").append(runCatching { subTm.simOperator }.getOrDefault("")).append("\n")
+            sb.append("网络代码: ").append(runCatching { subTm.networkOperator }.getOrDefault("")).append("\n")
+            sb.append("IMSI: ").append(runCatching { subTm.subscriberId }.getOrDefault("")).append("\n")
+            sb.append("ICCID: ").append(runCatching { subTm.simSerialNumber }.getOrDefault("")).append("\n")
+            sb.append("号码: ").append(runCatching { subTm.line1Number }.getOrDefault("")).append("\n")
+            sb.append("状态: ").append(runCatching { tm.simState }.getOrDefault(-1)).append("\n")
+            try {
+                val ss = tm.signalStrength
+                if (ss != null) {
+                    sb.append("信号 Lv:").append(runCatching { ss.level }.getOrDefault(-1))
+                    sb.append(" GSM:").append(runCatching { ss.gsmSignalStrength }.getOrDefault(Int.MIN_VALUE))
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        val lte = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthLte::class.java)
+                        if (lte.isNotEmpty()) sb.append(" LTE rsrp:").append(lte[0].dbm)
+                    }
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        val nr = ss.getCellSignalStrengths(android.telephony.CellSignalStrengthNr::class.java)
+                        if (nr.isNotEmpty()) sb.append(" NR rsrp:").append(nr[0].dbm)
+                    }
+                    sb.append("\n")
+                }
+            } catch (_: Throwable) {
+            }
+        } catch (t: Throwable) {
+            sb.append("读取失败: ").append(t.message).append("\n")
+        }
+        if (sb.isEmpty()) sb.append("无 SIM 数据（无卡或权限不足）")
+        return sb.toString().trim()
+    }
+
+    /** SIM 判定：配置任一卡槽的 mcc/mnc/运营商/IMSI 等出现在 App 读到文本中。 */
+    private fun judgeSim(): Verdict {
+        val data = envData("sim") ?: return Verdict.NOT_ENABLED
+        val slots = data.optJSONArray("slots") ?: return Verdict.FAIL
+        if (slots.length() == 0) return Verdict.FAIL
+        if (lastSimText.isBlank()) return Verdict.FAIL
+        for (i in 0 until slots.length()) {
+            val s = slots.optJSONObject(i) ?: continue
+            var hit = 0
+            var total = 0
+            val mcc = s.optString("mcc", "")
+            if (mcc.isNotEmpty()) {
+                total++
+                if (lastSimText.contains(mcc)) hit++
+            }
+            val mnc = s.optString("mnc", "")
+            if (mnc.isNotEmpty()) {
+                total++
+                if (lastSimText.contains(mnc)) hit++
+            }
+            val operator = s.optString("simOperatorName", "").ifEmpty { s.optString("carrier", "") }
+            if (operator.isNotEmpty()) {
+                total++
+                if (lastSimText.contains(operator)) hit++
+            }
+            val imsi = s.optString("subscriberId", "")
+            if (imsi.isNotEmpty()) {
+                total++
+                if (lastSimText.contains(imsi)) hit++
+            }
+            val iccid = s.optString("simSerialNumber", "")
+            if (iccid.isNotEmpty()) {
+                total++
+                if (lastSimText.contains(iccid)) hit++
+            }
+            // 至少 2 项命中视为生效（运营商名称可能被 ROM 截断）
+            if (total >= 2 && hit >= 2) return Verdict.PASS
+            if (total == 1 && hit == 1) return Verdict.PASS
+        }
+        return Verdict.FAIL
     }
 
     @android.annotation.SuppressLint("MissingPermission")

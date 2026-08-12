@@ -362,6 +362,8 @@
     <string name="env_detail_saved_title">已保存配置（点击使用 = 切换）</string>
     <string name="env_detail_active">使用中</string>
     <string name="env_detail_inactive">未使用</string>
+    <string name="env_random_filled">已随机生成合法参数，可继续微调</string>
+    <string name="env_random_title">随机</string>
     <string name="env_detail_in_use_badge">使用中</string>
     <string name="env_detail_view">详情</string>
     <string name="env_detail_data_title">配置详情</string>
