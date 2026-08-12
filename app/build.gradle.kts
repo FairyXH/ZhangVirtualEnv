@@ -64,6 +64,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.ui.graphics)
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
 

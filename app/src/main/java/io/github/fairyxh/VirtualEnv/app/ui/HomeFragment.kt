@@ -855,11 +855,11 @@ class HomeFragment : Fragment() {
                     } else {
                         getString(R.string.location_disabled)
                     }
-                    statusDetail = getString(
-                        R.string.home_status_detail,
-                        info?.data?.optString("phase", "1") ?: "-",
-                        enabledText
-                    )
+//                    statusDetail = getString(
+//                        R.string.home_status_detail,
+//                        info?.data?.optString("phase", "1") ?: "-",
+//                        enabledText
+//                    )
                 } else {
                     statusText = getString(R.string.home_status_offline)
                     statusDetail = getString(R.string.home_status_offline_detail)

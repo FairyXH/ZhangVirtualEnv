@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ZhangVirtualEnv</string>
-    <string name="module_description">Android Environment Replay Framework</string>
+    <string name="app_name">Zhang虚拟环境</string>
+    <string name="module_description">虚拟环境模块·强力隐私保护</string>
 
     <!-- Bottom bar -->
     <string name="tab_home">主页</string>
@@ -11,7 +11,7 @@
     <string name="tab_settings">设置</string>
 
     <!-- Home -->
-    <string name="home_subtitle">Android Environment Replay Framework</string>
+    <string name="home_subtitle">虚拟环境模块·强力隐私保护</string>
     <string name="home_status_title">模块状态</string>
     <string name="home_status_checking">正在检测…</string>
     <string name="home_status_ok">模块已激活，Backend 运行中</string>
