@@ -38,6 +38,7 @@ class ApiServer(
         private const val BIND_ADDRESS = "127.0.0.1"
         // 配置导入/导出请求体可能包含大量环境快照数据，放宽到 16MB
         private const val MAX_BODY = 1 shl 24 // 16MB
+        private const val MAX_HANDLER_THREADS = 16
     }
 
     private val running = AtomicBoolean(false)
@@ -48,7 +49,17 @@ class ApiServer(
         if (!running.compareAndSet(false, true)) return true
         return try {
             serverSocket = ServerSocket(port, 50, InetAddress.getByName(BIND_ADDRESS))
-            executor = Executors.newCachedThreadPool()
+            // 固定线程池 + 有界队列：防止大量慢速/半开连接把进程拖死
+            executor = Executors.newFixedThreadPool(
+                MAX_HANDLER_THREADS,
+                java.util.concurrent.ThreadFactory { r ->
+                    Thread(r, "ZVE-ApiHandler").apply { isDaemon = true }
+                }
+            ).also { pool ->
+                // CallerRunsPolicy：队列满时由 accept 线程直接处理，避免拒绝连接
+                (pool as java.util.concurrent.ThreadPoolExecutor).rejectedExecutionHandler =
+                    java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+            }
             Thread { acceptLoop() }
                 .apply {
                     name = "ZVE-ApiServer"
@@ -75,14 +86,41 @@ class ApiServer(
     }
 
     private fun acceptLoop() {
+        var consecutiveErrors = 0
         while (running.get()) {
             try {
                 val socket = serverSocket?.accept() ?: break
+                consecutiveErrors = 0
                 executor?.execute { handle(socket) }
             } catch (t: Throwable) {
-                if (running.get()) ZLog.w(TAG_SCOPE, "accept failed", t)
-                break
+                if (!running.get()) break
+                // accept 单次异常（如 fd 瞬时耗尽）不得退出循环，否则监听 socket 假死：
+                // 所有新连接进入 backlog 排队（SYN-SENT），App 端 ApiServer 看似存在实则不可用。
+                consecutiveErrors++
+                ZLog.w(TAG_SCOPE, "accept failed (#$consecutiveErrors), retrying", t)
+                try {
+                    if (consecutiveErrors >= 3) {
+                        recreateServerSocket()
+                    }
+                    Thread.sleep((consecutiveErrors * 100L).coerceAtMost(1000L))
+                } catch (ie: InterruptedException) {
+                    break
+                }
             }
+        }
+    }
+
+    /** 重建监听 socket（accept 连续失败时的兜底，避免长期假死）。 */
+    private fun recreateServerSocket() {
+        try {
+            serverSocket?.close()
+        } catch (_: Throwable) {
+        }
+        try {
+            serverSocket = ServerSocket(port, 50, InetAddress.getByName(BIND_ADDRESS))
+            ZLog.i(TAG_SCOPE, "ApiServer socket recreated on $BIND_ADDRESS:$port")
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "recreate server socket failed", t)
         }
     }
 

@@ -6,6 +6,8 @@ import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.util.Collections
 import java.util.HashSet
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Location Hook Adapter（Phase 1.1）。
@@ -20,6 +22,8 @@ import java.util.HashSet
  * 2. LocationManagerService.getCurrentLocation(...)  → before 直接回调虚拟位置（异步单次）
  * 3. LocationProviderManager.onReportLocation(LocationResult) → before 替换上报位置（连续定位统一分发点）
  * 4. GnssLocationProvider.onReportLocation(...)       → before 替换 GPS provider 上报（兜底）
+ * 5. ILocationListener$Stub$Proxy.onLocationChanged  → before 全局替换（仿 Paopao：任何到达 App 的 fix 都换为虚拟位置）
+ * 6. registerLocationListener / unregisterLocationListener → 维护活跃 listener，虚拟定位启用时周期主动推送
  */
 class LocationHookAdapter(
     private val backend: Backend,
@@ -28,6 +32,18 @@ class LocationHookAdapter(
 
     companion object {
         private const val TAG_SCOPE = "Hook"
+        private const val PUSH_INTERVAL_MS = 500L
+        private const val MAX_PUSH_LISTENERS = 128
+    }
+
+    /** 活跃的 ILocationListener（system_server 内 App Binder 代理实例）。 */
+    private val activeListeners = ConcurrentHashMap.newKeySet<Any>()
+
+    /** 周期主动推送是否已启动（幂等）。 */
+    private val pushStarted = AtomicBoolean(false)
+
+    private val pushExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-LocPush").apply { isDaemon = true }
     }
 
     /**
@@ -51,9 +67,12 @@ class LocationHookAdapter(
         hookGnssReportLocation(classLoader, gnssClass)
         hookDeliverOnLocationChanged(classLoader, providerManagerClass)
         hookRegisterLocationListener(classLoader, managerClass)
+        hookUnregisterLocationListener(classLoader, managerClass)
+        hookGlobalListenerProxy(classLoader)
         hookProviderEnabled(classLoader, managerClass)
         hookRegisterGnssStatusCallback(classLoader, managerClass)
         hookRegistrationFilter(classLoader, providerManagerClass)
+        startPushLoop()
     }
 
     /** 取刷新时间戳后的虚拟位置（所有对外投递点统一使用，防 SDK 新鲜度拒收）。 */
@@ -289,16 +308,22 @@ class LocationHookAdapter(
         val ok = registrar.register(method) { chain ->
             chain.proceed()
             val virtual: Location? = currentVirtual()
-            if (virtual != null) {
-                try {
-                    val listener = chain.getArg(2) ?: return@register null
-                    val pkg = chain.getArg(3) as? String ?: "?"
-                    hookListenerOnLocationChanged(listener, virtual)
+            try {
+                val listener = chain.getArg(2) ?: return@register null
+                val pkg = chain.getArg(3) as? String ?: "?"
+                // 维护活跃 listener 集合：虚拟定位启用时周期主动推送（摇杆移动实时生效）
+                if (activeListeners.size < MAX_PUSH_LISTENERS) {
+                    activeListeners.add(listener)
+                }
+                hookListenerOnLocationChanged(listener, virtual)
+                if (virtual != null) {
                     pushVirtualLocation(listener, virtual)
                     ZLog.i(TAG_SCOPE, "registerLocationListener pkg=$pkg listener=${listener.javaClass.name} pushed virtual")
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "registerLocationListener virtual push failed", t)
+                } else {
+                    ZLog.i(TAG_SCOPE, "registerLocationListener pkg=$pkg listener=${listener.javaClass.name} (virtual off)")
                 }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "registerLocationListener virtual push failed", t)
             }
             null
         }
@@ -310,13 +335,142 @@ class LocationHookAdapter(
     /** 已 hook 过 onLocationChanged 的 listener class（Binder Proxy class 全局共享，只需 hook 一次）。 */
     private val hookedListenerClasses = Collections.synchronizedSet(HashSet<Class<*>>())
 
+    // ---------- 连续定位 listener 注销点：unregisterLocationListener ----------
+
+    /**
+     * Hook unregisterLocationListener，从活跃 listener 集合移除实例，
+     * 避免周期主动推送向已注销 listener 投递（DeadObjectException 噪音）。
+     */
+    private fun hookUnregisterLocationListener(classLoader: ClassLoader, className: String) {
+        val clazz = HookSupport.findClass(classLoader, className) ?: return
+        val method = HookSupport.findMethods(clazz, "unregisterLocationListener")
+            .firstOrNull { it.parameterCount == 1 && it.parameterTypes[0].simpleName.contains("ILocationListener") }
+        if (method == null) {
+            ZLog.w(TAG_SCOPE, "unregisterLocationListener not found in $className")
+            return
+        }
+        val ok = registrar.register(method) { chain ->
+            try {
+                val listener = chain.getArg(0)
+                if (listener != null) {
+                    activeListeners.remove(listener)
+                    ZLog.i(TAG_SCOPE, "unregisterLocationListener removed ${listener.javaClass.name}")
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "unregisterLocationListener hook failed", t)
+            }
+            chain.proceed()
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked $className.unregisterLocationListener")
+        }
+    }
+
+    // ---------- 全局 Binder 出口替换：ILocationListener$Stub$Proxy.onLocationChanged ----------
+
+    /**
+     * 全局替换所有 App 的 ILocationListener Binder 出口（仿 Paopao hookGlobalLocationListener）。
+     *
+     * 在 system_server 进程中 hook `android.location.ILocationListener$Stub$Proxy` 的
+     * onLocationChanged：无论 provider 上报真实还是虚拟位置，只要虚拟定位启用，
+     * 到达 App 进程之前统一替换为虚拟位置。百度/微信等 SDK 的 listener 都是该
+     * Binder Proxy 实例，覆盖 requestLocationUpdates / registerLocationListener /
+     * passive 等全部注册路径，且不 Hook 任何第三方 App 进程（约束不变）。
+     */
+    private fun hookGlobalListenerProxy(classLoader: ClassLoader) {
+        val proxyClass = try {
+            Class.forName("android.location.ILocationListener\$Stub\$Proxy", false, classLoader)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "ILocationListener\$Stub\$Proxy not found, skip global proxy hook", t)
+            return
+        }
+        var hooked = 0
+        HookSupport.findMethods(proxyClass, "onLocationChanged").forEach { m ->
+            if (m.parameterCount < 1) return@forEach
+            val ok = registrar.register(m) { chain ->
+                val virtualNow: Location? = currentVirtual()
+                if (virtualNow != null && chain.args.isNotEmpty()) {
+                    val arg0 = chain.getArg(0)
+                    when {
+                        arg0 is List<*> -> {
+                            chain.proceed(arrayOf(listOf(virtualNow), chain.getArg(1)))
+                            ZLog.d(TAG_SCOPE, "proxy onLocationChanged(List) -> virtual ${virtualNow.latitude},${virtualNow.longitude}")
+                        }
+                        arg0 is Location -> {
+                            chain.proceed(arrayOf(virtualNow))
+                            ZLog.d(TAG_SCOPE, "proxy onLocationChanged(Location) -> virtual ${virtualNow.latitude},${virtualNow.longitude}")
+                        }
+                        else -> chain.proceed()
+                    }
+                } else {
+                    chain.proceed()
+                }
+                null
+            }
+            if (ok) {
+                hooked++
+                ZLog.i(TAG_SCOPE, "hooked ILocationListener\$Stub\$Proxy.onLocationChanged (${m.parameterCount} params)")
+            }
+        }
+        if (hooked == 0) {
+            ZLog.w(TAG_SCOPE, "ILocationListener\$Stub\$Proxy.onLocationChanged candidates not found")
+        }
+    }
+
+    // ---------- 周期主动推送（摇杆/路线实时投递兜底） ----------
+
+    /**
+     * 虚拟定位启用时，每 [PUSH_INTERVAL_MS] 向所有活跃 listener 主动推送一次虚拟位置。
+     *
+     * 背景：百度地图摇杆无效的根因是 SDK 在无真实 GPS fix 时收不到 provider 上报，
+     * 而 provider 注入（VirtualFixInjector）依赖 LocationProviderManager 实例捕获，
+     * Oplus 15 上存在签名差异时注入器可能不工作。这里直接调用 App listener 的
+     * Binder onLocationChanged，等效于 Paopao 的 callOnLocationChanged()：
+     * 不依赖 provider 链路，位置变化（摇杆位移）实时到达百度/微信。
+     */
+    private fun startPushLoop() {
+        if (!pushStarted.compareAndSet(false, true)) return
+        pushExecutor.scheduleWithFixedDelay(
+            {
+                try {
+                    pushToActiveListeners()
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "push loop failed", t)
+                }
+            },
+            PUSH_INTERVAL_MS,
+            PUSH_INTERVAL_MS,
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
+        ZLog.i(TAG_SCOPE, "listener push loop started (interval=${PUSH_INTERVAL_MS}ms)")
+    }
+
+    private fun pushToActiveListeners() {
+        if (!virtualLocationEnabled()) return
+        if (activeListeners.isEmpty()) return
+        val virtual = currentVirtual() ?: return
+        val iter = activeListeners.iterator()
+        while (iter.hasNext()) {
+            val listener = iter.next()
+            try {
+                pushVirtualLocation(listener, virtual)
+            } catch (t: Throwable) {
+                // DeadObject / 已注销 listener：移除避免持续噪音
+                iter.remove()
+                ZLog.d(TAG_SCOPE, "push listener removed (dead): ${listener.javaClass.name} ${t.message}")
+            }
+        }
+    }
+
     /**
      * 对 listener 的 onLocationChanged 做参数替换。
      *
      * 支持 Android 12+ 的 onLocationChanged(List<Location>, IRemoteCallback)
-     * 与旧式 onLocationChanged(Location)。
+     * 与旧式 onLocationChanged(Location)。virtual 为 null（虚拟定位未启用）时
+     * 仅注册替换钩子，启用后由 currentVirtual() 实时取数。
      */
-    private fun hookListenerOnLocationChanged(listener: Any, virtual: Location) {
+    private fun hookListenerOnLocationChanged(listener: Any, virtual: Location?) {
         val cls = listener.javaClass
         if (!hookedListenerClasses.add(cls)) return
         cls.methods.filter { it.name == "onLocationChanged" }.forEach { m ->
