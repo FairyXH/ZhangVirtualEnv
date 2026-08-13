@@ -68,6 +68,7 @@ Users are responsible for their own usage.
 | 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳 |
 | 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
+| 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（仿泡泡虚拟定位）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，百度地图摇杆移动实时生效（详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`） |
 | 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配百度地图等严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
 | SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
@@ -115,6 +116,7 @@ Users are responsible for their own usage.
 - `core/Backend.kt` — system_server 内的核心服务，持有各 Engine 与持久化
 - `core/EnvStateCache.kt` — App 进程侧 500ms 轮询缓存，Hook 层读取快照
 - `hook/FrameworkEnvHookAdapter.kt` — 普通 App 进程内的框架 API Hook
+- `hook/LocationHookAdapter.kt` — system_server 定位 Hook：provider 上报替换 + **全局 ILocationListener Proxy 出口替换 + 500ms 主动推送**（百度摇杆实时投递）
 - `hook/PhoneInterfaceManagerHookAdapter.kt` — phone 进程 Binder 层基站 Hook
 - `hook/SimTelephonyHookAdapter.kt` — phone 进程 ITelephony / IPhoneSubInfo SIM 身份与信号 Hook
 - `hook/SimSystemPropertyHookAdapter.kt` — phone 进程 TelephonyProperties 系统属性层 SIM 身份虚拟化（Oplus 15 必需，详见 `docs/reverse/oplus15-sim-property-layer-fix.md`）
@@ -359,6 +361,8 @@ adb logcat -s VirEnvDetector:I
 - **jadx CLI 反编译 framework.jar 很慢**：framework.jar 是 dex 且体积大；优先真机反射枚举
 - **LTE 值范围**：TAC 16 位、CI 28 位、PCI 0~503，random 生成必须落在范围内
 - **GNSS 真实回调覆盖**：必须拦截 `registerGnssStatusCallback`（不 proceed）并周期投递虚拟状态，否则真实卫星（几十颗）会覆盖虚拟值导致判定波动
+- **百度摇杆实时性**：除了 provider 注入，还必须做**全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（`LocationHookAdapter`），否则百度等 SDK 在无真实 GPS fix 时收不到持续 fix，摇杆位移不生效（逆向泡泡虚拟定位所得，详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`）
+- **ApiServer 假死**：`acceptLoop` 单次 accept 异常不得 break（否则监听 socket 在但连接全挂，App 端显示 Backend 离线）；已改为异常重试 + socket 重建 + 固定线程池
 - **NetworkOnMainThread**：检测器 API 调用必须在后台线程，UI 更新回主线程
 - **HMA / HideMyAppList**：不影响 LSPosed Hook 注入；检测器需要 Root 才能直读模块持久化配置
 - **高德地图坐标是 GCJ-02**：地图选点/POI/高德定位坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后才能注入系统（否则偏差数百米）；内部持久化统一 WGS-84，回显地图时 `wgs84ToGcj02` 转回。**本次更新前保存的旧地点/路线坐标是 GCJ 语义，建议重新选点保存**
@@ -386,7 +390,7 @@ ZhangVirtualEnv/
 └── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
 ```
 
-逆向与真机验证过程记录见 `docs/reverse/`（重点：`env-live-test-and-hook-fixes.md`、`config-preset-and-import-export.md`）。
+逆向与真机验证过程记录见 `docs/reverse/`（重点：`env-live-test-and-hook-fixes.md`、`config-preset-and-import-export.md`、`paopao-joystick-global-listener-analysis.md`）。
 
 ---
 
