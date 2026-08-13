@@ -22,7 +22,9 @@ import kotlin.math.sqrt
  * 距上次调用的时间差 × 速度推进游标，无需后台线程；路线播放期间
  * Hook 驱动即实时，无 Hook 调用则自然暂停。
  */
-class RouteEngine : LocationEngine {
+class RouteEngine(
+    private val jitterEnabled: () -> Boolean = { true },
+) : LocationEngine {
 
     override val name: String = "route"
 
@@ -251,8 +253,11 @@ class RouteEngine : LocationEngine {
         val location = Location("gps")
         // 运动随机抖动：经纬度各自独立，幅度随速度接近人体跑步 GPS 噪声
         // （低速约 ±0.7m，跑步速度 ≥4m/s 时约 ±2.2m，1°≈111.32km）
-        location.latitude = p.first + jitterFor(s.speedMps)
-        location.longitude = p.second + jitterFor(s.speedMps)
+        // 用户可在设置中关闭（settings.jitterEnabled=false），用于需要稳定坐标的场景。
+        val latJitter = if (jitterEnabled()) jitterFor(s.speedMps) else 0.0
+        val lonJitter = if (jitterEnabled()) jitterFor(s.speedMps) else 0.0
+        location.latitude = p.first + latJitter
+        location.longitude = p.second + lonJitter
         location.accuracy = 5f
         location.speed = s.speedMps.toFloat()
         location.bearing = bearingAt(s).toFloat()
@@ -270,8 +275,8 @@ class RouteEngine : LocationEngine {
         val p = interpolateCurrent(s)
         return LocationState(
             enabled = true,
-            latitude = p.first + jitterFor(s.speedMps),
-            longitude = p.second + jitterFor(s.speedMps),
+            latitude = p.first + if (jitterEnabled()) jitterFor(s.speedMps) else 0.0,
+            longitude = p.second + if (jitterEnabled()) jitterFor(s.speedMps) else 0.0,
             speed = s.speedMps.toFloat(),
             bearing = bearingAt(s).toFloat(),
             accuracy = 5f,

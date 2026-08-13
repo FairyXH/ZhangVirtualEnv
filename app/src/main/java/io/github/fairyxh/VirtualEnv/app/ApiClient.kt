@@ -161,6 +161,15 @@ object ApiClient {
 
     fun getJoystickStatus(): ApiResult = get("/api/joystick/status")
 
+    fun resetJoystick(): ApiResult = post("/api/joystick/reset", JSONObject())
+
+    fun getJitterSetting(): ApiResult = get("/api/settings/jitter")
+
+    fun setJitterSetting(enabled: Boolean): ApiResult {
+        val body = JSONObject().apply { put("enabled", enabled) }
+        return post("/api/settings/jitter", body)
+    }
+
     // ---------- LocationPoint ----------
 
     fun createLocationPoint(name: String, remark: String, latitude: Double, longitude: Double): ApiResult {

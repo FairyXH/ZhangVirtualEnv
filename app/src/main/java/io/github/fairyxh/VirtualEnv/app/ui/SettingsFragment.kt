@@ -65,6 +65,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
+import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.ui.glass.AppBackground
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
@@ -120,6 +121,21 @@ class SettingsFragment : Fragment() {
     private var privacyAgreed by mutableStateOf(false)
     private var launcherHidden by mutableStateOf(false)
     private var showDeveloperNotice by mutableStateOf(false)
+    private var jitterEnabled by mutableStateOf(true)
+
+    private fun setJitterSwitch(enabled: Boolean) {
+        jitterEnabled = enabled
+        Thread {
+            try {
+                val result = ApiClient.setJitterSetting(enabled)
+                if (result.code != 0) {
+                    ZLog.w(TAG_SCOPE, "set jitter setting failed: ${result.message}")
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "set jitter setting failed: ${t.message}")
+            }
+        }.start()
+    }
 
     private var envTestRunningState by mutableStateOf(false)
     private var envTestFields by mutableStateOf(
@@ -262,6 +278,7 @@ class SettingsFragment : Fragment() {
         )
         loadAmapConfig()
         initLauncherHideToggle()
+        loadJitterSetting()
 
         return androidx.compose.ui.platform.ComposeView(context).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -390,6 +407,31 @@ class SettingsFragment : Fragment() {
                         GlassToggle(
                             selected = { AppBackground.useWallpaper },
                             onSelect = { fragment.setWallpaperBackground(it) },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                    }
+                }
+
+                // 模拟设置卡（随机抖动）
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Row(
+                        Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            SectionTitle(getString(R.string.settings_sim_title))
+                            SectionDesc(getString(R.string.settings_sim_jitter_desc))
+                        }
+                        GlassToggle(
+                            selected = { fragment.jitterEnabled },
+                            onSelect = { fragment.setJitterSwitch(it) },
                             backdrop = backdrop,
                             modifier = Modifier.padding(start = 12.dp)
                         )
@@ -1510,6 +1552,23 @@ class SettingsFragment : Fragment() {
             }
         }
         AppBackground.setUseWallpaper(requireContext(), enabled)
+    }
+
+    // ---------- 随机抖动开关 ----------
+
+    /** 从后端读取随机抖动开关（异步，UI 先显示默认值）。 */
+    private fun loadJitterSetting() {
+        Thread {
+            try {
+                val result = ApiClient.getJitterSetting()
+                if (result.code == 0) {
+                    val enabled = result.data?.optBoolean("jitterEnabled", true) ?: true
+                    activity?.runOnUiThread { jitterEnabled = enabled }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "load jitter setting failed: ${t.message}")
+            }
+        }.start()
     }
 
     private val wallpaperPermissionLauncher =

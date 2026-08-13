@@ -207,6 +207,9 @@ class ApiServer(
                 path == "/api/route/status" && method == "GET" -> routeStatus()
                 path == "/api/joystick/set" && method == "POST" -> joystickSet(body)
                 path == "/api/joystick/status" && method == "GET" -> joystickStatus()
+                path == "/api/joystick/reset" && method == "POST" -> joystickReset()
+                path == "/api/settings/jitter" && method == "GET" -> settingsJitter()
+                path == "/api/settings/jitter" && method == "POST" -> settingsJitter(body)
                 path == "/api/location-point/create" && method == "POST" -> locationPointCreate(body)
                 path == "/api/location-point/list" && method == "GET" -> locationPointList()
                 path == "/api/location-point/use" && method == "POST" -> locationPointUse(body)
@@ -379,6 +382,24 @@ class ApiServer(
 
     private fun joystickStatus(): ApiResult {
         return ApiResult.ok("ok", backend.joystickStatusJson())
+    }
+
+    /** 显式复位摇杆位移（回基准位置；悬浮窗“复位”按钮使用）。 */
+    private fun joystickReset(): ApiResult {
+        backend.resetJoystickOffset()
+        return ApiResult.ok("ok", backend.joystickStatusJson())
+    }
+
+    // ---------- Settings ----------
+
+    private fun settingsJitter(body: String? = null): ApiResult {
+        if (body != null) {
+            val json = JSONObject(body)
+            if (json.has("enabled")) {
+                backend.setJitterEnabled(json.optBoolean("enabled", true))
+            }
+        }
+        return ApiResult.ok("ok", backend.settingsStatusJson())
     }
 
     // ---------- LocationPoint ----------

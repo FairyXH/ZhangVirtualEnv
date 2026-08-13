@@ -13,7 +13,9 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * 线程安全：状态保存在 [AtomicReference]，Hook 任意线程可并发读取。
  */
-class SinglePointLocationEngine : LocationEngine {
+class SinglePointLocationEngine(
+    private val jitterEnabled: () -> Boolean = { true },
+) : LocationEngine {
 
     override val name: String = "single-point"
 
@@ -52,28 +54,32 @@ class SinglePointLocationEngine : LocationEngine {
 
     override fun currentState(): LocationState = state.get()
 
-    companion object {
-        /**
-         * 由 [LocationState] 构建 [Location]。
-         *
-         * 每次调用都刷新 time/elapsedRealtimeNanos 为当前时间，
-         * 避免客户端因位置时间戳过旧而丢弃虚拟位置。
-         */
-        fun buildLocation(s: LocationState): Location {
-            val location = Location(s.provider.ifEmpty { "gps" })
-            // 随机抖动 ±0.000005°（约 ±0.5m），模拟真实 GPS 噪声；
-            // 每次调用独立抖动，客户端不易察觉“像素级静止”的虚拟定位。
+    /**
+     * 由 [LocationState] 构建 [Location]。
+     *
+     * 每次调用都刷新 time/elapsedRealtimeNanos 为当前时间，
+     * 避免客户端因位置时间戳过旧而丢弃虚拟位置。
+     */
+    fun buildLocation(s: LocationState): Location {
+        val location = Location(s.provider.ifEmpty { "gps" })
+        // 随机抖动 ±0.000005°（约 ±0.5m），模拟真实 GPS 噪声；
+        // 每次调用独立抖动，客户端不易察觉“像素级静止”的虚拟定位。
+        // 用户可在设置中关闭（settings.jitterEnabled=false），用于需要稳定坐标的场景。
+        if (jitterEnabled()) {
             val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
             location.latitude = s.latitude + jitter
             location.longitude = s.longitude + jitter
-            location.accuracy = s.accuracy
-            location.speed = s.speed
-            location.bearing = s.bearing
-            location.altitude = s.altitude
-            val now = System.currentTimeMillis()
-            location.time = now
-            location.elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
-            return location
+        } else {
+            location.latitude = s.latitude
+            location.longitude = s.longitude
         }
+        location.accuracy = s.accuracy
+        location.speed = s.speed
+        location.bearing = s.bearing
+        location.altitude = s.altitude
+        val now = System.currentTimeMillis()
+        location.time = now
+        location.elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+        return location
     }
 }

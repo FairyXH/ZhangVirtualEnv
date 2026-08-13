@@ -122,9 +122,9 @@ class VirtualFixInjector(
     private fun intervalMs(): Long {
         val cfg = backend.profileManager.locationHookConfig()
             .optLong("injectIntervalMs", DEFAULT_INTERVAL_MS)
-            .coerceAtLeast(500L)
-        // 摇杆移动时加快 fix 注入（≤1s），让地图实时跟随摇杆位移
-        return if (backend.joystickEngine.isEnabled()) cfg.coerceAtMost(1000L) else cfg
+            .coerceAtLeast(200L)
+        // 摇杆移动时 fix 注入与摇杆 tick（200ms）对齐，避免地图位置阶梯式跳变
+        return if (backend.joystickEngine.isEnabled()) cfg.coerceAtMost(250L) else cfg.coerceAtMost(1000L)
     }
 
     private fun startInjection() {

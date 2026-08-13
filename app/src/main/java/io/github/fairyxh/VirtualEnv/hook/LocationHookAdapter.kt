@@ -33,6 +33,7 @@ class LocationHookAdapter(
     companion object {
         private const val TAG_SCOPE = "Hook"
         private const val PUSH_INTERVAL_MS = 500L
+        private const val PUSH_INTERVAL_JOYSTICK_MS = 220L
         private const val MAX_PUSH_LISTENERS = 128
     }
 
@@ -431,19 +432,24 @@ class LocationHookAdapter(
      */
     private fun startPushLoop() {
         if (!pushStarted.compareAndSet(false, true)) return
-        pushExecutor.scheduleWithFixedDelay(
-            {
+        pushExecutor.execute(object : Runnable {
+            override fun run() {
                 try {
                     pushToActiveListeners()
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "push loop failed", t)
                 }
-            },
-            PUSH_INTERVAL_MS,
-            PUSH_INTERVAL_MS,
-            java.util.concurrent.TimeUnit.MILLISECONDS
-        )
-        ZLog.i(TAG_SCOPE, "listener push loop started (interval=${PUSH_INTERVAL_MS}ms)")
+                // 摇杆移动时加速推送（与 JoystickEngine tick 200ms 对齐），
+                // 避免百度等 SDK 看到阶梯式位置更新
+                val delay = if (backend.joystickEngine.isEnabled()) {
+                    PUSH_INTERVAL_JOYSTICK_MS
+                } else {
+                    PUSH_INTERVAL_MS
+                }
+                pushExecutor.schedule(this, delay, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+        })
+        ZLog.i(TAG_SCOPE, "listener push loop started (interval=${PUSH_INTERVAL_MS}ms, joystick=${PUSH_INTERVAL_JOYSTICK_MS}ms)")
     }
 
     private fun pushToActiveListeners() {

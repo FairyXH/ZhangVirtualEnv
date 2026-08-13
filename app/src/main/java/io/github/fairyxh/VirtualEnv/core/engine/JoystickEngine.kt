@@ -70,7 +70,11 @@ class JoystickEngine {
     fun isEnabled(): Boolean = state.get().enabled
 
     /**
-     * 更新摇杆向量。enabled=false 时清空累计位移（回到基准位置）。
+     * 更新摇杆向量。enabled=false 时**保留累计位移**（松手后停在新位置，不溜回原点），
+     * 仅 [resetOffset] 或显式 reset 才清空。
+     *
+     * dx/dy 做指数平滑（EMA）：Android 触摸事件常分轴采样（斜向快速拖动时一次 MOVE
+     * 可能只更新 x 或 y），直接使用原始值会先横走再纵走、呈锯齿；平滑后方向连续。
      *
      * @param dx 水平分量（-1..1，正=东）
      * @param dy 垂直分量（-1..1，正=北）
@@ -79,47 +83,67 @@ class JoystickEngine {
     fun setVector(enabled: Boolean, dx: Double, dy: Double, speedKmh: Double) {
         val now = SystemClock.elapsedRealtime()
         val s = state.get()
+        val targetDx = dx.coerceIn(-1.0, 1.0)
+        val targetDy = dy.coerceIn(-1.0, 1.0)
+        val smoothDx = if (enabled) s.dx + (targetDx - s.dx) * DIRECTION_SMOOTHING else targetDx
+        val smoothDy = if (enabled) s.dy + (targetDy - s.dy) * DIRECTION_SMOOTHING else targetDy
+        // 仅 enabled 边沿（false→true）重置 lastTime；持续拖动时保留 tick 的时间基准，
+        // 否则高频 setVector（40ms 节流）会反复截断 dt，导致位移速率不稳定。
+        val lastTime = if (enabled && !s.enabled) now else s.lastTime
         state.set(
             JoystickState(
                 enabled = enabled,
-                dx = dx.coerceIn(-1.0, 1.0),
-                dy = dy.coerceIn(-1.0, 1.0),
+                dx = smoothDx,
+                dy = smoothDy,
                 speedMps = (speedKmh / 3.6).coerceAtLeast(0.1),
-                offsetLat = if (enabled) s.offsetLat else 0.0,
-                offsetLon = if (enabled) s.offsetLon else 0.0,
-                lastTime = if (enabled) now else 0L,
+                offsetLat = s.offsetLat,
+                offsetLon = s.offsetLon,
+                lastTime = lastTime,
                 updateTime = now
             )
         )
-        ZLog.i("Core", "JoystickEngine vector enabled=$enabled dx=$dx dy=$dy speedKmh=$speedKmh")
+        ZLog.i("Core", "JoystickEngine vector enabled=$enabled dx=$smoothDx dy=$smoothDy speedKmh=$speedKmh offset=${s.offsetLat},${s.offsetLon}")
+    }
+
+    /** 显式复位：清空累计位移，回到基准位置（停止按钮 / API 使用）。 */
+    fun resetOffset() {
+        val s = state.get()
+        state.set(
+            s.copy(
+                offsetLat = 0.0,
+                offsetLon = 0.0,
+                updateTime = SystemClock.elapsedRealtime()
+            )
+        )
+        ZLog.i("Core", "JoystickEngine offset reset")
     }
 
     /**
-     * 把摇杆累计位移叠加到 [base] 上；未启用或 base 为 null 时返回 base。
-     * 每次调用按距上次调用的时间差推进位移（惰性推进，无后台线程）。
+     * 把摇杆累计位移叠加到 [base] 上；offset 为 0（或 base 为 null）时返回 base。
+     * enabled=false 时 offset 保留（松手停住），仍叠加。
      */
     fun applyTo(base: Location?): Location? {
         val s = state.get()
-        if (!s.enabled || base == null) return base
+        if (base == null || (s.offsetLat == 0.0 && s.offsetLon == 0.0)) return base
         baseLatRef.set(base.latitude)
         val location = Location(base)
         location.latitude = base.latitude + s.offsetLat
         location.longitude = base.longitude + s.offsetLon
-        location.speed = s.speedMps.toFloat()
-        location.bearing = bearingAt(s).toFloat()
+        location.speed = if (s.enabled) s.speedMps.toFloat() else 0f
+        location.bearing = if (s.enabled) bearingAt(s).toFloat() else base.bearing
         return location
     }
 
-    /** 叠加到 [state] 状态（App 展示用）。 */
+    /** 叠加到 [state] 状态（App 展示用）；offset 为 0 时返回原状态。 */
     fun applyTo(stateIn: LocationState): LocationState {
         val s = state.get()
-        if (!s.enabled) return stateIn
+        if (s.offsetLat == 0.0 && s.offsetLon == 0.0) return stateIn
         baseLatRef.set(stateIn.latitude)
         return stateIn.copy(
             latitude = stateIn.latitude + s.offsetLat,
             longitude = stateIn.longitude + s.offsetLon,
-            speed = s.speedMps.toFloat(),
-            bearing = bearingAt(s).toFloat(),
+            speed = if (s.enabled) s.speedMps.toFloat() else stateIn.speed,
+            bearing = if (s.enabled) bearingAt(s).toFloat() else stateIn.bearing,
             updateTime = System.currentTimeMillis()
         )
     }
@@ -162,5 +186,8 @@ class JoystickEngine {
     companion object {
         private const val METERS_PER_DEG_LAT = 111320.0
         private const val METERS_PER_DEG_LON = 111320.0
+
+        /** 方向指数平滑系数（0~1，越大响应越快；0.5 平衡平滑与跟手）。 */
+        private const val DIRECTION_SMOOTHING = 0.5
     }
 }

@@ -47,6 +47,7 @@ class EnvStateCache(
     private var stepFrequency: Int = 120
     private var stepCounter: Long = 0L
     private var lastSensorTickMs: Long = 0L
+    private var jitterEnabled: Boolean = true
 
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-EnvCache").apply { isDaemon = true }
@@ -102,6 +103,14 @@ class EnvStateCache(
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh location cache failed: ${t.message}")
+        }
+        try {
+            val settings = rawGet("/api/settings/jitter") ?: return
+            synchronized(lock) {
+                jitterEnabled = settings.optBoolean("jitterEnabled", true)
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "refresh settings cache failed: ${t.message}")
         }
         try {
             val route = rawGet("/api/route/status") ?: return
@@ -196,8 +205,13 @@ class EnvStateCache(
         val enabled = isLocationEnabled()
         if (!enabled) return null
         val location = android.location.Location("fused")
-        // 随机抖动 ±0.000005°（约 ±0.5m），与 system_server 引擎一致
-        val jitter = java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
+        // 随机抖动 ±0.000005°（约 ±0.5m），与 system_server 引擎一致；
+        // 用户可在设置中关闭（settings.jitterEnabled=false）。
+        val jitter = if (jitterEnabled) {
+            java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.000005, 0.000005)
+        } else {
+            0.0
+        }
         location.latitude = locationLat() + jitter
         location.longitude = locationLon() + jitter
         location.accuracy = locationAccuracy()

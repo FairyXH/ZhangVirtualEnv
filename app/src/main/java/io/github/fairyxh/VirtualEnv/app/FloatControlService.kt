@@ -36,8 +36,8 @@ class FloatControlService : Service() {
     companion object {
         private const val TAG_SCOPE = "FloatWin"
 
-        /** 摇杆上报节流间隔（ms）。 */
-        private const val JOYSTICK_THROTTLE_MS = 120L
+        /** 摇杆上报节流间隔（ms）。调低让方向更新更快，斜向移动更平滑。 */
+        private const val JOYSTICK_THROTTLE_MS = 40L
 
         fun start(context: android.content.Context) {
             try {

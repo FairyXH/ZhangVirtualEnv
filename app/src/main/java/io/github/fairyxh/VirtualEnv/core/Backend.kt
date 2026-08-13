@@ -71,7 +71,7 @@ class Backend private constructor(private val dataDir: File) {
         private set
 
     /** 路线模拟引擎（优先于单点输出）。 */
-    val routeEngine = RouteEngine()
+    val routeEngine = RouteEngine(jitterEnabled = { configManager.isJitterEnabled() })
 
     /** 悬浮窗摇杆引擎：位移叠加在路线/单点输出之上。 */
     val joystickEngine = JoystickEngine()
@@ -114,7 +114,7 @@ class Backend private constructor(private val dataDir: File) {
         databaseManager = DatabaseManager(File(dataDir, "zve.db"))
         timelineEngine = DefaultTimelineEngine()
         environmentManager = DefaultEnvironmentManager(databaseManager)
-        locationEngine = SinglePointLocationEngine()
+        locationEngine = SinglePointLocationEngine(jitterEnabled = { configManager.isJitterEnabled() })
         profileManager = ProfileManager(dataDir)
         recordingEngine = RecordingEngine(databaseManager, this)
 
@@ -688,6 +688,27 @@ class Backend private constructor(private val dataDir: File) {
 
     fun joystickStatusJson(): org.json.JSONObject {
         return joystickEngine.statusJson()
+    }
+
+    /** 显式复位摇杆位移（回基准位置）。 */
+    fun resetJoystickOffset() {
+        joystickEngine.resetOffset()
+    }
+
+    // ---------- 设置（随机抖动等） ----------
+
+    /** 随机抖动开关（单点/路线模拟共用，默认开启）。 */
+    fun isJitterEnabled(): Boolean = configManager.isJitterEnabled()
+
+    fun setJitterEnabled(enabled: Boolean) {
+        configManager.setJitterEnabled(enabled)
+        ZLog.i(TAG_SCOPE, "settings jitterEnabled=$enabled")
+    }
+
+    fun settingsStatusJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("jitterEnabled", configManager.isJitterEnabled())
+        }
     }
 
     // ---------- LocationPoint API ----------

@@ -22,6 +22,8 @@ class ConfigManager(private val configDir: File) {
         private const val KEY_LONGITUDE = "longitude"
         private const val KEY_SPEED = "speed"
         private const val KEY_BEARING = "bearing"
+        private const val KEY_SETTINGS = "settings"
+        private const val KEY_JITTER_ENABLED = "jitterEnabled"
     }
 
     private val configFile = File(configDir, FILE_NAME)
@@ -47,6 +49,13 @@ class ConfigManager(private val configDir: File) {
                 JSONObject()
             }
         }
+    }
+
+    /** 随机抖动开关（默认开启：模拟真实 GPS 噪声）。 */
+    fun isJitterEnabled(): Boolean = load().optJSONObject(KEY_SETTINGS)?.optBoolean(KEY_JITTER_ENABLED, true) ?: true
+
+    fun setJitterEnabled(enabled: Boolean) {
+        update(KEY_SETTINGS) { it.put(KEY_JITTER_ENABLED, enabled) }
     }
 
     fun isLocationEnabled(): Boolean = load().optJSONObject(KEY_LOCATION)?.optBoolean(KEY_ENABLED, false) ?: false
