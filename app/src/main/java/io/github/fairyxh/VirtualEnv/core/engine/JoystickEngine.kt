@@ -37,6 +37,36 @@ class JoystickEngine {
 
     private val state = AtomicReference(JoystickState())
 
+    /** 摇杆基准纬度（tick 推进 dLon 的 cos 因子用）。 */
+    private val baseLatRef = java.util.concurrent.atomic.AtomicReference(0.0)
+
+    /**
+     * 统一 tick 线程推进位移（200ms），applyTo 只读快照。
+     * 之前 applyTo 惰性推进导致 fix 注入（慢）与 NMEA/Gnss 注入（快）各自推进，
+     * 同一时刻各 Hook 点读到不同坐标 → 百度 SDK NMEA 一致性校验失败 → 定位失败。
+     */
+    private val tickExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-JoystickTick").apply { isDaemon = true }
+    }
+
+    init {
+        tickExecutor.scheduleWithFixedDelay(
+            {
+                try {
+                    val s = state.get()
+                    if (!s.enabled) return@scheduleWithFixedDelay
+                    val now = SystemClock.elapsedRealtime()
+                    state.set(advance(s, now, baseLatRef.get()))
+                } catch (t: Throwable) {
+                    ZLog.w("Core", "joystick tick failed", t)
+                }
+            },
+            200L,
+            200L,
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
+    }
+
     fun isEnabled(): Boolean = state.get().enabled
 
     /**
@@ -71,14 +101,12 @@ class JoystickEngine {
     fun applyTo(base: Location?): Location? {
         val s = state.get()
         if (!s.enabled || base == null) return base
-        val now = SystemClock.elapsedRealtime()
-        val updated = advance(s, now, base.latitude)
-        state.set(updated)
+        baseLatRef.set(base.latitude)
         val location = Location(base)
-        location.latitude = base.latitude + updated.offsetLat
-        location.longitude = base.longitude + updated.offsetLon
-        location.speed = updated.speedMps.toFloat()
-        location.bearing = bearingAt(updated).toFloat()
+        location.latitude = base.latitude + s.offsetLat
+        location.longitude = base.longitude + s.offsetLon
+        location.speed = s.speedMps.toFloat()
+        location.bearing = bearingAt(s).toFloat()
         return location
     }
 
@@ -86,14 +114,12 @@ class JoystickEngine {
     fun applyTo(stateIn: LocationState): LocationState {
         val s = state.get()
         if (!s.enabled) return stateIn
-        val now = SystemClock.elapsedRealtime()
-        val updated = advance(s, now, stateIn.latitude)
-        state.set(updated)
+        baseLatRef.set(stateIn.latitude)
         return stateIn.copy(
-            latitude = stateIn.latitude + updated.offsetLat,
-            longitude = stateIn.longitude + updated.offsetLon,
-            speed = updated.speedMps.toFloat(),
-            bearing = bearingAt(updated).toFloat(),
+            latitude = stateIn.latitude + s.offsetLat,
+            longitude = stateIn.longitude + s.offsetLon,
+            speed = s.speedMps.toFloat(),
+            bearing = bearingAt(s).toFloat(),
             updateTime = System.currentTimeMillis()
         )
     }
