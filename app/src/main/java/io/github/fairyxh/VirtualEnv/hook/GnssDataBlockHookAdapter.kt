@@ -120,7 +120,12 @@ class GnssDataBlockHookAdapter(
         try {
             if (!virtualLocationEnabled()) return
             val status = buildVirtualGnssStatus() ?: return
-            val method = listener.javaClass.getMethod("onSatelliteStatusChanged", Class.forName("android.location.GnssStatus"))
+            // Stub$Proxy 方法签名在不同 ROM 可能不同（参数类型/可见性），
+            // 用 declaredMethods 遍历 name+参数个数匹配，避免 getMethod 精确签名失败。
+            val method = listener.javaClass.declaredMethods.firstOrNull {
+                it.name == "onSatelliteStatusChanged" && it.parameterCount == 1
+            } ?: return
+            method.isAccessible = true
             method.invoke(listener, status)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "deliver virtual GnssStatus failed", t)
@@ -233,7 +238,10 @@ class GnssDataBlockHookAdapter(
             if (!virtualLocationEnabled()) return
             val loc = backend.currentLocation() ?: return
             val nmea = buildVirtualNmea(loc.latitude, loc.longitude) ?: return
-            val method = listener.javaClass.getMethod("onNmeaReceived", Long::class.javaPrimitiveType, String::class.java)
+            val method = listener.javaClass.declaredMethods.firstOrNull {
+                it.name == "onNmeaReceived" && it.parameterCount == 2
+            } ?: return
+            method.isAccessible = true
             method.invoke(listener, android.os.SystemClock.elapsedRealtimeNanos(), nmea)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "deliver virtual NMEA failed", t)
