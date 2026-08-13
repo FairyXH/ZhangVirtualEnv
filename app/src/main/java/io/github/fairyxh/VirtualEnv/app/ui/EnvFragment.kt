@@ -229,6 +229,7 @@ class EnvFragment : Fragment() {
                 requireActivity().runOnUiThread {
                     val data = result.data
                     val enabled = data != null && data.optBoolean("enabled", false)
+                    val auto = data != null && data.optBoolean("autoManaged", false)
                     val summary = configSummary(type, data)
                     val current = items
                     items = current.map { item ->
@@ -239,7 +240,13 @@ class EnvFragment : Fragment() {
                                 switchState = enabled,
                                 summary = getString(
                                     R.string.env_card_status_format,
-                                    getString(if (enabled) R.string.env_status_active else R.string.env_status_inactive),
+                                    getString(
+                                        when {
+                                            auto -> R.string.env_card_status_auto
+                                            enabled -> R.string.env_status_active
+                                            else -> R.string.env_status_inactive
+                                        }
+                                    ),
                                     summary
                                 )
                             )

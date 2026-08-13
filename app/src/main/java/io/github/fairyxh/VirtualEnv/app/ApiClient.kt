@@ -227,6 +227,15 @@ object ApiClient {
         return post("/api/env/enable", body)
     }
 
+    /** 自动托管开关：开启后该类型 Hook 忽略用户配置，使用模块自动生成的最优配置。 */
+    fun setEnvAutoManaged(type: String, autoManaged: Boolean): ApiResult {
+        val body = JSONObject().apply {
+            put("type", type)
+            put("autoManaged", autoManaged)
+        }
+        return post("/api/env/auto-managed", body)
+    }
+
     fun getEnvStatus(): ApiResult = get("/api/env/status")
 
     /** 上报环境实时测试结果报告（供自动化验证/修正 Hook）。 */

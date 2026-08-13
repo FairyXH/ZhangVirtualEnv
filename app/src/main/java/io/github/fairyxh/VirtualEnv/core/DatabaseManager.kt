@@ -40,6 +40,7 @@ class DatabaseManager(private val dbFile: File) {
         const val COL_TYPE = "type"
         const val COL_DATA = "data"
         const val COL_ENABLED = "enabled"
+        const val COL_AUTO_MANAGED = "auto_managed"
         const val COL_SNAPSHOT_ID = "snapshot_id"
         const val COL_UPDATE_TIME = "update_time"
 
@@ -87,6 +88,7 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_TYPE TEXT PRIMARY KEY," +
                 "$COL_ENABLED INTEGER NOT NULL DEFAULT 0," +
                 "$COL_DATA TEXT NOT NULL DEFAULT ''," +
+                "$COL_AUTO_MANAGED INTEGER NOT NULL DEFAULT 0," +
                 "$COL_SNAPSHOT_ID INTEGER NOT NULL DEFAULT -1," +
                 "$COL_UPDATE_TIME INTEGER NOT NULL" +
                 ")"
@@ -182,6 +184,19 @@ class DatabaseManager(private val dbFile: File) {
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "migrate recording failed", t)
+        }
+        try {
+            val envStateColumns = mutableSetOf<String>()
+            database.rawQuery("PRAGMA table_info($TABLE_ENV_STATE)", null).use { c ->
+                val nameIdx = c.getColumnIndexOrThrow("name")
+                while (c.moveToNext()) envStateColumns.add(c.getString(nameIdx))
+            }
+            if (!envStateColumns.contains(COL_AUTO_MANAGED)) {
+                database.execSQL("ALTER TABLE $TABLE_ENV_STATE ADD COLUMN $COL_AUTO_MANAGED INTEGER NOT NULL DEFAULT 0")
+                ZLog.i(TAG_SCOPE, "migrated: env_state add auto_managed column")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "migrate env_state failed", t)
         }
     }
 
@@ -577,11 +592,12 @@ class DatabaseManager(private val dbFile: File) {
 
     // ---------- EnvState CRUD（环境引擎上次使用的配置持久化） ----------
 
-    /** 保存某类型环境引擎的持久化状态（含开关与数据）。 */
-    fun saveEnvState(type: String, enabled: Boolean, dataJson: String, snapshotId: Long) {
+    /** 保存某类型环境引擎的持久化状态（含开关、自动托管与数据）。 */
+    fun saveEnvState(type: String, enabled: Boolean, dataJson: String, snapshotId: Long, autoManaged: Boolean = false) {
         val values = android.content.ContentValues().apply {
             put(COL_TYPE, type)
             put(COL_ENABLED, if (enabled) 1 else 0)
+            put(COL_AUTO_MANAGED, if (autoManaged) 1 else 0)
             put(COL_DATA, dataJson)
             put(COL_SNAPSHOT_ID, snapshotId)
             put(COL_UPDATE_TIME, System.currentTimeMillis())
@@ -606,12 +622,14 @@ class DatabaseManager(private val dbFile: File) {
             val enabledIdx = it.getColumnIndexOrThrow(COL_ENABLED)
             val dataIdx = it.getColumnIndexOrThrow(COL_DATA)
             val sidIdx = it.getColumnIndexOrThrow(COL_SNAPSHOT_ID)
+            val autoIdx = it.getColumnIndex(COL_AUTO_MANAGED)
             while (it.moveToNext()) {
                 val type = it.getString(typeIdx)
                 val obj = org.json.JSONObject()
                 obj.put("type", type)
                 obj.put("enabled", it.getInt(enabledIdx) != 0)
                 obj.put("snapshotId", it.getLong(sidIdx))
+                obj.put("autoManaged", autoIdx >= 0 && it.getInt(autoIdx) != 0)
                 val raw = it.getString(dataIdx)
                 if (raw.isNotBlank()) {
                     try {

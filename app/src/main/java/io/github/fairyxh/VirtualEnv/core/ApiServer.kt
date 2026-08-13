@@ -179,6 +179,7 @@ class ApiServer(
                 path == "/api/env/use" && method == "POST" -> envUse(body)
                 path == "/api/env/clear" && method == "POST" -> envClear(body)
                 path == "/api/env/enable" && method == "POST" -> envEnable(body)
+                path == "/api/env/auto-managed" && method == "POST" -> envAutoManaged(body)
                 path == "/api/env/suspend" && method == "POST" -> envSuspend()
                 path == "/api/env/resume" && method == "POST" -> envResume()
                 path == "/api/env/status" && method == "GET" -> envStatus()
@@ -440,6 +441,15 @@ class ApiServer(
         val enabled = json.optBoolean("enabled", false)
         if (type.isBlank()) return ApiResult.error("type required")
         if (!backend.setEnvEnabled(type, enabled)) return ApiResult.error("unsupported env type: $type", 404)
+        return ApiResult.ok("ok", backend.envStatus(type))
+    }
+
+    private fun envAutoManaged(body: String): ApiResult {
+        val json = JSONObject(body)
+        val type = json.optString("type", "")
+        val auto = json.optBoolean("autoManaged", false)
+        if (type.isBlank()) return ApiResult.error("type required")
+        if (!backend.setEnvAutoManaged(type, auto)) return ApiResult.error("unsupported env type: $type", 404)
         return ApiResult.ok("ok", backend.envStatus(type))
     }
 

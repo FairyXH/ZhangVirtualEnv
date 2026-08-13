@@ -50,6 +50,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.DefaultNames
@@ -94,6 +95,7 @@ fun EnvDetailPanel(
     // ---------- 表单状态 ----------
     var detailTitle by remember { mutableStateOf(fragment.getString(envTitleRes(type))) }
     var detailStatus by remember { mutableStateOf("") }
+    var autoManaged by remember { mutableStateOf(false) }
     var detailDialog by remember { mutableStateOf<JSONObject?>(null) }
     var cellType by remember { mutableStateOf("") }
     var cellMcc by remember { mutableStateOf("") }
@@ -496,9 +498,25 @@ fun EnvDetailPanel(
             fragment.requireActivity().runOnUiThread {
                 val data = result.data
                 val enabled = data != null && data.optBoolean("enabled", false)
+                autoManaged = data != null && data.optBoolean("autoManaged", false)
                 detailStatus = fragment.getString(
-                    if (enabled) R.string.env_detail_active else R.string.env_detail_inactive
+                    if (enabled) {
+                        if (autoManaged) R.string.env_detail_auto_active else R.string.env_detail_active
+                    } else {
+                        R.string.env_detail_inactive
+                    }
                 )
+            }
+        }
+    }
+
+    fun setAutoManaged(auto: Boolean) {
+        autoManaged = auto
+        executor.execute {
+            val result = ApiClient.setEnvAutoManaged(type, auto)
+            fragment.requireActivity().runOnUiThread {
+                toast(result.message)
+                refreshStatus()
             }
         }
     }
@@ -797,6 +815,64 @@ fun EnvDetailPanel(
                     }
                 }
 
+                // 自动托管：严格定位 SDK（百度等）适配入口。
+                // 开启后该类型模拟忽略用户配置，由模块基于虚拟位置自动生成
+                // 合法且自洽的最优配置（GNSS 卫星数充足 / 基站带虚拟坐标合法 ID 等）。
+                if (type != TYPE_SIM) {
+                    GlassCard(
+                        backdrop = backdrop,
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = colors.accent.copy(alpha = 0.10f)
+                    ) {
+                        Row(
+                            Modifier
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    fragment.getString(R.string.env_detail_auto_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    fragment.getString(R.string.env_detail_auto_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { autoManaged },
+                                onSelect = { setAutoManaged(it) },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                // 自动托管中：隐藏编辑/保存区，避免误改
+                if (autoManaged && type != TYPE_SIM) {
+                    GlassCard(
+                        backdrop = backdrop,
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            BasicText(
+                                fragment.getString(R.string.env_detail_auto_hint),
+                                style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            )
+                            BasicText(
+                                fragment.getString(R.string.env_detail_auto_toggle_off),
+                                Modifier.padding(top = 4.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                            )
+                        }
+                    }
+                }
+
+                if (!(autoManaged && type != TYPE_SIM)) {
                 when (type) {
                     TYPE_CELL -> {
                         GlassCard(
@@ -1162,6 +1238,7 @@ fun EnvDetailPanel(
                         }
                     }
                 }
+                } // if (!(autoManaged && type != TYPE_SIM))
             }
 
             // 悬浮圆形液态玻璃返回按钮：永远可见（不随内容滚动）

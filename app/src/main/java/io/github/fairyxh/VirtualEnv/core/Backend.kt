@@ -145,7 +145,104 @@ class Backend private constructor(private val dataDir: File) {
         }
         // 恢复各环境引擎上次使用的配置（wifi/cell/ble/gnss/sensor/sim）
         restoreEnvStates()
+        // 自动托管：各环境引擎的“最优配置”由 Backend 基于当前虚拟位置自动生成
+        setupAutoEnvProviders()
         ZLog.i(TAG_SCOPE, "Backend components started")
+    }
+
+    // ---------- 自动托管（Auto Managed Environment） ----------
+
+    /**
+     * 为环境引擎注入自动数据生成器。勾选“自动托管”后，用户配置不再直接生效，
+     * Hook 层读到的是基于当前虚拟位置自动生成的最优配置：
+     * - GNSS：卫星数充足（usedInFix > 2），百度等 SDK 才会采纳 GPS fix
+     * - Cell：带虚拟坐标且 ID 合法的基站（CDMA fallback / 派生基站）
+     * - WiFi：基于虚拟位置派生的合法扫描列表（不阻断网络定位数据源）
+     * - BLE / Sensor：合法默认值
+     */
+    private fun setupAutoEnvProviders() {
+        wifiEngine.autoDataProvider = { autoWifiData() }
+        cellEngine.autoDataProvider = { autoCellData() }
+        bleEngine.autoDataProvider = { autoBleData() }
+        gnssEngine.autoDataProvider = { autoGnssData() }
+        sensorEngine.autoDataProvider = { autoSensorData() }
+        ZLog.i(TAG_SCOPE, "auto env providers configured")
+    }
+
+    /** 自动托管：基站配置（空 entries → Hook fallback 带坐标 CDMA，ID 由工厂派生合法值）。 */
+    private fun autoCellData(): org.json.JSONObject {
+        return org.json.JSONObject().apply { put("entries", org.json.JSONArray()) }
+    }
+
+    /** 自动托管：GNSS 卫星充足（usedInFix=12 > 百度 a>2 阈值）。 */
+    private fun autoGnssData(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("satelliteCount", 24)
+            put("usedInFix", 12)
+            put("cn0", 38.0)
+        }
+    }
+
+    /** 自动托管：WiFi 扫描列表（基于虚拟位置派生，BSSID/SSID 合法）。 */
+    private fun autoWifiData(): org.json.JSONObject {
+        val loc = currentLocation()
+        val lat = loc?.latitude ?: 24.6
+        val lon = loc?.longitude ?: 118.0
+        val seed = ((lat * 1e6).toLong() * 31 + (lon * 1e6).toLong()).toInt()
+        val rnd = java.util.Random(seed.toLong())
+        val networks = org.json.JSONArray()
+        val count = 3 + rnd.nextInt(3)
+        for (i in 0 until count) {
+            // 常见真实 OUI 前缀（单播、非本地管理），避免 02: 本地管理地址被过滤
+            val oui = listOf(0x00, 0x04, 0x8C, 0xA4, 0x34, 0x38)[rnd.nextInt(6)]
+            val bssid = String.format(
+                "%02X:%02X:%02X:%02X:%02X:%02X",
+                oui, rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256)
+            )
+            val ssid = listOf("ChinaNet-", "CMCC-", "TP-LINK_", "ZVE-Auto-")[rnd.nextInt(4)] + (1000 + rnd.nextInt(9000))
+            networks.put(org.json.JSONObject().apply {
+                put("ssid", ssid)
+                put("bssid", bssid)
+                put("rssi", -40 - rnd.nextInt(40))
+                put("frequency", if (rnd.nextBoolean()) 2412 + rnd.nextInt(5) * 5 else 5180 + rnd.nextInt(4) * 5)
+                put("capabilities", "[WPA2-PSK-CCMP]")
+            })
+        }
+        return org.json.JSONObject().apply { put("networks", networks) }
+    }
+
+    /** 自动托管：BLE 设备（2 个合法 beacon）。 */
+    private fun autoBleData(): org.json.JSONObject {
+        val loc = currentLocation()
+        val seed = ((loc?.latitude ?: 24.6) * 1e6).toLong()
+        val rnd = java.util.Random(seed)
+        val devices = org.json.JSONArray()
+        for (i in 0 until 2) {
+            val addr = String.format(
+                "AA:%02X:%02X:%02X:%02X:%02X",
+                rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256)
+            )
+            devices.put(org.json.JSONObject().apply {
+                put("name", "ZVE-Beacon-${100 + rnd.nextInt(900)}")
+                put("address", addr)
+                put("rssi", -60 - rnd.nextInt(25))
+            })
+        }
+        return org.json.JSONObject().apply { put("devices", devices) }
+    }
+
+    /** 自动托管：传感器步频默认值。 */
+    private fun autoSensorData(): org.json.JSONObject {
+        return org.json.JSONObject().apply { put("stepFrequency", 110) }
+    }
+
+    /** 设置某环境类型自动托管开关（用户配置保留，但 currentData 改为自动生成）。 */
+    fun setEnvAutoManaged(type: String, auto: Boolean): Boolean {
+        val engine = envEngine(type) ?: return false
+        engine.setAutoManaged(auto)
+        persistEnvState(type)
+        ZLog.i(TAG_SCOPE, "env type=$type autoManaged=$auto")
+        return true
     }
 
     // ---------- Location API（Hook Adapter 调用） ----------
@@ -781,14 +878,16 @@ class Backend private constructor(private val dataDir: File) {
         val engine = envEngine(type) ?: return
         try {
             val status = engine.statusJson()
-            val data = status.optJSONObject("data")
+            val data = engine.userData() ?: status.optJSONObject("data")
             val enabled = status.optBoolean("enabled", false)
+            val autoManaged = status.optBoolean("autoManaged", false)
             val snapshotId = activeEnvSnapshotIds[type] ?: -1L
             databaseManager.saveEnvState(
                 type,
                 enabled,
                 data?.toString() ?: "",
-                snapshotId
+                snapshotId,
+                autoManaged
             )
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "persist env state type=$type failed", t)
@@ -805,6 +904,8 @@ class Backend private constructor(private val dataDir: File) {
                 val enabled = row.optBoolean("enabled", false)
                 engine.update(data)
                 if (!enabled) engine.setEnabled(false)
+                val autoManaged = row.optBoolean("autoManaged", false)
+                if (autoManaged) engine.setAutoManaged(true)
                 val snapshotId = row.optLong("snapshotId", -1L)
                 if (snapshotId >= 0) activeEnvSnapshotIds[type] = snapshotId
                 if (type == "sim") {

@@ -28,12 +28,12 @@
     <string name="home_status_offline">模块未激活 / Backend 未运行</string>
     <string name="home_status_offline_detail">请在 LSPosed 中启用模块并重启，作用域需包含系统框架</string>
     <string name="home_feature_status_title">功能状态</string>
-    <string name="home_feature_status_hint">实时刷新：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器</string>
+    <string name="home_feature_status_hint">各项功能工作状态预览</string>
     <string name="home_float_title">悬浮窗</string>
-    <string name="home_float_desc">统一管理摇杆与路线两种模式，悬浮球默认收起</string>
+    <string name="home_float_desc">位置模拟和路线模拟快捷控制悬浮窗</string>
     <string name="home_float_opened">悬浮窗已打开（默认悬浮球状态）</string>
     <string name="home_collect_title">一键采集</string>
-    <string name="home_collect_desc">采集当前设备的位置、基站、WiFi、蓝牙、GNSS 状态，保存为环境包</string>
+    <string name="home_collect_desc">采集当前设备的状态保存为环境包</string>
     <string name="home_collect_button">开始采集</string>
     <string name="home_collect_running">采集进行中…</string>
     <string name="home_collect_name_hint">采集名称，如：公司门口 1</string>
@@ -49,7 +49,7 @@
 
     <!-- 配置状态预设 -->
     <string name="home_preset_title">配置状态</string>
-    <string name="home_preset_desc">快捷保存当前虚拟配置（位置 / 路线 / 环境六大板块），可保存多份并一键加载</string>
+    <string name="home_preset_desc">快捷保存当前虚拟配置以及加载</string>
     <string name="home_preset_save">保存当前状态</string>
     <string name="home_preset_empty">暂无已保存配置</string>
     <string name="home_preset_saved_title">已保存配置（点击加载）</string>
@@ -72,7 +72,7 @@
 
     <!-- Recording -->
     <string name="home_recording_title">持续记录（录像）</string>
-    <string name="home_recording_desc">按采样间隔记录位置 / 基站 / WiFi / 蓝牙，形成时间轴录像</string>
+    <string name="home_recording_desc">按采样间隔记录设备环境，形成时间轴录像</string>
     <string name="home_recording_name_hint">录像名称，如：通勤路线 1</string>
     <string name="home_recording_interval_hint">间隔 秒（0.1~300，支持小数）</string>
     <string name="home_recording_start">开始录制</string>
@@ -255,7 +255,7 @@
     <string name="route_title">路线模拟</string>
     <string name="route_subtitle">地图点击绘制路线 · 保存后可用于路线模拟</string>
     <string name="route_switch_title">启用路线模拟</string>
-    <string name="route_switch_desc">开启后沿已保存路线移动，与单点虚拟定位互斥</string>
+    <string name="route_switch_desc">开启后沿已保存路线移动，与单点虚拟定位互斥，请通过悬浮窗控制启停。</string>
     <string name="route_status_idle">路线未运行</string>
     <string name="route_status_running">路线运行中 · %1$d 个路径点</string>
     <string name="route_status_offline">Backend 未连接</string>
@@ -310,6 +310,7 @@
     <string name="env_card_config_summary_sensor">步频 %1$d 步/分</string>
     <string name="env_card_config_summary_gnss">卫星 %1$d · 使用 %2$d</string>
     <string name="env_card_status_format">%1$s · %2$s</string>
+    <string name="env_card_status_auto">自动托管</string>
     <string name="env_cell_title">基站模拟</string>
     <string name="env_cell_desc">MCC / MNC / TAC / CID / PCI / RSRP（多基站）</string>
     <string name="env_cell_coming">Phase 3 实现</string>
@@ -413,6 +414,11 @@
     <string name="env_detail_saved_title">已保存配置（点击使用 = 切换）</string>
     <string name="env_detail_active">使用中</string>
     <string name="env_detail_inactive">未使用</string>
+    <string name="env_detail_auto_active">自动托管</string>
+    <string name="env_detail_auto_title">自动托管</string>
+    <string name="env_detail_auto_desc">忽略手动配置，由模块基于虚拟位置自动生成最优环境（适配百度等严格定位）</string>
+    <string name="env_detail_auto_hint">自动托管中：本页手动配置暂不生效</string>
+    <string name="env_detail_auto_toggle_off">Hook 正在使用模块自动生成的卫星 / 基站 / 网络等最优配置，关闭自动托管后恢复手动配置。</string>
     <string name="env_random_filled">已随机生成合法参数，可继续微调</string>
     <string name="env_random_title">随机</string>
     <string name="env_detail_in_use_badge">使用中</string>
