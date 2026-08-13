@@ -64,7 +64,7 @@ Users are responsible for their own usage.
 
 | 类别 | 能力 |
 |---|---|
-| 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
+| 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动；**摇杆松手保留当前位置**（不溜回原点），斜向移动经方向平滑 + 注入频率对齐（摇杆启用时 fix/push 加速至 ~200-250ms）后顺滑无锯齿；**随机抖动可在设置页关闭**（`/api/settings/jitter`） |
 | 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
