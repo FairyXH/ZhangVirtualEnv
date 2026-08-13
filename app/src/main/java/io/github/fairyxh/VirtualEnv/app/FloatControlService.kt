@@ -304,6 +304,9 @@ class FloatControlService : Service() {
         view.findViewById<View>(R.id.routeStopButton).setOnClickListener {
             executor.execute {
                 val result = ApiClient.stopRoute()
+                // 停止即复位：摇杆累计位移同步回基准位置
+                stopJoystick()
+                ApiClient.resetJoystick()
                 toastResult(result, R.string.float_route_stopped)
                 refreshRouteUi()
             }
