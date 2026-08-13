@@ -86,7 +86,7 @@ class SimSubscriptionHookAdapter(
             hooked += installOnClass(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim subscription hooks active on $className")
         }
-        // SubscriptionInfoInternal.toSubscriptionInfo()：Oplus 子类 override 也无法绕过的构造点
+        // SubscriptionInfoInternal.toSubscriptionInfo()：Oplus 子类 override 场景下仍能命中的构造点
         HookSupport.findClass(classLoader, CLASS_SUB_INTERNAL)?.let { clazz ->
             hooked += hookToSubscriptionInfo(clazz)
         }

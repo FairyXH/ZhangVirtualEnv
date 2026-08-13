@@ -170,7 +170,7 @@ class FrameworkEnvHookAdapter(
         val clazz = HookSupport.findClass(classLoader, "android.location.LocationManager") ?: return
         var hooked = 0
         // 注册回调：总是启动周期投递（虚拟数据可用后自动覆盖真实回调）。
-        // 虚拟启用时**不 proceed**（彻底屏蔽真实 GNSS）；虚拟未启用时 proceed
+        // 虚拟启用时**不 proceed**（测试进程中接管真实 GNSS 回调）；虚拟未启用时 proceed
         // 保留真实注册，但周期投递会在配置恢复后立即接管，避免时序竞态。
         HookSupport.findMethods(clazz, "registerGnssStatusCallback")
             .filter { it.parameterTypes.any { p -> p.simpleName == "Callback" } }

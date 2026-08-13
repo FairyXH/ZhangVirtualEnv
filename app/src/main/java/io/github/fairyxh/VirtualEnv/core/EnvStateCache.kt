@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  * 避免每次 Hook 调用都发起网络请求。
  *
  * 注意：被 Hook 的目标 App 进程通常不允许 cleartext HTTP（usesCleartextTraffic=false），
- * 因此这里使用原始 TCP Socket 直连 127.0.0.1，绕过应用层网络安全策略。
+ * 因此这里使用原始 TCP Socket 直连 127.0.0.1（不受应用层网络安全策略限制）。
  * 每个请求必须携带 X-ZVE-Token（与 ApiServer 一致），否则被 404 拒绝。
  */
 class EnvStateCache(
@@ -213,7 +213,7 @@ class EnvStateCache(
         executor.shutdownNow()
     }
 
-    /** 原始 TCP HTTP GET，绕过 cleartext 网络安全策略。 */
+    /** 原始 TCP HTTP GET（不经由应用层网络安全策略）。 */
     private fun rawGet(path: String): JSONObject? {
         val socket = Socket()
         return try {

@@ -21,8 +21,7 @@ import kotlin.math.roundToInt
  * 页面级 Backdrop 宿主（黑底 + 可选壁纸）。
  *
  * 默认不绘制背景（窗口/根视图纯黑，卡片直接浮在黑色之上）；设置里开启
- * “用桌面背景”后，读取壁纸位图全屏自绘（绕过 ColorOS FLAG_SHOW_WALLPAPER
- * 曲面左缘黑遮罩），并叠暗化层保证浅色文字/玻璃卡片对比度 + 极淡雾化
+ * “用桌面背景”后，读取壁纸位图全屏自绘（避免 ColorOS 曲面左缘黑遮罩），并叠暗化层保证浅色文字/玻璃卡片对比度 + 极淡雾化
  * 模拟轻微磨砂。通过 [LayerBackdrop] 把背景层导出给所有 GlassCard /
  * GlassButton / GlassBottomTabs 采样。
  */
