@@ -142,16 +142,26 @@ class FrameworkEnvHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
-            val virtual = cache.currentCell()
-            if (virtual != null) {
-                try {
-                    val list = VirtualCellFactory.buildCellInfoList(virtual)
-                    // 启用即覆盖：即使空配置也返回空列表，绝不放行真实基站
-                    ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
-                    return@register list
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "build virtual cells failed, fallback", t)
+            // 虚拟定位未启用：放行真实基站（检测器/普通场景不误判）
+            if (!cache.isLocationEnabled()) return@register original
+            try {
+                val virtual = cache.currentCell()
+                val list = if (virtual != null) {
+                    VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
+                        // 空配置 fallback：带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
+                        listOfNotNull(
+                            VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+                        )
+                    }
+                } else {
+                    listOfNotNull(
+                        VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+                    )
                 }
+                ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
+                return@register list
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "build virtual cells failed, fallback", t)
             }
             original
         }

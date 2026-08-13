@@ -186,7 +186,7 @@
     <string name="settings_subtitle">应用标识、高德地图配置与项目说明</string>
     <string name="settings_appearance_title">外观</string>
     <string name="settings_appearance_desc">使用桌面壁纸作为 App 背景图</string>
-    <string name="settings_sim_title">模拟</string>
+    <string name="settings_sim_title">随机抖动</string>
     <string name="settings_sim_jitter_desc">位置模拟 / 路线模拟叠加随机 GPS 抖动（更真实；关闭后坐标稳定）</string>
     <string name="dialog_close">关闭</string>
     <string name="settings_appearance_permission_denied">需要照片/文件权限才能使用壁纸背景</string>
