@@ -13,7 +13,7 @@
       "reportLocation": "onReportLocation",
       "providerManagerClass": "com.android.server.location.provider.LocationProviderManager",
       "managerReportLocation": "onReportLocation",
-      "injectProviders": ["gps", "passive"],
+      "injectProviders": ["gps", "passive", "network"],
       "injectIntervalMs": 1000
     },
     "sim": {

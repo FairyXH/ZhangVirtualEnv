@@ -61,6 +61,8 @@ class WifiServiceHookAdapter(
                 if (clazz != null) {
                     hookGetScanResults(clazz)
                     hookGetConnectionInfo(clazz)
+                    hookStartScan(clazz)
+                    hookGetDhcpInfo(clazz)
                     ZLog.i(TAG_SCOPE, "WifiServiceImpl hooks installed (attempt ${retries + 1})")
                     return
                 }
@@ -269,6 +271,69 @@ class WifiServiceHookAdapter(
             .firstOrNull { it.parameterCount == paramCount }
             ?.also { ZLog.i(TAG_SCOPE, "resolve $name -> ${it.toGenericString()}") }
             ?: ZLog.w(TAG_SCOPE, "$name not found in ${clazz.name}").let { null }
+    }
+
+    // ---------- startScan(String, String): boolean ----------
+
+    /**
+     * 百度 SDK 会主动调用 `WifiManager.startScan()` 触发系统真实扫描，随后注册
+     * `SCAN_RESULTS` 广播接收器把真实扫描结果写入本地缓存（com.baidu.location.c.i），
+     * 网络定位请求仍可能携带这些真实 WiFi 指纹。虚拟定位启用时直接返回 false
+     * （不触发真实扫描），阻断真实扫描广播产生。
+     */
+    private fun hookStartScan(clazz: Class<*>) {
+        val method = findMethod(clazz, "startScan", 2) ?: return
+        val ok = registrar.register(method) { chain ->
+            val original = chain.proceed()
+            try {
+                if (virtualLocationEnabled()) {
+                    ZLog.d(TAG_SCOPE, "WifiService.startScan -> false (virtual location)")
+                    false
+                } else {
+                    original
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "WifiService.startScan virtual failed, fallback", t)
+                original
+            }
+        }
+        if (ok) ZLog.i(TAG_SCOPE, "hooked WifiServiceImpl.startScan")
+    }
+
+    // ---------- getDhcpInfo(String): DhcpInfo ----------
+
+    /**
+     * 百度 SDK 读取 DHCP 网关 IP（`&wf_gw=`）作为网络定位辅助参数，泄漏真实局域网
+     * 拓扑。虚拟定位启用时返回空 DhcpInfo（网关不可用），阻断该数据源。
+     */
+    private fun hookGetDhcpInfo(clazz: Class<*>) {
+        val method = findMethod(clazz, "getDhcpInfo", 1) ?: return
+        val ok = registrar.register(method) { chain ->
+            val original = chain.proceed()
+            try {
+                if (virtualLocationEnabled()) {
+                    val info = newEmptyDhcpInfo(method.returnType)
+                    ZLog.d(TAG_SCOPE, "WifiService.getDhcpInfo -> empty (virtual location)")
+                    info
+                } else {
+                    original
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "WifiService.getDhcpInfo virtual failed, fallback", t)
+                original
+            }
+        }
+        if (ok) ZLog.i(TAG_SCOPE, "hooked WifiServiceImpl.getDhcpInfo")
+    }
+
+    /** 反射构造空 DhcpInfo（兼容 no-arg 与隐藏构造）。 */
+    private fun newEmptyDhcpInfo(returnType: Class<*>): Any {
+        val ctor = try {
+            returnType.getDeclaredConstructor().also { it.isAccessible = true }
+        } catch (t: Throwable) {
+            returnType.getConstructor()
+        }
+        return ctor.newInstance()
     }
 
     private fun setField(target: Any, fieldName: String, value: Any) {

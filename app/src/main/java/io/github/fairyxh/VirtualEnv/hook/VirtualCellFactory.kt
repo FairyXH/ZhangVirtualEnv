@@ -64,6 +64,11 @@ object VirtualCellFactory {
 
     /**
      * 构造携带虚拟经纬度的 CellIdentityCdma（7 参公开构造，顺序 nid/sid/bid/lon/lat）。
+     *
+     * nid/sid/bid 必须为合法正数：百度 SDK 解析 `a(int)` 会把 Integer.MAX_VALUE
+     * 归一为 -1，随后 `com.baidu.location.c.a.b()`（要求 lac > -1 && cid > 0）
+     * 判定基站无效并丢弃——这是百度网络定位拿不到基站数据的根因。
+     * 这里从虚拟坐标派生稳定 ID，保证同一虚拟点每次生成一致且合法。
      */
     fun buildCellIdentityCdma(latitude: Double, longitude: Double): Any? {
         return try {
@@ -79,8 +84,13 @@ object VirtualCellFactory {
             )
             val lonQ = (longitude * 14400.0).toInt()
             val latQ = (latitude * 14400.0).toInt()
-            val identity = ctor.newInstance(Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, lonQ, latQ, null, null)
-            ZLog.d(TAG_SCOPE, "CellIdentityCdma 7-arg ctor lon=$lonQ lat=$latQ")
+            // 派生合法基站 ID：CDMA sid/nid/bid 均在 1..65534，>0 通过百度 b() 校验
+            val seed = Math.abs(lonQ.toLong() * 31 + latQ.toLong()).toInt()
+            val nid = 1 + (seed and 0x7FFF)
+            val sid = 1 + ((seed ushr 15) and 0x7FFF)
+            val bid = 1 + ((seed ushr 2) and 0x7FFF)
+            val identity = ctor.newInstance(nid, sid, bid, lonQ, latQ, null, null)
+            ZLog.d(TAG_SCOPE, "CellIdentityCdma 7-arg ctor nid=$nid sid=$sid bid=$bid lon=$lonQ lat=$latQ")
             identity
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "build CellIdentityCdma failed", t)

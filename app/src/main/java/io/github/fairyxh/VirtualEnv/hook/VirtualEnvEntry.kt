@@ -182,6 +182,9 @@ class VirtualEnvEntry : XposedModule() {
             LocationHookAdapter(backend, registrar).install(param.classLoader)
             // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位
             WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
+            // GNSS 原始数据流阻断：NMEA/导航消息/原始测量（百度 SDK 拉回真实位置根因）
+            val gnssBlocked = GnssDataBlockHookAdapter(backend, registrar).install(param.classLoader)
+            log(Log.INFO, TAG, "[$TAG_SCOPE] gnss data block hooks installed hooked=$gnssBlocked")
             // 虚拟 fix 主动注入：百度/微信 gps 无 fix 时主动上报，GMS fused passive 缓存刷新
             VirtualFixInjector(backend, registrar).install(param.classLoader)
             // SubscriptionInfo 全局虚拟化（system_server 的 ISub.Stub 返回点，对任意 App 生效）

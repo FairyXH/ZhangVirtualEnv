@@ -35,7 +35,85 @@ class PhoneInterfaceManagerHookAdapter(
         hooked += hookGetAllCellInfo(classLoader)
         hooked += hookGetCellLocation(classLoader)
         hooked += hookGetNeighboringCellInfo(classLoader)
+        hooked += hookRequestCellInfoUpdate(classLoader)
         return hooked
+    }
+
+    // ---------- requestCellInfoUpdate(int, ICellInfoCallback, String, String) ----------
+
+    /**
+     * Android 10+ 异步基站回调（百度 SDK 9.1.6 主链路，见 docs/reverse/baidu-sdk-nmea-cellinfo-analysis.md）。
+     *
+     * 客户端 `TelephonyManager.requestCellInfoUpdate(Executor, CellInfoCallback)` → Binder
+     * `ITelephony.requestCellInfoUpdate(subId, ICellInfoCallback, pkg, attr)` →
+     * 本方法。原实现通过 sendRequestAsync 异步把**真实** CellInfo 回调给 App。
+     *
+     * 虚拟定位启用时：不 proceed 原始链路，直接反射调用 `ICellInfoCallback.onCellInfo(List)`
+     * 投递虚拟基站（优先 cell 配置，回退带虚拟经纬度的 CDMA），与 getAllCellInfo 保持同一策略。
+     */
+    private fun hookRequestCellInfoUpdate(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, CLASS_NAME) ?: return 0
+        val methods = HookSupport.findMethods(clazz, "requestCellInfoUpdate")
+            .filter { it.parameterCount == 4 && it.parameterTypes[1].simpleName.contains("ICellInfoCallback") }
+        if (methods.isEmpty()) {
+            ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate(4) not found")
+            return 0
+        }
+        var hooked = 0
+        methods.forEach { method ->
+            val ok = registrar.register(method) { chain ->
+                if (!virtualLocationEnabled()) {
+                    chain.proceed()
+                    return@register null
+                }
+                try {
+                    val callback = chain.getArg(1)
+                    val cells = buildVirtualCells()
+                    invokeCellInfoCallback(callback, cells)
+                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate -> virtual ${cells.size} cells")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate virtual failed, fallback", t)
+                    chain.proceed()
+                }
+                null
+            }
+            if (ok) {
+                hooked++
+                ZLog.i(TAG_SCOPE, "hooked PhoneInterfaceManager.requestCellInfoUpdate(${method.parameterCount})")
+            }
+        }
+        return hooked
+    }
+
+    /** 构造虚拟基站列表：优先按 cell 配置，否则回退带虚拟经纬度的 CDMA。 */
+    private fun buildVirtualCells(): List<Any> {
+        val cellData = cache.currentCell()
+        if (cellData != null) {
+            try {
+                val list = VirtualCellFactory.buildCellInfoList(cellData)
+                if (list.isNotEmpty()) return list
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "requestCellInfoUpdate config build failed, fallback cdma", t)
+            }
+        }
+        val cellCount = cellData?.optJSONArray("entries")?.length()?.coerceIn(1, 16) ?: 1
+        return (0 until cellCount).mapNotNull {
+            VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+        }
+    }
+
+    /** 反射调用 ICellInfoCallback.onCellInfo(List<CellInfo>)。 */
+    private fun invokeCellInfoCallback(callback: Any, cells: List<Any>) {
+        val method = try {
+            callback.javaClass.getMethod("onCellInfo", List::class.java)
+        } catch (t: Throwable) {
+            // 部分 ROM 参数为 ArrayList/具体类型，取 declared 兼容
+            callback.javaClass.declaredMethods.firstOrNull {
+                it.name == "onCellInfo" && it.parameterCount == 1
+            } ?: throw t
+        }
+        method.isAccessible = true
+        method.invoke(callback, cells)
     }
 
     private fun virtualLocationEnabled(): Boolean = cache.isLocationEnabled()
