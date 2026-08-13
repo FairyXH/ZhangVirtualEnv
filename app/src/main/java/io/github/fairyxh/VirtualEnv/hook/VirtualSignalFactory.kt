@@ -151,15 +151,46 @@ object VirtualSignalFactory {
     private fun buildNr(signal: JSONObject): Any? {
         return try {
             val cls = Class.forName(CLASS_CELL_SIGNAL_NR)
-            val rsrp = signal.optInt("nr", -105)
+            val rsrp = signal.optInt("nr", -105).coerceIn(-156, -31)
+            val rsrq = signal.optInt("nrRsrq", -15).coerceIn(-43, 20)
+            val sinr = signal.optInt("nrSinr", 20).coerceIn(-23, 40)
             val level = signal.optInt("level", 3)
-            // AOSP: CellSignalStrengthNr(ssRsrp, ssRsrq, ssSinr, csiRsrp, csiRsrq, csiSinr, level)
-            val ctor = cls.getDeclaredConstructor(
-                Int::class.java, Int::class.java, Int::class.java, Int::class.java,
-                Int::class.java, Int::class.java, Int::class.java
-            )
-            ctor.isAccessible = true
-            ctor.newInstance(rsrp, -15, 20, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, level)
+            // Oplus 15 JADX 确认：CellSignalStrengthNr 公开构造为 9 参
+            // (csiRsrp,csiRsrq,csiSinr,csiCqiTableIndex,List<Byte>,ssRsrp,ssRsrq,ssSinr,timingAdvance)
+            // 与 6 参 (csiRsrp,csiRsrq,csiSinr,ssRsrp,ssRsrq,ssSinr)；旧 AOSP 才有
+            // 7 参 (ssRsrp,ssRsrq,ssSinr,csiRsrp,csiRsrq,csiSinr,level)。
+            // csi 参数一律 Integer.MAX_VALUE（不可用），ss 为真实虚拟值。
+            val ctor6 = try {
+                cls.getDeclaredConstructor(
+                    Int::class.java, Int::class.java, Int::class.java,
+                    Int::class.java, Int::class.java, Int::class.java
+                ).also { it.isAccessible = true }
+            } catch (t: Throwable) {
+                null
+            }
+            if (ctor6 != null) {
+                val obj = ctor6.newInstance(
+                    Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, rsrp, rsrq, sinr
+                )
+                // level 由 updateLevel 从 ssRsrp 推导，无需再设
+                ZLog.d(TAG_SCOPE, "CellSignalStrengthNr via 6-arg ctor rsrp=$rsrp")
+                return obj
+            }
+            val ctor7 = try {
+                cls.getDeclaredConstructor(
+                    Int::class.java, Int::class.java, Int::class.java, Int::class.java,
+                    Int::class.java, Int::class.java, Int::class.java
+                ).also { it.isAccessible = true }
+            } catch (t: Throwable) {
+                null
+            }
+            if (ctor7 != null) {
+                val obj = ctor7.newInstance(rsrp, rsrq, sinr, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, level)
+                ZLog.d(TAG_SCOPE, "CellSignalStrengthNr via 7-arg ctor rsrp=$rsrp")
+                return obj
+            }
+            ZLog.w(TAG_SCOPE, "CellSignalStrengthNr ctor 6/7-arg not found")
+            null
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "build CellSignalStrengthNr failed", t)
             null

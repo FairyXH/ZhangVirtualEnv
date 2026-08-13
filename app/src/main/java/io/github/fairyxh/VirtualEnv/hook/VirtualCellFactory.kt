@@ -125,10 +125,11 @@ object VirtualCellFactory {
         val info = infoClass.getDeclaredConstructor().newInstance()
 
         val identityClass = Class.forName("android.telephony.CellIdentityLte")
-        val ci = c.optLong("ci", -1L).toInt()
-        val pci = c.optInt("pci", -1)
-        val tac = c.optLong("tac", -1L).toInt()
-        // AOSP/Oplus 5 参公开构造顺序：(mcc, mnc, ci, pci, tac)
+        // Oplus 15 JADX 确认：CellIdentityLte(int mcc, int mnc, int ci, int pci, int tac)
+        // 字段范围：ci 0..268435455（28bit）、pci 0..503、tac 0..16777215（24bit）
+        val ci = sanitizeInt(c, "ci", 0, 268435455)
+        val pci = sanitizeInt(c, "pci", 0, 503)
+        val tac = sanitizeInt(c, "tac", 0, 16777215)
         val identity = identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
         ).newInstance(
@@ -141,17 +142,18 @@ object VirtualCellFactory {
         infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
 
         val signalClass = Class.forName("android.telephony.CellSignalStrengthLte")
-        val unknown = Int.MAX_VALUE
+        // Oplus 15 JADX 确认：CellSignalStrengthLte(int rssi, int rsrp, int rsrq, int rssnr,
+        //   int cqi, int timingAdvance)；rsrp 合法范围 -156..-31
         val signal = signalClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java,
             Int::class.java, Int::class.java
         ).newInstance(
-            unknown,
-            c.optInt("rsrp", -110),
-            unknown,
-            unknown,
-            unknown,
-            unknown
+            Int.MAX_VALUE,
+            sanitizeInt(c, "rsrp", -156, -31, -110),
+            Int.MAX_VALUE,
+            Int.MAX_VALUE,
+            Int.MAX_VALUE,
+            Int.MAX_VALUE
         )
         infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
         return info
@@ -162,25 +164,34 @@ object VirtualCellFactory {
         val info = infoClass.getDeclaredConstructor().newInstance()
 
         val identityClass = Class.forName("android.telephony.CellIdentityGsm")
+        val mcc = c.optInt("mcc", 460)
+        val mnc = c.optInt("mnc", 0)
+        // Oplus 15 JADX 确认：CellIdentityGsm(int lac, int cid, int arfcn, int bsic,
+        //   String mccStr, String mncStr, String alphal, String alphas, Collection)
+        // 字段范围：lac/cid 0..65535、arfcn 0..65535、bsic 0..63
         val identity = identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java,
             String::class.java, String::class.java, String::class.java, String::class.java,
             java.util.Collection::class.java
         ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
-            c.optLong("lac", -1L).toInt(),
-            c.optLong("cid", -1L).toInt(),
-            "", "", "", "",
+            sanitizeInt(c, "lac", 0, 65535, 0),
+            sanitizeInt(c, "cid", 0, 65535, 0),
+            sanitizeInt(c, "arfcn", 0, 65535, 0),
+            sanitizeInt(c, "bsic", 0, 63, 0),
+            mcc.toString(),
+            mnc.toString(),
+            "", "",
             java.util.Collections.emptyList<Any>()
         )
         infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
 
         val signalClass = Class.forName("android.telephony.CellSignalStrengthGsm")
+        // Oplus 15 JADX 确认：CellSignalStrengthGsm(int rssi, int ber, int ta)
+        // rssi 合法范围 -113..-51（ASU 99 表示不可用）
         val signal = signalClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java
         ).newInstance(
-            c.optInt("rssi", -90),
+            sanitizeInt(c, "rssi", -113, -51, -90),
             -1,
             -1
         )
@@ -190,29 +201,70 @@ object VirtualCellFactory {
 
     private fun buildNrCell(c: org.json.JSONObject): Any? {
         val infoClass = Class.forName("android.telephony.CellInfoNr")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-
         val identityClass = Class.forName("android.telephony.CellIdentityNr")
+        val signalClass = Class.forName("android.telephony.CellSignalStrengthNr")
         val mcc = c.optInt("mcc", 460)
         val mnc = c.optInt("mnc", 0)
-        // additionalPlmns 不能为 null：构造器会调 Collection.size() 直接 NPE
+        // Oplus 15 JADX 确认：CellIdentityNr(int pci, int tac, int nrArfcn, int[] bands,
+        //   String mccStr, String mncStr, long nci, String alphal, String alphas, Collection)
+        // 字段范围：pci 0..1007、tac 0..16777215、nrArfcn 0..3279165、nci 0..68719476735（36bit）
+        val pci = sanitizeInt(c, "pci", 0, 1007, 0)
+        val tac = sanitizeInt(c, "tac", 0, 16777215, 0)
+        val nrArfcn = if (c.has("nrArfcn")) sanitizeInt(c, "nrArfcn", 0, 3279165, 0)
+            else sanitizeInt(c, "arfcn", 0, 3279165, 0)
+        val nci = sanitizeNrNci(c)
         val identity = identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, IntArray::class.java,
             String::class.java, String::class.java, Long::class.java,
             String::class.java, String::class.java, java.util.Collection::class.java
         ).newInstance(
-            mcc,
-            mnc,
-            c.optLong("tac", -1L).toInt(),
+            pci,
+            tac,
+            nrArfcn,
             intArrayOf(),
             mcc.toString(),
             String.format("%02d", mnc),
-            c.optLong("nci", -1L),
+            nci,
             "", "",
             java.util.Collections.emptyList<Any>()
         )
-        infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
+        // Oplus 15 CellInfoNr 只有 setCellIdentity、无 setCellSignalStrength：
+        // 必须用 5 参公开构造 CellInfoNr(int connectionStatus, boolean registered,
+        //   long timeStamp, CellIdentityNr, CellSignalStrengthNr) 附带信号。
+        val signal = buildNrSignal(c)
+        val info = try {
+            infoClass.getConstructor(
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType,
+                identityClass,
+                signalClass
+            ).newInstance(0, true, System.nanoTime(), identity, signal)
+        } catch (t: Throwable) {
+            // 老 ROM 回退：no-arg + setCellIdentity（信号保留默认不可用）
+            ZLog.w(TAG_SCOPE, "CellInfoNr 5-arg ctor not found, fallback no-arg", t)
+            infoClass.getDeclaredConstructor().newInstance().also {
+                infoClass.getMethod("setCellIdentity", identityClass).invoke(it, identity)
+            }
+        }
         return info
+    }
+
+    /** NR 信号强度：Oplus 15 JADX 确认 6 参公开构造 (csiRsrp, csiRsrq, csiSinr, ssRsrp, ssRsrq, ssSinr)。 */
+    private fun buildNrSignal(c: org.json.JSONObject): Any {
+        val signalClass = Class.forName("android.telephony.CellSignalStrengthNr")
+        // ssRsrp 合法范围 -156..-31；csi 参数用 Integer.MAX_VALUE（不可用）
+        return signalClass.getDeclaredConstructor(
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java,
+            Int::class.java, Int::class.java
+        ).newInstance(
+            Int.MAX_VALUE,
+            Int.MAX_VALUE,
+            Int.MAX_VALUE,
+            sanitizeInt(c, "rsrp", -156, -31, -105),
+            sanitizeInt(c, "rsrq", -43, 20, -15),
+            sanitizeInt(c, "sinr", -23, 40, 20)
+        )
     }
 
     private fun buildWcdmaCell(c: org.json.JSONObject): Any? {
@@ -220,30 +272,65 @@ object VirtualCellFactory {
         val info = infoClass.getDeclaredConstructor().newInstance()
 
         val identityClass = Class.forName("android.telephony.CellIdentityWcdma")
+        val mcc = c.optInt("mcc", 460)
+        val mnc = c.optInt("mnc", 0)
+        // Oplus 15 JADX 确认：CellIdentityWcdma(int lac, int cid, int psc, int uarfcn,
+        //   String mccStr, String mncStr, String alphal, String alphas, Collection, ClosedSubscriberGroupInfo)
+        // 字段范围：lac 0..65535、cid 0..268435455、psc 0..511、uarfcn 0..16383
         val identity = identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java,
             String::class.java, String::class.java, String::class.java, String::class.java,
-            java.util.Collection::class.java
+            java.util.Collection::class.java, Class.forName("android.telephony.ClosedSubscriberGroupInfo")
         ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
-            c.optLong("lac", -1L).toInt(),
-            c.optLong("cid", -1L).toInt(),
-            "", "", "", "",
-            java.util.Collections.emptyList<Any>()
+            sanitizeInt(c, "lac", 0, 65535, 0),
+            sanitizeInt(c, "cid", 0, 268435455, 0),
+            sanitizeInt(c, "psc", 0, 511, 0),
+            sanitizeInt(c, "uarfcn", 0, 16383, 0),
+            mcc.toString(),
+            mnc.toString(),
+            "", "",
+            java.util.Collections.emptyList<Any>(),
+            null
         )
         infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
 
         val signalClass = Class.forName("android.telephony.CellSignalStrengthWcdma")
+        // Oplus 15 JADX 确认：CellSignalStrengthWcdma(int rssi, int ber, int rscp, int ecno)
+        // rssi 合法范围 -113..-51、rscp -120..-25、ecno -24..0
         val signal = signalClass.getDeclaredConstructor(
-            Int::class.java, Int::class.java, Int::class.java
+            Int::class.java, Int::class.java, Int::class.java, Int::class.java
         ).newInstance(
-            c.optInt("rssi", -90),
+            sanitizeInt(c, "rssi", -113, -51, -90),
             -1,
-            -1
+            sanitizeInt(c, "rscp", -120, -25, -95),
+            sanitizeInt(c, "ecno", -24, 0, -9)
         )
         infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
         return info
+    }
+
+    // ---------- 数值消毒 ----------
+
+    private const val MAX_NCI = 68719476735L // 2^36-1，CellIdentityNr.MAX_NCI
+
+    /** 读配置 int 并夹到合法范围；缺失/非法时返回 [defaultValue]。 */
+    private fun sanitizeInt(c: org.json.JSONObject, key: String, min: Int, max: Int, defaultValue: Int = min): Int {
+        if (!c.has(key)) return defaultValue
+        val v = c.optInt(key, defaultValue)
+        return if (v in min..max) v else defaultValue
+    }
+
+    /** NR NCI：0..MAX_NCI 合法；配置缺失/越界/哨兵值（Long.MAX_VALUE）时派生确定性合法值。 */
+    private fun sanitizeNrNci(c: org.json.JSONObject): Long {
+        val raw = c.optLong("nci", -1L)
+        if (raw in 1..MAX_NCI) return raw
+        // 派生：mcc 10bit<<26 | mnc 10bit<<16 | tac 8bit<<8 | pci 8bit，恒在 36bit 内
+        val mcc = c.optInt("mcc", 460).toLong() and 0x3FF
+        val mnc = c.optInt("mnc", 0).toLong() and 0x3FF
+        val tac = c.optInt("tac", 0).toLong() and 0xFF
+        val pci = c.optInt("pci", 0).toLong() and 0xFF
+        val derived = (mcc shl 26) or (mnc shl 16) or (tac shl 8) or pci
+        return if (derived in 1..MAX_NCI) derived else 1L
     }
 
     private fun call(target: Any, name: String, value: Any) {

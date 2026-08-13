@@ -65,7 +65,7 @@ Users are responsible for their own usage.
 | 类别 | 能力 |
 |---|---|
 | 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
-| 基站（Cell） | LTE / NR 虚拟小区（mcc/mnc/tac/ci/pci），可采集真实小区后模拟 |
+| 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`） |
 | SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
 | BLE | 虚拟 Beacon 扫描结果，可采集真实设备后模拟 |

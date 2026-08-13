@@ -907,7 +907,10 @@ class Backend private constructor(private val dataDir: File) {
             put("mcc", 460)
             put("mnc", 11)
             put("tac", rnd.nextInt(0, 65536))
-            put("nci", 140000000000L + rnd.nextInt(100000000))
+            put("pci", rnd.nextInt(0, 1008))
+            // NCI 36bit 合法范围 0..68719476735（CellIdentityNr.MAX_NCI）；超出会被
+            // inRangeOrUnavailable 归一化为 Long.MAX_VALUE（读回 9223372036854775807）
+            put("nci", rnd.nextLong(1, 68719476736L))
         })
         setEnvData("cell", org.json.JSONObject().apply { put("entries", cellEntries) })
         setEnvEnabled("cell", true)

@@ -169,6 +169,9 @@ fun EnvDetailPanel(
                     put("mnc", cellMnc.toIntOrNull() ?: -1)
                     put("tac", cellTac.toIntOrNull() ?: -1)
                     put("ci", cellCi.toLongOrNull() ?: -1L)
+                    // NR 的 CellIdentityNr 读 nci 键；LTE/GSM/WCDMA 读 ci 键。
+                    // 双写保证类型切换后字段不丢（工厂对 nci 越界/缺失会派生合法值）。
+                    put("nci", cellCi.toLongOrNull() ?: -1L)
                     put("pci", cellPci.toIntOrNull() ?: -1)
                     put("rsrp", cellRsrp.toIntOrNull() ?: -1)
                 }
@@ -291,8 +294,8 @@ fun EnvDetailPanel(
                 val mcc = entry.optInt("mcc", -1)
                 val mnc = entry.optInt("mnc", -1)
                 val tac = entry.optInt("tac", -1)
-                val ci = entry.optLong("ci", -1L)
-                fragment.getString(R.string.env_cell_entry_format, typeStr, mcc, mnc, tac, ci)
+                val id = if (entry.has("nci")) entry.optLong("nci", -1L) else entry.optLong("ci", -1L)
+                fragment.getString(R.string.env_cell_entry_format, typeStr, mcc, mnc, tac, id)
             }
             TYPE_WIFI -> {
                 val ssid = entry.optString("ssid", "")
@@ -346,7 +349,12 @@ fun EnvDetailPanel(
                 cellMcc = (440 + rnd.nextInt(30)).toString()
                 cellMnc = rnd.nextInt(100).toString()
                 cellTac = rnd.nextInt(65536).toString()
-                cellCi = rnd.nextInt(1 shl 28).toString()
+                // NR 的 NCI 是 36bit 值，直接生成合法范围，避免越界被归一化为 Long.MAX_VALUE
+                cellCi = if (netType == "NR") {
+                    rnd.nextLong(1, 68719476736L).toString()
+                } else {
+                    rnd.nextInt(1 shl 28).toString()
+                }
                 cellPci = rnd.nextInt(504).toString()
                 cellRsrp = (-130 + rnd.nextInt(40)).toString()
             }
