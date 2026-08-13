@@ -209,8 +209,8 @@ class EnvFragment : Fragment() {
             requireActivity().runOnUiThread {
                 if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                     Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
-                    refreshStatuses()
                 }
+                refreshStatuses()
             }
         }
     }
@@ -252,8 +252,12 @@ class EnvFragment : Fragment() {
         }
     }
 
-    /** 卡片显示当前使用的配置摘要（原始 data 的要点；未配置显示“未配置”）。 */
+    /** 卡片显示当前使用的配置摘要（优先“使用中”快照名；未配置显示“未配置”）。 */
     private fun configSummary(type: String, status: org.json.JSONObject?): String {
+        val snapshotName = status?.optString("snapshotName", "")
+        if (!snapshotName.isNullOrEmpty()) {
+            return getString(R.string.env_card_config_snapshot, snapshotName)
+        }
         val data = status?.optJSONObject("data")
         val none = getString(R.string.env_card_no_config)
         if (data == null) return none

@@ -88,6 +88,9 @@ class Backend private constructor(private val dataDir: File) {
     /** 虚拟 SIM 卡身份 / 信号状态（com.android.phone / system_server Hook 读取）。 */
     val simEngine = EnvStateEngine("sim")
 
+    /** 环境引擎类型清单（持久化/恢复/状态展示共用）。 */
+    private val ENV_ENGINE_TYPES = listOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
+
     /** 环境录制与回放引擎。 */
     lateinit var recordingEngine: RecordingEngine
         private set
@@ -140,6 +143,8 @@ class Backend private constructor(private val dataDir: File) {
                 locationEngine.setEnabled(true)
             }
         }
+        // 恢复各环境引擎上次使用的配置（wifi/cell/ble/gnss/sensor/sim）
+        restoreEnvStates()
         ZLog.i(TAG_SCOPE, "Backend components started")
     }
 
@@ -683,10 +688,15 @@ class Backend private constructor(private val dataDir: File) {
                  )
              }
              else -> return null
-         }
-         ZLog.i(TAG_SCOPE, "env snapshot used id=$id type=$type")
-         return snapshot
-     }
+             }
+             if (type in ENV_ENGINE_TYPES) {
+                 persistEnvState(type)
+                 } else if (type == "collect") {
+            ENV_ENGINE_TYPES.forEach { persistEnvState(it) }
+        }
+        ZLog.i(TAG_SCOPE, "env snapshot used id=$id type=$type")
+        return snapshot
+    }
 
     /** 一键采集包：拆分到 wifi / cell / ble 引擎（gnss/sensor 后续 Phase 接入）。 */
     private fun loadCollectSnapshot(data: org.json.JSONObject) {
@@ -741,6 +751,7 @@ class Backend private constructor(private val dataDir: File) {
             }
             else -> return false
         }
+        persistEnvState(type)
         ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
         return true
     }
@@ -751,6 +762,62 @@ class Backend private constructor(private val dataDir: File) {
         for (i in 0 until slots.length()) {
             val slot = slots.optJSONObject(i) ?: continue
             CarrierConfigPersister.applySlot(slot)
+        }
+    }
+
+    /** 按类型取环境引擎；非环境类型返回 null。 */
+    private fun envEngine(type: String): EnvStateEngine? = when (type) {
+        "wifi" -> wifiEngine
+        "cell" -> cellEngine
+        "ble" -> bleEngine
+        "gnss" -> gnssEngine
+        "sensor" -> sensorEngine
+        "sim" -> simEngine
+        else -> null
+    }
+
+    /** 持久化某类型环境引擎的上次配置（含开关/数据/来源快照）。 */
+    private fun persistEnvState(type: String) {
+        val engine = envEngine(type) ?: return
+        try {
+            val status = engine.statusJson()
+            val data = status.optJSONObject("data")
+            val enabled = status.optBoolean("enabled", false)
+            val snapshotId = activeEnvSnapshotIds[type] ?: -1L
+            databaseManager.saveEnvState(
+                type,
+                enabled,
+                data?.toString() ?: "",
+                snapshotId
+            )
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "persist env state type=$type failed", t)
+        }
+    }
+
+    /** 启动时恢复各环境引擎上次使用的配置（enabled=true 自动生效，Hook 立即读到虚拟值）。 */
+    private fun restoreEnvStates() {
+        try {
+            databaseManager.loadEnvStates().forEach { row ->
+                val type = row.optString("type", "")
+                val engine = envEngine(type) ?: return@forEach
+                val data = row.optJSONObject("data") ?: return@forEach
+                val enabled = row.optBoolean("enabled", false)
+                engine.update(data)
+                if (!enabled) engine.setEnabled(false)
+                val snapshotId = row.optLong("snapshotId", -1L)
+                if (snapshotId >= 0) activeEnvSnapshotIds[type] = snapshotId
+                if (type == "sim") {
+                    if (enabled) {
+                        persistSimConfig(data)
+                    } else {
+                        CarrierConfigPersister.resetAll()
+                    }
+                }
+                ZLog.i(TAG_SCOPE, "env state restored type=$type enabled=$enabled")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "restore env states failed", t)
         }
     }
 
@@ -774,6 +841,7 @@ class Backend private constructor(private val dataDir: File) {
             }
             else -> return false
         }
+        persistEnvState(type)
         ZLog.i(TAG_SCOPE, "env type=$type enabled=$enabled")
         return true
     }
@@ -789,7 +857,18 @@ class Backend private constructor(private val dataDir: File) {
             "sim" -> simEngine.statusJson()
             else -> return null
         }
-        status.put("activeSnapshotId", activeEnvSnapshotIds[type] ?: -1L)
+        val snapshotId = activeEnvSnapshotIds[type] ?: -1L
+        status.put("activeSnapshotId", snapshotId)
+        if (snapshotId >= 0) {
+            try {
+                val name = databaseManager.queryEnvSnapshots()
+                    .firstOrNull { it.optLong("id", -1L) == snapshotId }
+                    ?.optString("name", "")
+                if (!name.isNullOrEmpty()) status.put("snapshotName", name)
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "env status snapshot name failed", t)
+            }
+        }
         return status
     }
 
@@ -989,6 +1068,11 @@ class Backend private constructor(private val dataDir: File) {
                     setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
                 )
             }
+        }
+        if (type in ENV_ENGINE_TYPES) {
+            databaseManager.deleteEnvState(type)
+        } else if (type == "collect") {
+            ENV_ENGINE_TYPES.forEach { databaseManager.deleteEnvState(it) }
         }
         ZLog.i(TAG_SCOPE, "env cleared type=$type")
     }

@@ -254,6 +254,7 @@
     <string name="env_status_active">使用中</string>
     <string name="env_status_inactive">未使用</string>
     <string name="env_card_no_config">未配置</string>
+    <string name="env_card_config_snapshot">使用配置：%1$s</string>
     <string name="env_card_config_summary_cell">%1$d 个基站 · %2$s</string>
     <string name="env_card_config_summary_wifi">%1$d 个 WiFi · %2$s</string>
     <string name="env_card_config_summary_ble">%1$d 个设备 · %2$s</string>

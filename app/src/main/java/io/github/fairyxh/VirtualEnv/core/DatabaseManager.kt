@@ -17,11 +17,12 @@ class DatabaseManager(private val dbFile: File) {
 
     companion object {
         private const val TAG_SCOPE = "Core"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         const val TABLE_ROUTE = "route"
         const val TABLE_LOCATION_POINT = "location_point"
         const val TABLE_ENV_SNAPSHOT = "env_snapshot"
+        const val TABLE_ENV_STATE = "env_state"
         const val TABLE_RECORDING = "recording"
         const val TABLE_RECORDING_FRAME = "recording_frame"
 
@@ -37,6 +38,9 @@ class DatabaseManager(private val dbFile: File) {
         const val COL_LONGITUDE = "longitude"
         const val COL_TYPE = "type"
         const val COL_DATA = "data"
+        const val COL_ENABLED = "enabled"
+        const val COL_SNAPSHOT_ID = "snapshot_id"
+        const val COL_UPDATE_TIME = "update_time"
 
         const val COL_DURATION_MS = "duration_ms"
         const val COL_FRAME_COUNT = "frame_count"
@@ -74,6 +78,16 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_TYPE TEXT NOT NULL," +
                 "$COL_DATA TEXT NOT NULL," +
                 "$COL_CREATE_TIME INTEGER NOT NULL" +
+                ")"
+
+        /** 各环境引擎上次使用的配置（wifi/cell/ble/gnss/sensor/sim）：重启后恢复。 */
+        private const val SQL_CREATE_ENV_STATE =
+            "CREATE TABLE IF NOT EXISTS $TABLE_ENV_STATE (" +
+                "$COL_TYPE TEXT PRIMARY KEY," +
+                "$COL_ENABLED INTEGER NOT NULL DEFAULT 0," +
+                "$COL_DATA TEXT NOT NULL DEFAULT ''," +
+                "$COL_SNAPSHOT_ID INTEGER NOT NULL DEFAULT -1," +
+                "$COL_UPDATE_TIME INTEGER NOT NULL" +
                 ")"
 
         private const val SQL_CREATE_RECORDING =
@@ -117,6 +131,7 @@ class DatabaseManager(private val dbFile: File) {
             opened.execSQL(SQL_CREATE_ROUTE)
             opened.execSQL(SQL_CREATE_LOCATION_POINT)
             opened.execSQL(SQL_CREATE_ENV_SNAPSHOT)
+            opened.execSQL(SQL_CREATE_ENV_STATE)
             opened.execSQL(SQL_CREATE_RECORDING)
             opened.execSQL(SQL_CREATE_RECORDING_FRAME)
             opened.execSQL(SQL_INDEX_RECORDING_FRAME)
@@ -545,5 +560,61 @@ class DatabaseManager(private val dbFile: File) {
             db.delete(TABLE_RECORDING_FRAME, "$COL_RECORDING_ID=?", arrayOf(id.toString()))
         }
         return deleted
+    }
+
+    // ---------- EnvState CRUD（环境引擎上次使用的配置持久化） ----------
+
+    /** 保存某类型环境引擎的持久化状态（含开关与数据）。 */
+    fun saveEnvState(type: String, enabled: Boolean, dataJson: String, snapshotId: Long) {
+        val values = android.content.ContentValues().apply {
+            put(COL_TYPE, type)
+            put(COL_ENABLED, if (enabled) 1 else 0)
+            put(COL_DATA, dataJson)
+            put(COL_SNAPSHOT_ID, snapshotId)
+            put(COL_UPDATE_TIME, System.currentTimeMillis())
+        }
+        open().insertWithOnConflict(TABLE_ENV_STATE, null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** 加载全部环境引擎持久化状态。 */
+    fun loadEnvStates(): List<org.json.JSONObject> {
+        val result = mutableListOf<org.json.JSONObject>()
+        val cursor = open().query(
+            TABLE_ENV_STATE,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "$COL_UPDATE_TIME ASC"
+        )
+        cursor?.use {
+            val typeIdx = it.getColumnIndexOrThrow(COL_TYPE)
+            val enabledIdx = it.getColumnIndexOrThrow(COL_ENABLED)
+            val dataIdx = it.getColumnIndexOrThrow(COL_DATA)
+            val sidIdx = it.getColumnIndexOrThrow(COL_SNAPSHOT_ID)
+            while (it.moveToNext()) {
+                val type = it.getString(typeIdx)
+                val obj = org.json.JSONObject()
+                obj.put("type", type)
+                obj.put("enabled", it.getInt(enabledIdx) != 0)
+                obj.put("snapshotId", it.getLong(sidIdx))
+                val raw = it.getString(dataIdx)
+                if (raw.isNotBlank()) {
+                    try {
+                        obj.put("data", org.json.JSONObject(raw))
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "env state data parse failed type=$type", t)
+                    }
+                }
+                result.add(obj)
+            }
+        }
+        return result
+    }
+
+    /** 删除某类型环境引擎的持久化状态（清除配置时调用）。 */
+    fun deleteEnvState(type: String) {
+        open().delete(TABLE_ENV_STATE, "$COL_TYPE=?", arrayOf(type))
     }
 }
