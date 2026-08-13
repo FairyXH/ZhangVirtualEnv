@@ -137,6 +137,7 @@
     <string name="location_point_name_hint">地点名称，如：公司</string>
     <string name="location_point_remark_hint">备注（可选），如：工位 3 楼</string>
     <string name="location_point_save">保存此点</string>
+    <string name="location_point_teleport">传送到该点</string>
     <string name="location_point_name_required">请输入地点名称</string>
     <string name="location_point_saved">地点已保存</string>
     <string name="location_saved_title">已保存地点</string>

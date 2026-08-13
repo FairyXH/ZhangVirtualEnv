@@ -99,6 +99,10 @@ class VirtualEnvEntry : XposedModule() {
                     simCfg.third
                 ).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] sim telephony hooks installed pkg=$pkg hooked=$simHooked loader=${hostClassLoader}")
+                // Oplus 15：getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator* 直接读系统属性，
+                // 必须拦截 TelephonyProperties setter 才能全局虚拟化（属性进程级全局，不 Hook 第三方 App）
+                val simPropHooked = SimSystemPropertyHookAdapter(cache, registrar).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] sim system-property hooks installed pkg=$pkg hooked=$simPropHooked loader=${hostClassLoader}")
             }
             // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
             if (processName == "com.android.bluetooth" && bleHooksInstalled.compareAndSet(false, true)) {

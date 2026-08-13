@@ -587,16 +587,32 @@ class LocationSimFragment : Fragment() {
                             modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
                             placeholder = getString(R.string.location_point_remark_hint)
                         )
-                        GlassButton(
-                            onClick = { fragment.saveCurrentPoint() },
-                            backdrop = backdrop,
-                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
-                            tint = colors.accent
+                        Row(
+                            Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            BasicText(
-                                getString(R.string.location_point_save),
-                                style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            )
+                            GlassButton(
+                                onClick = { fragment.teleportToPoint() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.location_point_teleport),
+                                    style = TextStyle(color = androidx.compose.ui.graphics.Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { fragment.saveCurrentPoint() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.35f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.location_point_save),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }
@@ -829,6 +845,26 @@ class LocationSimFragment : Fragment() {
 
     private fun formatCoord(value: Double): String {
         return if (value == 0.0) "0.0" else String.format("%.6f", value)
+    }
+
+    /**
+     * 直接传送到输入坐标（不保存到列表）：设置坐标并启用单点虚拟定位。
+     */
+    private fun teleportToPoint() {
+        val lat = latitudeText.toDoubleOrNull()
+        val lon = longitudeText.toDoubleOrNull()
+        if (lat == null || lon == null) {
+            Toast.makeText(requireContext(), R.string.location_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+        executor.execute {
+            val result = ApiClient.setLocation(lat, lon, 0f, 0f)
+            ApiClient.setLocationEnabled(true)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                refreshStatus()
+            }
+        }
     }
 
     private fun applyPoint() {
