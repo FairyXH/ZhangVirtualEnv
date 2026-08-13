@@ -38,6 +38,29 @@
     <string name="home_saved_title">已保存采集</string>
     <string name="home_saved_empty">暂无已保存采集</string>
 
+    <!-- 配置状态预设 -->
+    <string name="home_preset_title">配置状态</string>
+    <string name="home_preset_desc">快捷保存当前虚拟配置（位置 / 路线 / 环境六大板块），可保存多份并一键加载</string>
+    <string name="home_preset_save">保存当前状态</string>
+    <string name="home_preset_empty">暂无已保存配置</string>
+    <string name="home_preset_saved_title">已保存配置（点击加载）</string>
+    <string name="home_preset_name_hint">配置名称，如：上班通勤</string>
+    <string name="home_preset_remark_hint">备注（可选）</string>
+    <string name="home_preset_name_label">名称</string>
+    <string name="home_preset_remark_label">备注</string>
+    <string name="home_preset_save_dialog_title">保存当前配置状态</string>
+    <string name="home_preset_edit_dialog_title">编辑配置</string>
+    <string name="home_preset_confirm_save">保存</string>
+    <string name="home_preset_confirm_edit">更新</string>
+    <string name="home_preset_cancel">取消</string>
+    <string name="home_preset_name_required">请输入配置名称</string>
+    <string name="home_preset_saved_toast">配置状态已保存</string>
+    <string name="home_preset_loaded_toast">已加载配置：%1$s</string>
+    <string name="home_preset_deleted_toast">配置已删除</string>
+    <string name="home_preset_edit">编辑</string>
+    <string name="home_preset_delete">删除</string>
+    <string name="home_preset_meta">更新于 %1$s</string>
+
     <!-- Recording -->
     <string name="home_recording_title">持续记录（录像）</string>
     <string name="home_recording_desc">按采样间隔记录位置 / 基站 / WiFi / 蓝牙，形成时间轴录像</string>
@@ -201,6 +224,14 @@
     <string name="settings_amap_privacy_link">《高德开放平台隐私权政策》</string>
     <string name="settings_amap_privacy_required">请先阅读并同意高德隐私政策</string>
     <string name="settings_no_browser">未找到浏览器</string>
+    <string name="settings_backup_title">配置导入导出</string>
+    <string name="settings_backup_desc">导出模块整体设置（位置/路线/已保存地点/环境快照/环境配置/配置状态/应用设置）为 JSON 备份文件，或从备份文件恢复。导入会覆盖当前全部配置并立即生效（不含录像数据）</string>
+    <string name="settings_backup_export">导出配置</string>
+    <string name="settings_backup_import">导入配置</string>
+    <string name="settings_backup_exported">配置已导出</string>
+    <string name="settings_backup_imported">配置已导入并生效</string>
+    <string name="settings_backup_export_failed">导出失败：%1$s</string>
+    <string name="settings_backup_import_failed">导入失败：%1$s</string>
 
     <!-- Route -->
     <string name="route_title">路线模拟</string>

@@ -74,6 +74,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -228,6 +229,20 @@ class SettingsFragment : Fragment() {
             envTestRunningState = false
             Toast.makeText(requireContext(), R.string.settings_env_test_perm, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** 配置导出：SAF 创建 JSON 文件后写入。 */
+    private val exportConfigLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) exportConfigTo(uri)
+    }
+
+    /** 配置导入：SAF 选择备份 JSON 文件后读取并恢复。 */
+    private val importConfigLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) importConfigFrom(uri)
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -545,6 +560,47 @@ class SettingsFragment : Fragment() {
                                         fontSize = 13.sp,
                                         fontFamily = FontFamily.Monospace
                                     )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 配置导入导出卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_backup_title))
+                        SectionDesc(getString(R.string.settings_backup_desc))
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.onExportConfig() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_backup_export),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { fragment.onImportConfig() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_backup_import),
+                                    style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 )
                             }
                         }
@@ -1424,6 +1480,159 @@ class SettingsFragment : Fragment() {
         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("zve", text))
         Toast.makeText(requireContext(), R.string.settings_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- 配置导入导出（备份模块整体设置） ----------
+
+    private fun onExportConfig() {
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+        exportConfigLauncher.launch("ZhangVirtualEnv-备份-$stamp.json")
+    }
+
+    private fun onImportConfig() {
+        importConfigLauncher.launch(
+            arrayOf("application/json", "text/plain", "application/octet-stream")
+        )
+    }
+
+    /** 导出：拉取后端整体配置 + 本 App 设置，写入 SAF 文件。 */
+    private fun exportConfigTo(uri: android.net.Uri) {
+        Thread {
+            try {
+                val result = io.github.fairyxh.VirtualEnv.app.ApiClient.exportConfig()
+                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    runOnUi {
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.settings_backup_export_failed, result.message),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@Thread
+                }
+                val json = result.data ?: org.json.JSONObject()
+                json.put("appSettings", collectAppSettings())
+                val text = json.toString(2)
+                val ctx = requireContext()
+                val out = ctx.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("open output stream failed")
+                out.use { it.write(text.toByteArray(StandardCharsets.UTF_8)) }
+                runOnUi {
+                    Toast.makeText(requireContext(), R.string.settings_backup_exported, Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "config export failed", t)
+                runOnUi {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.settings_backup_export_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }.apply {
+            name = "ZVE-ConfigExport"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** 导入：读取 SAF 文件 → 恢复本 App 设置 → 后端整体覆盖并立即生效。 */
+    private fun importConfigFrom(uri: android.net.Uri) {
+        Thread {
+            try {
+                val ctx = requireContext()
+                val text = ctx.contentResolver.openInputStream(uri)
+                    ?.bufferedReader(StandardCharsets.UTF_8)
+                    ?.use { it.readText() }
+                    ?: throw IllegalStateException("open input stream failed")
+                val json = org.json.JSONObject(text)
+                val appSettings = json.optJSONObject("appSettings")
+                if (appSettings != null) json.remove("appSettings")
+                val result = io.github.fairyxh.VirtualEnv.app.ApiClient.importConfig(json)
+                runOnUi {
+                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                        restoreAppSettings(appSettings)
+                        loadAmapConfig()
+                        initLauncherHideToggle()
+                        Toast.makeText(requireContext(), R.string.settings_backup_imported, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.settings_backup_import_failed, result.message),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "config import failed", t)
+                runOnUi {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.settings_backup_import_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }.apply {
+            name = "ZVE-ConfigImport"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** 收集 App 侧设置（高德 Key/隐私、桌面图标、壁纸背景）用于备份。 */
+    private fun collectAppSettings(): org.json.JSONObject {
+        val ctx = requireContext()
+        val amap = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val ui = ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        val bg = ctx.getSharedPreferences("app_background", Context.MODE_PRIVATE)
+        return org.json.JSONObject().apply {
+            put("amap_config", org.json.JSONObject().apply {
+                put("amap_key", amap.getString(KEY_AMAP_KEY, "") ?: "")
+                put("amap_security_key", amap.getString(KEY_AMAP_SECURITY, "") ?: "")
+                put("privacy_agreed", AmapPrivacyManager.isAgreed(ctx))
+            })
+            put("zve_ui", org.json.JSONObject().apply {
+                put("launcher_hidden", ui.getBoolean(KEY_LAUNCHER_HIDDEN, false))
+            })
+            put("app_background", org.json.JSONObject().apply {
+                put("use_wallpaper", bg.getBoolean("use_wallpaper", false))
+            })
+        }
+    }
+
+    /** 恢复 App 侧设置（高德 Key/隐私、桌面图标、壁纸背景）。 */
+    private fun restoreAppSettings(appSettings: org.json.JSONObject?) {
+        if (appSettings == null) return
+        val ctx = requireContext()
+        appSettings.optJSONObject("amap_config")?.let { a ->
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_AMAP_KEY, a.optString("amap_key", ""))
+                .putString(KEY_AMAP_SECURITY, a.optString("amap_security_key", ""))
+                .apply()
+            AmapPrivacyManager.setAgreed(ctx, a.optBoolean("privacy_agreed", false))
+        }
+        appSettings.optJSONObject("zve_ui")?.let { z ->
+            val hidden = z.optBoolean("launcher_hidden", false)
+            ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_LAUNCHER_HIDDEN, hidden)
+                .apply()
+            // applyLauncherAlias 需要 Fragment 存活，由调用方在 UI 线程执行
+            launcherHidden = hidden
+            applyLauncherAlias(hidden, silent = true)
+        }
+        appSettings.optJSONObject("app_background")?.let { b ->
+            AppBackground.setUseWallpaper(ctx, b.optBoolean("use_wallpaper", false))
+        }
+    }
+
+    private fun runOnUi(block: () -> Unit) {
+        if (isAdded) {
+            requireActivity().runOnUiThread(block)
+        }
     }
 
     /** 读取应用签名 SHA1（高德开放平台 APP 信息校验用）。 */

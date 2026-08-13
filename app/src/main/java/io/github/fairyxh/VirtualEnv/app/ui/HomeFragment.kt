@@ -48,6 +48,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCheckbox
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassInputDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassSegmented
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
@@ -98,6 +99,21 @@ class HomeFragment : Fragment() {
         val meta: String
     )
 
+    private data class PresetItem(
+        val id: Long,
+        val name: String,
+        val remark: String,
+        val meta: String
+    )
+
+    /** 配置状态预设弹窗状态：mode=save 新建 / mode=edit 重命名。 */
+    private data class PresetDialogState(
+        val mode: String,
+        val id: Long,
+        val name: String,
+        val remark: String
+    )
+
     // ---------- Compose 视图状态 ----------
 
     private var statusDotEnabled by mutableStateOf(false)
@@ -127,6 +143,11 @@ class HomeFragment : Fragment() {
 
     private val savedItems = mutableStateListOf<SavedItem>()
     private var selectedItem: SavedItem? = null
+
+    private val presetItems = mutableStateListOf<PresetItem>()
+    private var presetDialog by mutableStateOf<PresetDialogState?>(null)
+    private var presetNameInput by mutableStateOf("")
+    private var presetRemarkInput by mutableStateOf("")
 
     // ---------- 业务对象（逻辑不变） ----------
 
@@ -197,6 +218,7 @@ class HomeFragment : Fragment() {
 
         refreshBackendStatus()
         refreshSavedItems()
+        refreshPresets()
         return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
@@ -209,6 +231,7 @@ class HomeFragment : Fragment() {
         super.onResume()
         refreshBackendStatus()
         refreshSavedItems()
+        refreshPresets()
         playbackPollHandler.removeCallbacks(playbackPoll)
         playbackPollHandler.post(playbackPoll)
         featurePollHandler.removeCallbacks(featurePoll)
@@ -320,6 +343,65 @@ class HomeFragment : Fragment() {
                                 BasicText(
                                     value,
                                     style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 配置状态卡（快捷保存/加载当前虚拟配置）
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            getString(R.string.home_preset_title),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        BasicText(
+                            getString(R.string.home_preset_desc),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.showSavePresetDialog() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.home_preset_save),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        if (presetItems.isEmpty()) {
+                            BasicText(
+                                getString(R.string.home_preset_empty),
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            BasicText(
+                                getString(R.string.home_preset_saved_title),
+                                Modifier.padding(top = 14.dp),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            )
+                            presetItems.forEach { item ->
+                                PresetItemRow(
+                                    item = item,
+                                    backdrop = backdrop,
+                                    onLoad = { fragment.loadPreset(item) },
+                                    onEdit = { fragment.showEditPresetDialog(item) },
+                                    onDelete = { fragment.deletePreset(item) }
                                 )
                             }
                         }
@@ -733,6 +815,30 @@ class HomeFragment : Fragment() {
                     onDismiss = { detailDialog = null }
                 )
             }
+            presetDialog?.let { state ->
+                GlassInputDialog(
+                    title = if (state.mode == "save") {
+                        getString(R.string.home_preset_save_dialog_title)
+                    } else {
+                        getString(R.string.home_preset_edit_dialog_title)
+                    },
+                    primaryLabel = getString(R.string.home_preset_name_label),
+                    primaryValue = presetNameInput,
+                    onPrimaryChange = { presetNameInput = it },
+                    secondaryLabel = getString(R.string.home_preset_remark_label),
+                    secondaryValue = presetRemarkInput,
+                    onSecondaryChange = { presetRemarkInput = it },
+                    confirmText = if (state.mode == "save") {
+                        getString(R.string.home_preset_confirm_save)
+                    } else {
+                        getString(R.string.home_preset_confirm_edit)
+                    },
+                    confirmEnabled = presetNameInput.isNotBlank(),
+                    cancelText = getString(R.string.home_preset_cancel),
+                    onConfirm = { fragment.confirmPresetDialog() },
+                    onDismiss = { presetDialog = null }
+                )
+            }
         }
     }
 
@@ -806,6 +912,74 @@ class HomeFragment : Fragment() {
                 ) {
                     BasicText(
                         getString(R.string.home_recording_delete),
+                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PresetItemRow(
+        item: PresetItem,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onLoad: () -> Unit,
+        onEdit: () -> Unit,
+        onDelete: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onLoad,
+            backdrop = backdrop,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth(),
+            containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+            height = 56.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        item.name,
+                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    )
+                    if (item.remark.isNotBlank()) {
+                        BasicText(
+                            getString(R.string.location_point_remark_format, item.remark),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                        )
+                    }
+                    BasicText(
+                        item.meta,
+                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                    )
+                }
+                GlassButton(
+                    onClick = onEdit,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_preset_edit),
+                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                    )
+                }
+                GlassButton(
+                    onClick = onDelete,
+                    backdrop = backdrop,
+                    modifier = Modifier.width(64.dp),
+                    isInteractive = false,
+                    surfaceColor = colors.danger.copy(alpha = 0.25f)
+                ) {
+                    BasicText(
+                        getString(R.string.home_preset_delete),
                         style = TextStyle(color = colors.danger, fontSize = 12.sp)
                     )
                 }
@@ -1297,6 +1471,128 @@ class HomeFragment : Fragment() {
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "saveRecordingAsRoute failed", t)
+        }
+    }
+
+    // ---------- 配置状态预设（快捷保存/加载当前虚拟配置） ----------
+
+    private fun refreshPresets() {
+        executor.execute {
+            val result = ApiClient.listConfigPresets()
+            val presets = result.data?.optJSONArray("presets")
+            requireActivity().runOnUiThread {
+                presetItems.clear()
+                presets?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val item = arr.optJSONObject(i) ?: continue
+                        presetItems.add(
+                            PresetItem(
+                                id = item.optLong("id", -1L),
+                                name = item.optString("name", ""),
+                                remark = item.optString("remark", ""),
+                                meta = getString(
+                                    R.string.home_preset_meta,
+                                    formatTime(item.optLong("updateTime", 0L))
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showSavePresetDialog() {
+        presetNameInput = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
+            getString(R.string.home_preset_title)
+        )
+        presetRemarkInput = ""
+        presetDialog = PresetDialogState("save", -1L, presetNameInput, "")
+    }
+
+    private fun showEditPresetDialog(item: PresetItem) {
+        presetNameInput = item.name
+        presetRemarkInput = item.remark
+        presetDialog = PresetDialogState("edit", item.id, item.name, item.remark)
+    }
+
+    private fun confirmPresetDialog() {
+        val state = presetDialog ?: return
+        val name = presetNameInput.trim()
+        if (name.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_preset_name_required, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val remark = presetRemarkInput.trim()
+        presetDialog = null
+        executor.execute {
+            val result = if (state.mode == "save") {
+                ApiClient.createConfigPreset(name, remark)
+            } else {
+                ApiClient.renameConfigPreset(state.id, name, remark)
+            }
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                if (result.code == ApiResult.CODE_OK) {
+                    if (state.mode == "save") {
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.home_preset_saved_toast,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    refreshPresets()
+                }
+            }
+        }
+    }
+
+    /** 一键加载配置状态预设：点击行即应用保存时的完整虚拟配置。 */
+    private fun loadPreset(item: PresetItem) {
+        executor.execute {
+            val result = ApiClient.loadConfigPreset(item.id)
+            requireActivity().runOnUiThread {
+                if (result.code == ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.home_preset_loaded_toast, item.name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    refreshFeatureStatus()
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun deletePreset(item: PresetItem) {
+        executor.execute {
+            val result = ApiClient.deleteConfigPreset(item.id)
+            requireActivity().runOnUiThread {
+                Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                if (result.code == ApiResult.CODE_OK) {
+                    Toast.makeText(
+                        requireContext(),
+                        R.string.home_preset_deleted_toast,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    refreshPresets()
+                }
+            }
+        }
+    }
+
+    /** 加载预设后立即刷新主页功能状态（位置/路线/环境开关）。 */
+    private fun refreshFeatureStatus() {
+        executor.execute {
+            val loc = ApiClient.getLocationStatus()
+            val route = ApiClient.getRouteStatus()
+            val env = ApiClient.getEnvStatus()
+            val joystick = ApiClient.getJoystickStatus()
+            requireActivity().runOnUiThread {
+                renderFeatureStatus(loc, route, env, joystick)
+            }
         }
     }
 
