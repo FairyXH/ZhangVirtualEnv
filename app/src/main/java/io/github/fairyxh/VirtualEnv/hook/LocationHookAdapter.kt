@@ -530,8 +530,24 @@ class LocationHookAdapter(
                 ZLog.d(TAG_SCOPE, "registerLocationListener -> pushed virtual single (${virtual.latitude},${virtual.longitude})")
             }
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "push virtual location to listener failed", t)
+            // 已注销/进程退出：移除活跃集合，避免周期推送持续向死 Binder 投递
+            if (isDeadObject(t)) {
+                activeListeners.remove(listener)
+                ZLog.d(TAG_SCOPE, "push listener removed (dead): ${cls.name}")
+            } else {
+                ZLog.w(TAG_SCOPE, "push virtual location to listener failed", t)
+            }
         }
+    }
+
+    /** 剥开 InvocationTargetException 判断 DeadObjectException。 */
+    private fun isDeadObject(t: Throwable): Boolean {
+        var cur: Throwable? = t
+        while (cur != null) {
+            if (cur is android.os.DeadObjectException) return true
+            cur = cur.cause
+        }
+        return false
     }
 
     // ---------- provider 启用状态：isProviderEnabledForUser / isProviderEnabled ----------

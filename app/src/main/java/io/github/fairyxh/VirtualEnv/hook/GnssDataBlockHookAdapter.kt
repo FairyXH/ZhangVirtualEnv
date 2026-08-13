@@ -468,13 +468,38 @@ class GnssDataBlockHookAdapter(
                 )
             }
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "deliver virtual NMEA failed", t)
+            val cause = unwrap(t)
+            if (cause is android.os.DeadObjectException) {
+                // 百度等 SDK 注销/进程重启后，Binder 代理已死：取消任务并移除，
+                // 否则周期投递持续失败会让百度 SDK 的 NMEA 时间戳（ab）不再更新，
+                // 触发 e() 的 aa-ab>=3000 重置 → GPS fix 被判定 mock。
+                nmeaTasks.remove(listener)?.cancel(false)
+                allNmeaListeners.remove(listener)
+                ZLog.i(TAG_SCOPE, "GnssNmea listener dead, task cancelled (${listener.javaClass.name})")
+            } else {
+                ZLog.w(TAG_SCOPE, "deliver virtual NMEA failed", t)
+            }
         }
+    }
+
+    /** 剥开 InvocationTargetException 取真实 cause。 */
+    private fun unwrap(t: Throwable): Throwable {
+        var cur = t
+        while (cur is java.lang.reflect.InvocationTargetException && cur.cause != null) {
+            cur = cur.cause!!
+        }
+        return cur
     }
 
     /**
      * 基于虚拟位置构造 $GPRMC 语句（百度 SDK 只解析 $GPGGA/$GPRMC 的经纬度与状态）。
      * 字段：$GPRMC,hhmmss.000,A,纬度,N/S,经度,E/W,速度,航向,日期,,,A*校验和
+     *
+     * 状态字段必须用 **V**（Void）而非 A：
+     * 逆向 com.baidu.location.c.f.e(Location) 发现，NMEA 解析出坐标（ac!=null）且
+     * 状态为 A（ad=true）时 e() 返回 400 → n() 走 mock 分支 → 百度地图定位失败；
+     * 状态为 V（ad=false）且坐标有效时 e() 返回 0 → n() 走正常 GPS 路径。
+     * （真实设备上室内无 GPS fix 时 NMEA 也常为 V，故 V 状态更“真实”。）
      */
     private fun buildVirtualNmea(latitude: Double, longitude: Double): String? {
         return try {
@@ -488,7 +513,7 @@ class GnssDataBlockHookAdapter(
             val lonHem = if (longitude >= 0) "E" else "W"
             val body = String.format(
                 java.util.Locale.US,
-                "GPRMC,120000.000,A,%02d%07.4f,%s,%03d%07.4f,%s,0.0,0.0,130826,,,A",
+                "GPRMC,120000.000,V,%02d%07.4f,%s,%03d%07.4f,%s,0.0,0.0,130826,,,A",
                 latDeg, latMin, latHem, lonDeg, lonMin, lonHem
             )
             var checksum = 0
