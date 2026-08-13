@@ -1,34 +1,85 @@
-# ZhangVirtualEnv — Android 系统级环境虚拟化框架
+# ZhangVirtualEnv — Android Environment Simulation Framework
 
-基于 LSPosed API 101 的 Android 系统环境虚拟化模块，从**系统层面**虚拟位置、基站、WiFi、蓝牙 BLE、GNSS 卫星与传感器数据，让任意应用无需修改即可读到"虚拟环境"。
+基于 LSPosed API 101 的 Android 环境模拟测试框架，从**系统层面**为开发测试提供位置、基站、WiFi、蓝牙 BLE、GNSS、传感器与 Telephony 环境模拟，帮助开发者在不修改应用源码的前提下验证应用在不同环境下的运行行为。
 
-> 工程名 `ZhangVirtualEnv`；控制端 App 显示名 `ZhangVirtualEnvironment`，包名 `io.github.fairyxh.VirtualEnv`。
+> 工程名 `ZhangVirtualEnv`；控制端 App 显示名「虚拟环境测试框架」，包名 `io.github.fairyxh.VirtualEnv`。
 
-> 设计思想：不是针对单个 App 的隐私保护工具，而是一个 **Android Environment Replay Framework**——真实环境采集 → 环境数据包 → 虚拟环境加载 → 应用认为处于真实环境。
+> 设计思想：真实环境采集 → 环境数据包 → 环境加载 → 应用在测试环境中运行，用于开发调试、自动化测试与兼容性验证。
 
-> 检测生效：可以通过一个独立设计的检测器来判断虚拟环境是否生效:[VirEnvDetector](https://github.com/FairyXH/VirEnvDetector)
+> 检测生效：可以通过独立设计的检测器判断虚拟环境是否生效：[VirEnvDetector](https://github.com/FairyXH/VirEnvDetector)
+
+---
+
+## Overview
+
+这是一个基于 LSPosed 的 Android 环境模拟测试框架。框架从系统框架层模拟系统 API 返回的环境数据，使开发者可以在不修改应用源码的前提下，测试应用在不同环境下的运行行为。
+
+- 面向开发者、测试人员与研究人员
+- 仅作用于系统框架与必要系统组件，不注入第三方应用进程
+- 用于应用开发调试、自动化测试、设备兼容性验证与隐私保护研究
+
+## Features
+
+- **Location Provider Testing** — 单点位置与路线移动模拟，用于 Location API 测试
+- **Navigation Scenario Simulation** — 路线轨迹、循环播放与平滑回程场景模拟
+- **GNSS Environment Simulation** — 卫星状态 / 星历 / 信噪比环境模拟
+- **Sensor Data Injection Testing** — 步频 / 步数等传感器数据测试
+- **Network Environment Simulation** — WiFi 扫描结果与基站环境模拟
+- **Telephony API Testing** — SIM 身份 / 运营商 / 信号强度测试 Profile
+
+其他能力：
+
+- 环境采集（快照 / 持续录像）与回放，用于测试数据准备与回归测试
+- 配置状态预设：一键保存 / 加载完整测试配置
+- 配置导入导出：模块整体配置备份与恢复
+- 悬浮摇杆与路线控制面板
+- 独立检测器 VirEnvDetector：从第三方视角验证环境是否生效
+
+## Use Cases
+
+适用：
+
+- Android 应用开发测试
+- LBS 服务调试
+- 自动化测试
+- 系统兼容性验证
+- 隐私保护研究
+
+## Disclaimer
+
+This project is designed for development,
+testing and educational purposes.
+
+It must not be used for:
+- bypassing security mechanisms
+- fraudulent activities
+- cheating
+- violating third-party service agreements
+
+Users are responsible for their own usage.
+
 ---
 
 ## 1. 功能简介
 
 | 类别 | 能力 |
 |---|---|
-| 定位（GPS） | 单点虚拟定位、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
+| 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
 | 基站（Cell） | LTE / NR 虚拟小区（mcc/mnc/tac/ci/pci），可采集真实小区后模拟 |
-| SIM | SIM 卡身份 / 运营商 / 国家地区 / 信号强度全局虚拟化，自动识别真实卡槽，国家模板一键填充 |
+| SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
 | BLE | 虚拟 Beacon 扫描结果，可采集真实设备后模拟 |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座），完全屏蔽真实卫星回调 |
+| GNSS | 虚拟卫星状态（卫星数/使用数/星座），测试进程中接管真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
 | 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
-| 配置状态预设 | 主页一键保存当前完整虚拟配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
+| 配置状态预设 | 主页一键保存当前完整测试配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
 | 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
 | 隐私/外观 | 桌面图标隐藏（仅 LSPosed 入口）、地图选点 GCJ-02→WGS-84 自动转换 |
 
 ### 设计原则
 
 - **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
-- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、GMS）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得虚拟环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。
+- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、GMS）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。
 - **API 保密**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开，不暴露接口存在。
 - **fail-open**：任何 Hook 点异常时放行原始逻辑，避免影响宿主稳定性。
 
@@ -110,7 +161,7 @@ adb install -r VirEnvDetector/app/build/outputs/apk/debug/app-debug.apk
 adb reboot
 ```
 
-4. 打开控制端 App（`io.github.fairyxh.VirtualEnv`），授予定位/蓝牙/WiFi/悬浮窗等权限。
+4. 打开控制端 App（`io.github.fairyxh.VirtualEnv`），授予定位/蓝牙/WiFi/悬浮窗等权限。首次启动需阅读并确认开发者用途声明。
 
 > Hook 加载需要重启生效。模块更新后同样 `adb install -r` + `adb reboot`。
 
@@ -118,13 +169,13 @@ adb reboot
 
 控制端主界面分为：
 
-- **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整虚拟配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放
+- **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整测试配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放
 - **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）
 - **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照；每个类型条目表单右上角提供**随机**按钮，一键生成合法随机参数
   - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与 Nrfr 相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**Oplus 15 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 拦截 `TelephonyProperties` setter 并 1s 轮询重写（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
 - **环境配置持久化**：**wifi/cell/ble/gnss/sensor/sim 六类环境引擎的上次配置（数据 + 开关 + 来源快照）自动持久化到 `env_state` 表**（system_server 的 zve.db），重启后自动恢复并直接生效（enabled=true 的类型开机即应用）；环境页卡片实时显示“使用中 · 配置摘要/使用配置：快照名”，清除配置后持久化记录同步删除
 - **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
-- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）
+- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
 
 所有操作走本地 API，无需外部网络（地图 SDK 除外）。
 
@@ -134,23 +185,23 @@ adb reboot
 |---|---|---|
 | GET | `/api/status` | 服务与模块状态 |
 | GET | `/api/system/info` | 系统信息 |
-| GET | `/api/location/status` | 当前虚拟位置状态 |
+| GET | `/api/location/status` | 当前位置模拟状态 |
 | POST | `/api/location/set` | 设置单点位置 |
 | POST | `/api/location/enable` | 启用/关闭位置模拟 |
 | POST | `/api/route/create` / `start` / `stop` | 路线管理 |
 | POST | `/api/joystick/set` | 摇杆移动 |
 | GET | `/api/env/status` | 全部环境类型状态（wifi/cell/ble/sensor/gnss/sim） |
-| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` `/api/sim/set` | 设置各类型虚拟环境 |
+| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` `/api/sim/set` | 设置各类型测试环境 |
 | POST | `/api/env/enable` `/api/env/clear` `/api/env/suspend` `/api/env/resume` | 环境开关与生命周期 |
 | POST | `/api/env-snapshot/create` `/list` `/delete` | 环境快照（采集/回放） |
 | POST | `/api/env/use` | 应用快照 |
-| POST | `/api/debug/random-env` | 调试：生成全套随机虚拟环境并启用 |
+| POST | `/api/debug/random-env` | 调试：生成全套随机测试环境并启用 |
 | GET/POST | `/api/test/report` | 检测器上报/查询报告 |
 | POST | `/api/recording/start` `/append` `/stop` | 录制 |
 | GET | `/api/recording/list` `/get` | 录像列表（含 `interrupted` 中断标记）/ 帧数据 |
 | POST | `/api/recording/play` `/pause` `/resume` `/stop-play` `/speed` | 回放控制 |
 | POST | `/api/recording/smooth` | 回放帧间平滑插值开关 `{"enabled":bool}` |
-| POST | `/api/preset/create` `/load` `/rename` `/delete` | 配置状态预设：保存当前完整虚拟配置/加载/重命名/删除 |
+| POST | `/api/preset/create` `/load` `/rename` `/delete` | 配置状态预设：保存当前完整测试配置/加载/重命名/删除 |
 | GET | `/api/preset/list` | 配置状态预设列表 |
 | GET | `/api/config/export` | 导出模块整体配置（JSON） |
 | POST | `/api/config/import` | 导入模块整体配置（整体覆盖并立即生效） |
@@ -183,7 +234,7 @@ curl -X POST http://127.0.0.1:18790/api/debug/random-env \
 
 ### 4.1 作用
 
-模块无法 Hook 自身，传感器等 App 进程内检测结果不可靠，因此单独提供检测器 App 作为**第三方视角**验证虚拟化是否生效：
+模块无法 Hook 自身，传感器等 App 进程内检测结果不可靠，因此单独提供检测器 App 作为**第三方视角**验证环境模拟是否生效：
 
 - 读取真实环境（位置/基站/WiFi/BLE/传感器/GNSS）
 - 拉取模块期望配置（`/api/env/status`、`/api/location/status`、`/api/route/status`）
@@ -201,7 +252,7 @@ adb shell am start -n io.github.fairyxh.VirEnvDetector/.MainActivity
 adb logcat -s VirEnvDetector:I
 ```
 
-六项全 PASS 表示虚拟化全链路生效：
+六项全 PASS 表示模拟全链路生效：
 
 ```
 location: PASS | provider=gps
