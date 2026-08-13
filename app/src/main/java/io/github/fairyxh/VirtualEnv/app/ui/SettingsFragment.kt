@@ -119,6 +119,7 @@ class SettingsFragment : Fragment() {
     private var amapSecurity by mutableStateOf("")
     private var privacyAgreed by mutableStateOf(false)
     private var launcherHidden by mutableStateOf(false)
+    private var showDeveloperNotice by mutableStateOf(false)
 
     private var envTestRunningState by mutableStateOf(false)
     private var envTestFields by mutableStateOf(
@@ -265,6 +266,9 @@ class SettingsFragment : Fragment() {
         return androidx.compose.ui.platform.ComposeView(context).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
+                if (showDeveloperNotice) {
+                    DeveloperNoticeDialog(onAgree = { showDeveloperNotice = false })
+                }
                 SettingsScreen(this@SettingsFragment)
             }
         }
@@ -604,6 +608,51 @@ class SettingsFragment : Fragment() {
                                 )
                             }
                         }
+                    }
+                }
+
+                // 关于本项目卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_about_title))
+                        SectionDesc(getString(R.string.settings_about_name))
+                        SectionLabel(getString(R.string.settings_about_purpose_title))
+                        BasicText(
+                            getString(R.string.settings_about_purpose),
+                            Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp, lineHeight = 20.sp)
+                        )
+                        GlassButton(
+                            onClick = { fragment.showDeveloperNotice() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                            surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                        ) {
+                            BasicText(
+                                getString(R.string.settings_about_view_notice),
+                                style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // 免责声明卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_disclaimer_title))
+                        BasicText(
+                            getString(R.string.settings_disclaimer_body),
+                            Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp, lineHeight = 20.sp)
+                        )
                     }
                 }
             }
@@ -1480,6 +1529,11 @@ class SettingsFragment : Fragment() {
         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("zve", text))
         Toast.makeText(requireContext(), R.string.settings_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    /** 设置页「关于本项目」重新查看开发者用途声明。 */
+    private fun showDeveloperNotice() {
+        showDeveloperNotice = true
     }
 
     // ---------- 配置导入导出（备份模块整体设置） ----------
