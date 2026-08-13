@@ -118,9 +118,9 @@ return propVal == null ? defaultVal : propVal;
    `SystemProperties.set(key, formatList(newList))` 写回（不复用原 setter，避免递归），
    未配置槽保留真实值；SIM 未启用/无配置时 `chain.proceed()` 放行。
 
-2. **1s 轮询**：监听 `EnvStateCache.currentSim()` 指纹变化，配置变化后即使电话栈
-   没有新写入也主动按当前属性值 + 虚拟槽重写 6 个属性；禁用/清除后放行（属性保持
-   电话栈真实值）。
+2. **1s 轮询**：每 1s 读取 `EnvStateCache.currentSim()`，按当前属性值 + 虚拟槽
+   比对并写回 6 个属性（配置变化自动生效；电话栈启动/网络注册后把属性写回
+   真实值时也会在 1s 内修正）；禁用/清除后放行（属性保持电话栈真实值）。
 
 3. `SystemProperties` 是隐藏 API，统一反射访问（fail-open）。
 
@@ -161,13 +161,20 @@ SIM 运营商代码: 45500
 
 ## 5. 遗留问题
 
-- **SIM 引擎配置不持久化**：SIM 配置保存在 system_server 内存引擎，重启后
-  `/api/env/status` 的 `sim` 为空；需重新在 App 应用配置（CarrierConfig 固化
-  属系统持久层，禁用/清除时 `CarrierConfigPersister.resetAll()` 还原）。
 - **SubscriptionInfo 改写（system_server）仍未触发**：`sim subscription hooks
   installed hooked=6` 但无 `SubscriptionInfo rewritten` 日志（Oplus 子类 override
   或构造点不同）；检测器 5 个字段不走该路径，本次不阻塞。
 - 属性层 Hook 只替换配置槽；多卡用户如需双卡都虚拟化需在 App 配置两个槽。
+
+## 5.1 相关后续修复（v135）
+
+- **轮询改为每 1s 持续修正**：v132 只在配置指纹变化时重写一次，电话栈在
+  SIM 加载/网络注册后会把 `gsm.sim.operator.*` / `gsm.operator.numeric` 等属性
+  重新写回真实值（重启后实测部分字段被还原）；v135 改为每 1s 按配置比对属性，
+  有差异才写回，重启后属性保持虚拟（`applyCurrent` 内部无差异时不会写）。
+- **环境引擎配置持久化（env_state 表）**：wifi/cell/ble/gnss/sensor/sim 六类的
+  上次配置（数据+开关+来源快照）持久化到 zve.db `env_state` 表，重启后
+  `restoreEnvStates()` 自动恢复；SIM 恢复 enabled=true 时会重新 CarrierConfig 固化。
 
 ## 6. 排错要点（下次直接复用）
 
