@@ -21,6 +21,8 @@
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），完全屏蔽真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
 | 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
+| 配置状态预设 | 主页一键保存当前完整虚拟配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
+| 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
 | 隐私/外观 | 桌面图标隐藏（仅 LSPosed 入口）、地图选点 GCJ-02→WGS-84 自动转换 |
 
 ### 设计原则
@@ -116,12 +118,13 @@ adb reboot
 
 控制端主界面分为：
 
+- **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整虚拟配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放
 - **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）
 - **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照；每个类型条目表单右上角提供**随机**按钮，一键生成合法随机参数
   - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与 Nrfr 相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**Oplus 15 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 拦截 `TelephonyProperties` setter 并 1s 轮询重写（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
 - **环境配置持久化**：**wifi/cell/ble/gnss/sensor/sim 六类环境引擎的上次配置（数据 + 开关 + 来源快照）自动持久化到 `env_state` 表**（system_server 的 zve.db），重启后自动恢复并直接生效（enabled=true 的类型开机即应用）；环境页卡片实时显示“使用中 · 配置摘要/使用配置：快照名”，清除配置后持久化记录同步删除
 - **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
-- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口
+- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）
 
 所有操作走本地 API，无需外部网络（地图 SDK 除外）。
 
@@ -147,6 +150,10 @@ adb reboot
 | GET | `/api/recording/list` `/get` | 录像列表（含 `interrupted` 中断标记）/ 帧数据 |
 | POST | `/api/recording/play` `/pause` `/resume` `/stop-play` `/speed` | 回放控制 |
 | POST | `/api/recording/smooth` | 回放帧间平滑插值开关 `{"enabled":bool}` |
+| POST | `/api/preset/create` `/load` `/rename` `/delete` | 配置状态预设：保存当前完整虚拟配置/加载/重命名/删除 |
+| GET | `/api/preset/list` | 配置状态预设列表 |
+| GET | `/api/config/export` | 导出模块整体配置（JSON） |
+| POST | `/api/config/import` | 导入模块整体配置（整体覆盖并立即生效） |
 
 请求示例：
 
@@ -324,7 +331,7 @@ ZhangVirtualEnv/
 └── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
 ```
 
-逆向与真机验证过程记录见 `docs/reverse/`（重点：`env-live-test-and-hook-fixes.md`）。
+逆向与真机验证过程记录见 `docs/reverse/`（重点：`env-live-test-and-hook-fixes.md`、`config-preset-and-import-export.md`）。
 
 ---
 
