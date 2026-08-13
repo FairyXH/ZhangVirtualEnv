@@ -36,7 +36,8 @@ class ApiServer(
         const val TOKEN_HEADER = "X-ZVE-Token"
 
         private const val BIND_ADDRESS = "127.0.0.1"
-        private const val MAX_BODY = 1 shl 20 // 1MB
+        // 配置导入/导出请求体可能包含大量环境快照数据，放宽到 16MB
+        private const val MAX_BODY = 1 shl 24 // 16MB
     }
 
     private val running = AtomicBoolean(false)
@@ -210,6 +211,13 @@ class ApiServer(
                 path == "/api/recording/status" && method == "GET" -> recordingStatus()
                 path == "/api/recording/speed" && method == "POST" -> recordingSpeed(body)
                 path == "/api/recording/smooth" && method == "POST" -> recordingSmooth(body)
+                path == "/api/preset/create" && method == "POST" -> presetCreate(body)
+                path == "/api/preset/list" && method == "GET" -> presetList()
+                path == "/api/preset/load" && method == "POST" -> presetLoad(body)
+                path == "/api/preset/rename" && method == "POST" -> presetRename(body)
+                path == "/api/preset/delete" && method == "POST" -> presetDelete(body)
+                path == "/api/config/export" && method == "GET" -> configExport()
+                path == "/api/config/import" && method == "POST" -> configImport(body)
                 else -> ApiResult.error("not found: $method $path", 404)
             }
         } catch (t: Throwable) {
@@ -606,6 +614,74 @@ class ApiServer(
 
     private fun recordingStatus(): ApiResult {
         return ApiResult.ok("ok", backend.recordingStatusJson())
+    }
+
+    // ---------- 配置状态预设 ----------
+
+    private fun presetCreate(body: String): ApiResult {
+        val json = JSONObject(body)
+        val name = json.optString("name", "")
+        if (name.isBlank()) return ApiResult.error("name required")
+        val remark = json.optString("remark", "")
+        val id = backend.saveConfigPreset(name, remark)
+        ZLog.i(TAG_SCOPE, "config preset created id=$id name=$name")
+        return ApiResult.ok("saved", JSONObject().apply { put("id", id) })
+    }
+
+    private fun presetList(): ApiResult {
+        val data = JSONObject()
+        data.put("presets", org.json.JSONArray(backend.listConfigPresets()))
+        return ApiResult.ok("ok", data)
+    }
+
+    private fun presetLoad(body: String): ApiResult {
+        val id = JSONObject(body).optLong("id", -1)
+        val preset = backend.loadConfigPreset(id)
+            ?: return ApiResult.error("config preset not found: $id")
+        ZLog.i(TAG_SCOPE, "config preset loaded id=$id name=${preset.optString("name")}")
+        return ApiResult.ok("applied", preset)
+    }
+
+    private fun presetRename(body: String): ApiResult {
+        val json = JSONObject(body)
+        val id = json.optLong("id", -1)
+        val name = json.optString("name", "")
+        if (name.isBlank()) return ApiResult.error("name required")
+        val remark = json.optString("remark", "")
+        return if (backend.renameConfigPreset(id, name, remark)) {
+            ApiResult.ok("updated")
+        } else {
+            ApiResult.error("config preset not found: $id")
+        }
+    }
+
+    private fun presetDelete(body: String): ApiResult {
+        val id = JSONObject(body).optLong("id", -1)
+        return if (backend.deleteConfigPreset(id)) {
+            ApiResult.ok("deleted")
+        } else {
+            ApiResult.error("config preset not found: $id")
+        }
+    }
+
+    // ---------- 配置整体导入导出 ----------
+
+    private fun configExport(): ApiResult {
+        return ApiResult.ok("ok", backend.exportConfigJson())
+    }
+
+    private fun configImport(body: String): ApiResult {
+        val json = try {
+            JSONObject(body)
+        } catch (t: Throwable) {
+            return ApiResult.error("bad config json: ${t.message}")
+        }
+        return if (backend.importConfigJson(json)) {
+            ZLog.i(TAG_SCOPE, "config imported via api")
+            ApiResult.ok("imported")
+        } else {
+            ApiResult.error("import failed")
+        }
     }
 
     private fun locationStatus(): ApiResult {

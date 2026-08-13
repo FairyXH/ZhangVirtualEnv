@@ -320,6 +320,47 @@ object ApiClient {
 
     fun getRecordingStatus(): ApiResult = get("/api/recording/status")
 
+    // ---------- 配置状态预设 ----------
+
+    /** 保存当前完整配置状态（位置/路线/摇杆 + 环境六大板块）为预设。 */
+    fun createConfigPreset(name: String, remark: String): ApiResult {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("remark", remark)
+        }
+        return post("/api/preset/create", body)
+    }
+
+    fun listConfigPresets(): ApiResult = get("/api/preset/list")
+
+    /** 一键加载配置状态预设。 */
+    fun loadConfigPreset(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/preset/load", body)
+    }
+
+    fun renameConfigPreset(id: Long, name: String, remark: String): ApiResult {
+        val body = JSONObject().apply {
+            put("id", id)
+            put("name", name)
+            put("remark", remark)
+        }
+        return post("/api/preset/rename", body)
+    }
+
+    fun deleteConfigPreset(id: Long): ApiResult {
+        val body = JSONObject().apply { put("id", id) }
+        return post("/api/preset/delete", body)
+    }
+
+    // ---------- 配置整体导入导出 ----------
+
+    /** 导出模块整体配置（data 即完整配置 JSON）。 */
+    fun exportConfig(): ApiResult = get("/api/config/export")
+
+    /** 导入模块整体配置（整体覆盖并立即生效）。 */
+    fun importConfig(json: JSONObject): ApiResult = post("/api/config/import", json)
+
     private fun get(path: String): ApiResult {
         return request("GET", path, null)
     }

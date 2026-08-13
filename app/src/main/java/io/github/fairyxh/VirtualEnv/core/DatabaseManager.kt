@@ -17,12 +17,13 @@ class DatabaseManager(private val dbFile: File) {
 
     companion object {
         private const val TAG_SCOPE = "Core"
-        private const val DATABASE_VERSION = 5
+        private const val DATABASE_VERSION = 6
 
         const val TABLE_ROUTE = "route"
         const val TABLE_LOCATION_POINT = "location_point"
         const val TABLE_ENV_SNAPSHOT = "env_snapshot"
         const val TABLE_ENV_STATE = "env_state"
+        const val TABLE_CONFIG_PRESET = "config_preset"
         const val TABLE_RECORDING = "recording"
         const val TABLE_RECORDING_FRAME = "recording_frame"
 
@@ -90,6 +91,17 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_UPDATE_TIME INTEGER NOT NULL" +
                 ")"
 
+        /** 配置状态预设：保存当前完整虚拟配置（位置/路线/摇杆/环境六大板块），可多份保存与一键加载。 */
+        private const val SQL_CREATE_CONFIG_PRESET =
+            "CREATE TABLE IF NOT EXISTS $TABLE_CONFIG_PRESET (" +
+                "$COL_ID INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "$COL_NAME TEXT NOT NULL," +
+                "$COL_REMARK TEXT DEFAULT ''," +
+                "$COL_DATA TEXT NOT NULL," +
+                "$COL_CREATE_TIME INTEGER NOT NULL," +
+                "$COL_UPDATE_TIME INTEGER NOT NULL" +
+                ")"
+
         private const val SQL_CREATE_RECORDING =
             "CREATE TABLE IF NOT EXISTS $TABLE_RECORDING (" +
                 "$COL_ID INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -132,6 +144,7 @@ class DatabaseManager(private val dbFile: File) {
             opened.execSQL(SQL_CREATE_LOCATION_POINT)
             opened.execSQL(SQL_CREATE_ENV_SNAPSHOT)
             opened.execSQL(SQL_CREATE_ENV_STATE)
+            opened.execSQL(SQL_CREATE_CONFIG_PRESET)
             opened.execSQL(SQL_CREATE_RECORDING)
             opened.execSQL(SQL_CREATE_RECORDING_FRAME)
             opened.execSQL(SQL_INDEX_RECORDING_FRAME)
@@ -616,5 +629,140 @@ class DatabaseManager(private val dbFile: File) {
     /** 删除某类型环境引擎的持久化状态（清除配置时调用）。 */
     fun deleteEnvState(type: String) {
         open().delete(TABLE_ENV_STATE, "$COL_TYPE=?", arrayOf(type))
+    }
+
+    // ---------- ConfigPreset CRUD（配置状态预设） ----------
+
+    /** 插入一条配置状态预设（data 为 envStateSnapshotJson 完整配置）。 */
+    fun insertConfigPreset(name: String, remark: String, dataJson: String): Long {
+        val now = System.currentTimeMillis()
+        val values = android.content.ContentValues().apply {
+            put(COL_NAME, name)
+            put(COL_REMARK, remark)
+            put(COL_DATA, dataJson)
+            put(COL_CREATE_TIME, now)
+            put(COL_UPDATE_TIME, now)
+        }
+        return open().insert(TABLE_CONFIG_PRESET, null, values)
+    }
+
+    /** 查询全部配置状态预设（按更新时间倒序）。 */
+    fun queryConfigPresets(): List<org.json.JSONObject> {
+        val result = mutableListOf<org.json.JSONObject>()
+        val cursor = open().query(
+            TABLE_CONFIG_PRESET,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "$COL_UPDATE_TIME DESC"
+        )
+        cursor?.use {
+            val idIdx = it.getColumnIndexOrThrow(COL_ID)
+            val nameIdx = it.getColumnIndexOrThrow(COL_NAME)
+            val remarkIdx = it.getColumnIndexOrThrow(COL_REMARK)
+            val dataIdx = it.getColumnIndexOrThrow(COL_DATA)
+            val createIdx = it.getColumnIndexOrThrow(COL_CREATE_TIME)
+            val updateIdx = it.getColumnIndexOrThrow(COL_UPDATE_TIME)
+            while (it.moveToNext()) {
+                val obj = org.json.JSONObject()
+                obj.put("id", it.getLong(idIdx))
+                obj.put("name", it.getString(nameIdx))
+                obj.put("remark", it.getString(remarkIdx))
+                obj.put("data", org.json.JSONObject(it.getString(dataIdx)))
+                obj.put("createTime", it.getLong(createIdx))
+                obj.put("updateTime", it.getLong(updateIdx))
+                result.add(obj)
+            }
+        }
+        return result
+    }
+
+    /** 更新配置状态预设的名称/备注。 */
+    fun updateConfigPreset(id: Long, name: String, remark: String): Boolean {
+        val values = android.content.ContentValues().apply {
+            put(COL_NAME, name)
+            put(COL_REMARK, remark)
+            put(COL_UPDATE_TIME, System.currentTimeMillis())
+        }
+        return open().update(TABLE_CONFIG_PRESET, values, "$COL_ID=?", arrayOf(id.toString())) > 0
+    }
+
+    /** 删除一条配置状态预设。 */
+    fun deleteConfigPreset(id: Long): Boolean {
+        return open().delete(TABLE_CONFIG_PRESET, "$COL_ID=?", arrayOf(id.toString())) > 0
+    }
+
+    // ---------- 配置导入导出（整体替换配置表） ----------
+
+    /**
+     * 事务内清空并重建全部配置表（route / location_point / env_snapshot / env_state / config_preset）。
+     * 任一失败回滚，保证导入不会产生半套配置。
+     */
+    fun replaceConfigData(
+        routes: List<org.json.JSONObject>,
+        locationPoints: List<org.json.JSONObject>,
+        envSnapshots: List<org.json.JSONObject>,
+        envStates: List<org.json.JSONObject>,
+        presets: List<org.json.JSONObject>
+    ): Boolean {
+        val db = open()
+        return try {
+            db.beginTransaction()
+            db.delete(TABLE_ROUTE, null, null)
+            db.delete(TABLE_LOCATION_POINT, null, null)
+            db.delete(TABLE_ENV_SNAPSHOT, null, null)
+            db.delete(TABLE_ENV_STATE, null, null)
+            db.delete(TABLE_CONFIG_PRESET, null, null)
+            routes.forEach { r ->
+                insertRoute(
+                    r.optString("name", ""),
+                    r.optString("remark", ""),
+                    r.optJSONArray("points")?.toString() ?: "[]",
+                    r.optDouble("speed", 3.5),
+                    r.optInt("stepFrequency", 120)
+                )
+            }
+            locationPoints.forEach { p ->
+                insertLocationPoint(
+                    p.optString("name", ""),
+                    p.optString("remark", ""),
+                    p.optDouble("latitude", 0.0),
+                    p.optDouble("longitude", 0.0)
+                )
+            }
+            envSnapshots.forEach { s ->
+                insertEnvSnapshot(
+                    s.optString("name", ""),
+                    s.optString("remark", ""),
+                    s.optString("type", ""),
+                    s.optJSONObject("data")?.toString() ?: "{}"
+                )
+            }
+            envStates.forEach { e ->
+                saveEnvState(
+                    e.optString("type", ""),
+                    e.optBoolean("enabled", false),
+                    e.optJSONObject("data")?.toString() ?: "",
+                    e.optLong("snapshotId", -1L)
+                )
+            }
+            presets.forEach { p ->
+                insertConfigPreset(
+                    p.optString("name", ""),
+                    p.optString("remark", ""),
+                    p.optJSONObject("data")?.toString() ?: "{}"
+                )
+            }
+            db.setTransactionSuccessful()
+            ZLog.i(TAG_SCOPE, "config tables replaced routes=${routes.size} points=${locationPoints.size} snapshots=${envSnapshots.size} envStates=${envStates.size} presets=${presets.size}")
+            true
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "replace config data failed", t)
+            false
+        } finally {
+            db.endTransaction()
+        }
     }
 }

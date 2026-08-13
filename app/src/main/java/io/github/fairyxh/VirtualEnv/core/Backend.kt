@@ -1170,4 +1170,114 @@ class Backend private constructor(private val dataDir: File) {
     fun recordingStatusJson(): org.json.JSONObject {
         return recordingEngine.statusJson()
     }
+
+    // ---------- 配置状态预设（主页快速保存/加载当前配置） ----------
+
+    /** 保存当前完整配置状态（位置/路线/摇杆 + 环境六大板块）为预设。 */
+    fun saveConfigPreset(name: String, remark: String): Long {
+        val data = envStateSnapshotJson().toString()
+        val id = databaseManager.insertConfigPreset(name, remark, data)
+        ZLog.i(TAG_SCOPE, "config preset saved id=$id name=$name")
+        return id
+    }
+
+    fun listConfigPresets(): List<org.json.JSONObject> {
+        return databaseManager.queryConfigPresets()
+    }
+
+    fun renameConfigPreset(id: Long, name: String, remark: String): Boolean {
+        return databaseManager.updateConfigPreset(id, name, remark)
+    }
+
+    fun deleteConfigPreset(id: Long): Boolean {
+        return databaseManager.deleteConfigPreset(id)
+    }
+
+    /** 一键加载配置状态预设：应用保存时的完整虚拟配置（含持久化）。 */
+    fun loadConfigPreset(id: Long): org.json.JSONObject? {
+        val preset = databaseManager.queryConfigPresets()
+            .firstOrNull { it.optLong("id", -1L) == id }
+            ?: return null
+        val data = preset.optJSONObject("data") ?: return null
+        applyEnvStateSnapshot(data)
+        ZLog.i(TAG_SCOPE, "config preset loaded id=$id name=${preset.optString("name")}")
+        return preset
+    }
+
+    // ---------- 配置整体导入导出（设置页备份） ----------
+
+    /**
+     * 导出模块整体配置：config.json + 路线 + 已保存地点 + 环境快照 +
+     * 环境上次配置 + 配置状态预设（不含录像数据，录像帧体积大且属于录制数据）。
+     */
+    fun exportConfigJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("version", 1)
+            put("app", "ZhangVirtualEnv")
+            put("exportedAt", System.currentTimeMillis())
+            put("config", configManager.load())
+            put("routes", org.json.JSONArray(databaseManager.queryRoutes()))
+            put("locationPoints", org.json.JSONArray(databaseManager.queryLocationPoints()))
+            put("envSnapshots", org.json.JSONArray(databaseManager.queryEnvSnapshots()))
+            put("envStates", org.json.JSONArray(databaseManager.loadEnvStates()))
+            put("presets", org.json.JSONArray(databaseManager.queryConfigPresets()))
+        }
+    }
+
+    /** 导入模块整体配置：事务覆盖全部配置表并重新应用到运行引擎。 */
+    fun importConfigJson(json: org.json.JSONObject): Boolean {
+        return try {
+            val config = json.optJSONObject("config") ?: org.json.JSONObject()
+            val ok = databaseManager.replaceConfigData(
+                routes = jsonArrayToObjects(json.optJSONArray("routes")),
+                locationPoints = jsonArrayToObjects(json.optJSONArray("locationPoints")),
+                envSnapshots = jsonArrayToObjects(json.optJSONArray("envSnapshots")),
+                envStates = jsonArrayToObjects(json.optJSONArray("envStates")),
+                presets = jsonArrayToObjects(json.optJSONArray("presets"))
+            )
+            if (!ok) return false
+            configManager.saveRoot(config)
+            reloadRuntimeConfig()
+            ZLog.i(TAG_SCOPE, "config imported (routes/locationPoints/envSnapshots/envStates/presets)")
+            true
+        } catch (t: Throwable) {
+            ZLog.e(TAG_SCOPE, "import config failed", t)
+            false
+        }
+    }
+
+    private fun jsonArrayToObjects(arr: org.json.JSONArray?): List<org.json.JSONObject> {
+        val list = mutableListOf<org.json.JSONObject>()
+        if (arr == null) return list
+        for (i in 0 until arr.length()) {
+            arr.optJSONObject(i)?.let { list.add(it) }
+        }
+        return list
+    }
+
+    /** 导入后把持久化配置重新应用到运行引擎（位置开关 + 环境引擎 + SIM 固化）。 */
+    private fun reloadRuntimeConfig() {
+        synchronized(this) {
+            activeEnvSnapshotIds.clear()
+            if (configManager.isLocationEnabled()) {
+                val cfg = configManager.load()
+                val loc = cfg.optJSONObject("location")
+                if (loc != null) {
+                    (locationEngine as SinglePointLocationEngine).setPoint(
+                        loc.optDouble("latitude", 0.0),
+                        loc.optDouble("longitude", 0.0),
+                        loc.optDouble("speed", 0.0).toFloat(),
+                        loc.optDouble("bearing", 0.0).toFloat()
+                    )
+                    locationEngine.setEnabled(true)
+                }
+            } else {
+                locationEngine.setEnabled(false)
+            }
+            routeEngine.stop()
+            joystickEngine.setVector(false, 0.0, 0.0, 5.0)
+            restoreEnvStates()
+            ZLog.i(TAG_SCOPE, "runtime config reloaded after import")
+        }
+    }
 }

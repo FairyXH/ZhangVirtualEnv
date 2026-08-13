@@ -73,6 +73,13 @@ class ConfigManager(private val configDir: File) {
         }
     }
 
+    /** 整体覆盖配置（配置导入时使用）。 */
+    fun saveRoot(root: JSONObject) {
+        synchronized(lock) {
+            save(root)
+        }
+    }
+
     private fun save(root: JSONObject) {
         try {
             configFile.writeText(root.toString(2))
