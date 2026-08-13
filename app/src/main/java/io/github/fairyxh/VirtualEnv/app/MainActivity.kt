@@ -23,8 +23,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -277,12 +280,22 @@ class MainActivity : FragmentActivity() {
         val noticeView = ComposeView(this)
         noticeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         noticeView.setContent {
-            DeveloperNoticeDialog(
-                onAgree = {
-                    DeveloperNoticeManager.setAccepted(this@MainActivity, true)
-                    root.removeView(noticeView)
-                }
-            )
+            var visible by remember { mutableStateOf(true) }
+            // Dialog 是独立 Window：仅 removeView ComposeView 不会关闭窗口
+            // （DisposeOnViewTreeLifecycleDestroyed 只在 ON_DESTROY 时 dispose composition）。
+            // 必须先把 visible 置 false 让 Dialog 离开 composition 自动关窗，
+            // 再移除覆盖层，否则「同意并继续」看起来点击无效。
+            LaunchedEffect(visible) {
+                if (!visible) root.removeView(noticeView)
+            }
+            if (visible) {
+                DeveloperNoticeDialog(
+                    onAgree = {
+                        DeveloperNoticeManager.setAccepted(this@MainActivity, true)
+                        visible = false
+                    }
+                )
+            }
         }
         root.addView(
             noticeView,
