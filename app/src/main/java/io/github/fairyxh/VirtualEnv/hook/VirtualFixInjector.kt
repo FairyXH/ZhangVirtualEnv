@@ -153,11 +153,15 @@ class VirtualFixInjector(
         managers.forEach { (name, manager) ->
             try {
                 val method = reportMethod(manager.javaClass, resultClass) ?: return@forEach
-                val loc = Location(virtual)
                 // gps/passive 都使用 "gps" 名：百度 SDK 的 passive listener
                 // （com.baidu.location.c.f$h.onLocationChanged）明确要求
                 // location.getProvider()=="gps" 才接受被动 fix；network 保持 network。
-                loc.provider = if (name == "network") "network" else "gps"
+                // 必须刷新时间戳：旧时间戳导致 LocationRegistration 过滤 delta=0
+                // 直接丢弃（志愿汇只收到 1 次 fix 的根因）。
+                val loc = LocationFresh.fresh(
+                    virtual,
+                    if (name == "network") "network" else "gps"
+                )
                 val result = LocationResultFactory.create(resultClass, loc)
                 method.invoke(manager, result)
                 if (ticks % 10 == 1) {

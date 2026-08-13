@@ -53,7 +53,19 @@ class LocationHookAdapter(
         hookRegisterLocationListener(classLoader, managerClass)
         hookProviderEnabled(classLoader, managerClass)
         hookRegisterGnssStatusCallback(classLoader, managerClass)
+        hookRegistrationFilter(classLoader, providerManagerClass)
     }
+
+    /** 取刷新时间戳后的虚拟位置（所有对外投递点统一使用，防 SDK 新鲜度拒收）。 */
+    private fun currentVirtual(provider: String? = null): Location? {
+        val virtual = backend.currentLocation() ?: return null
+        return LocationFresh.fresh(virtual, provider)
+    }
+
+    /** 虚拟定位启用（单点或路线任一开启；采集暂停时放行原始行为）。 */
+    private fun virtualLocationEnabled(): Boolean =
+        !backend.isSuspended() &&
+            (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     // ---------- 单次查询：getLastLocation ----------
 
@@ -68,7 +80,7 @@ class LocationHookAdapter(
         val ok = registrar.register(method) { chain ->
             // after：先走原始逻辑，再决定是否替换返回值
             val original = chain.proceed()
-            val virtual = backend.currentLocation()
+            val virtual = currentVirtual()
             if (virtual != null) {
                 ZLog.d(TAG_SCOPE, "getLastLocation -> virtual ${virtual.latitude},${virtual.longitude}")
                 virtual
@@ -97,7 +109,7 @@ class LocationHookAdapter(
         }
         val callbackClass = method.parameterTypes[2]
         val ok = registrar.register(method) { chain ->
-            val virtual: Location? = backend.currentLocation()
+            val virtual: Location? = currentVirtual()
             if (virtual != null) {
                 // before：直接向回调投递虚拟位置，并返回已取消的 cancellation signal，阻止原链路
                 try {
@@ -147,7 +159,7 @@ class LocationHookAdapter(
         if (locationResultClass == null) return
 
         val ok = registrar.register(method) { chain ->
-            val virtual: Location? = backend.currentLocation()
+            val virtual: Location? = currentVirtual()
             if (virtual != null) {
                 try {
                     // 构造 LocationResult 替换上报位置（兼容 AOSP wrap(Location) 与 ColorOS wrap(List)）
@@ -184,7 +196,7 @@ class LocationHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             // before：替换上报位置为虚拟位置，然后继续原始分发链路
-            val virtual: Location? = backend.currentLocation()
+            val virtual: Location? = currentVirtual()
             if (virtual != null) {
                 chain.proceed(arrayOf(chain.getArg(0), virtual))
                 ZLog.d(TAG_SCOPE, "gnss onReportLocation -> virtual ${virtual.latitude},${virtual.longitude}")
@@ -229,7 +241,7 @@ class LocationHookAdapter(
                 return@forEach
             }
             val ok = registrar.register(method) { chain ->
-                val virtual: Location? = backend.currentLocation()
+                val virtual: Location? = currentVirtual()
                 if (virtual != null) {
                     try {
                         val virtualResult = LocationResultFactory.create(locationResultClass, virtual)
@@ -276,7 +288,7 @@ class LocationHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             chain.proceed()
-            val virtual: Location? = backend.currentLocation()
+            val virtual: Location? = currentVirtual()
             if (virtual != null) {
                 try {
                     val listener = chain.getArg(2) ?: return@register null
@@ -310,7 +322,7 @@ class LocationHookAdapter(
         cls.methods.filter { it.name == "onLocationChanged" }.forEach { m ->
             try {
                 val ok = registrar.register(m) { chain ->
-                    val virtualNow: Location? = backend.currentLocation()
+                    val virtualNow: Location? = currentVirtual()
                     if (virtualNow != null && chain.args.isNotEmpty()) {
                         val arg0 = chain.getArg(0)
                         if (arg0 is List<*>) {
@@ -413,6 +425,70 @@ class LocationHookAdapter(
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $className.registerGnssStatusCallback")
+        }
+    }
+
+    // ---------- 投递过滤旁路：LocationRegistration$1.test / LocationRequest getters ----------
+
+    /**
+     * system_server 对每个 listener 的投递过滤（Android 15 services.jar 逆向确认）：
+     *
+     * LocationProviderManager$LocationRegistration.acceptLocationChange(LocationResult)
+     *   → permittedLocationResult.filter(LocationRegistration$1.test(Location))：
+     *     - `deltaMs < minUpdateIntervalMillis - maxJitterMs` → 丢弃（"too fast"）
+     *     - `distanceTo(prev) <= minUpdateDistanceMeters` → 丢弃（"too close"）
+     *
+     * 虚拟定位启用时，注入的 fix 坐标静止且时间戳相同，会被这两道过滤丢弃：
+     * 志愿汇 gps listener 带 minUpdateDistance=10m → 只收到第 1 次 fix（locations=1），
+     * 之后地图不再更新（摇杆无法移动）。虚拟定位启用时直接放行所有投递。
+     */
+    private fun hookRegistrationFilter(classLoader: ClassLoader, providerManagerClass: String) {
+        // 优先挂匿名 Predicate：只影响投递过滤，不影响 provider request 计算
+        val predicateName = "$providerManagerClass\$LocationRegistration\$1"
+        val predicateClazz = HookSupport.findClass(classLoader, predicateName)
+        if (predicateClazz != null) {
+            val method = HookSupport.findMethods(predicateClazz, "test")
+                .firstOrNull { it.parameterCount == 1 && it.parameterTypes[0] == Location::class.java }
+            if (method != null) {
+                val ok = registrar.register(method) { chain ->
+                    if (virtualLocationEnabled()) {
+                        true
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                if (ok) {
+                    ZLog.i(TAG_SCOPE, "hooked $predicateName.test (delivery filter bypass)")
+                    return
+                }
+            }
+            ZLog.w(TAG_SCOPE, "LocationRegistration\$1.test not found, fallback LocationRequest getters")
+        }
+
+        // 回退：LocationRequest 过滤 getter 返回 0（虚拟定位启用时）
+        val requestClass = HookSupport.findClass(classLoader, "android.location.LocationRequest")
+            ?: return
+        // getMinUpdateDistanceMeters(): double, getMinUpdateIntervalMillis(): long
+        listOf(
+            "getMinUpdateDistanceMeters" to 0.0,
+            "getMinUpdateIntervalMillis" to 0L,
+        ).forEach { (name, zero) ->
+            val method = HookSupport.findMethods(requestClass, name)
+                .firstOrNull { it.parameterCount == 0 }
+            if (method == null) {
+                ZLog.w(TAG_SCOPE, "LocationRequest.$name not found")
+                return@forEach
+            }
+            val ok = registrar.register(method) { chain ->
+                if (virtualLocationEnabled()) {
+                    zero
+                } else {
+                    chain.proceed()
+                }
+            }
+            if (ok) {
+                ZLog.i(TAG_SCOPE, "hooked LocationRequest.$name -> 0 (virtual)")
+            }
         }
     }
 }
