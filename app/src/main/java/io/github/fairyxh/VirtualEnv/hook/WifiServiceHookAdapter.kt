@@ -43,6 +43,18 @@ class WifiServiceHookAdapter(
         !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
+    /** 节流：同一调用点 5s 内只打一条 I 级观测日志。 */
+    private val lastCallLog = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun logCallOnce(key: String, msg: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = lastCallLog[key] ?: 0L
+        if (now - last >= 5000L) {
+            lastCallLog[key] = now
+            ZLog.i(TAG_SCOPE, msg)
+        }
+    }
+
     private val installThread: HandlerThread by lazy {
         HandlerThread("ZVE-WifiHook").apply { start() }
     }
@@ -104,18 +116,19 @@ class WifiServiceHookAdapter(
             val original = chain.proceed()
             try {
                 val virtual = backend.wifiEngine.currentData()
+                val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null
                 if (virtual != null) {
                     // WiFi 模拟开关打开：直接覆盖真实扫描结果（空配置也返回空列表）
                     val list = buildVirtualScanResults(virtual)
                     val slice = newParceledListSlice(method.returnType, list)
-                    ZLog.d(TAG_SCOPE, "WifiService.getScanResults -> virtual ${list.size} networks")
+                    logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> virtual ${list.size} networks")
                     slice
                 } else if (!virtualLocationEnabled()) {
                     original
                 } else {
                     // 虚拟定位开启但未配置虚拟 WiFi：阻断网络定位数据源
                     val slice = newParceledListSlice(method.returnType, emptyList<Any>())
-                    ZLog.d(TAG_SCOPE, "WifiService.getScanResults -> empty (virtual location)")
+                    logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> empty (virtual location)")
                     slice
                 }
             } catch (t: Throwable) {
@@ -204,17 +217,18 @@ class WifiServiceHookAdapter(
             val original = chain.proceed()
             try {
                 val virtual = backend.wifiEngine.currentData()
+                val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null
                 if (virtual != null) {
                     // WiFi 模拟开关打开：直接覆盖当前连接信息
                     val info = buildVirtualWifiInfo(method.returnType, virtual)
-                    ZLog.d(TAG_SCOPE, "WifiService.getConnectionInfo -> virtual")
+                    logCallOnce("conn|$pkg", "WifiService.getConnectionInfo pkg=$pkg -> virtual")
                     info
                 } else if (!virtualLocationEnabled()) {
                     original
                 } else {
                     // 虚拟定位开启但未配置虚拟 WiFi：返回空 WifiInfo，阻断网络定位
                     val info = newEmptyWifiInfo(method.returnType)
-                    ZLog.d(TAG_SCOPE, "WifiService.getConnectionInfo -> empty (virtual location)")
+                    logCallOnce("conn|$pkg", "WifiService.getConnectionInfo pkg=$pkg -> empty (virtual location)")
                     info
                 }
             } catch (t: Throwable) {

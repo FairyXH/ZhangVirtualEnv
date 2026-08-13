@@ -161,7 +161,10 @@ class VirtualFixInjector(
                 val result = LocationResultFactory.create(resultClass, loc)
                 method.invoke(manager, result)
                 if (ticks % 10 == 1) {
-                    ZLog.d(TAG_SCOPE, "fix inject [$name] -> virtual ${loc.latitude},${loc.longitude}")
+                    ZLog.i(
+                        TAG_SCOPE,
+                        "fix inject [$name] -> virtual ${String.format(java.util.Locale.US, "%.5f,%.5f", loc.latitude, loc.longitude)} managers=${managers.keys}"
+                    )
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "fix inject [$name] failed", t)

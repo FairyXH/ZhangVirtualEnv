@@ -102,8 +102,9 @@ class LocationHookAdapter(
                 // before：直接向回调投递虚拟位置，并返回已取消的 cancellation signal，阻止原链路
                 try {
                     val callback = chain.getArg(2)
+                    val pkg = chain.getArg(3) as? String ?: "?"
                     invokeCallbackOnLocation(callbackClass, callback, virtual)
-                    ZLog.d(TAG_SCOPE, "getCurrentLocation -> virtual ${virtual.latitude},${virtual.longitude}")
+                    ZLog.i(TAG_SCOPE, "getCurrentLocation -> virtual pkg=$pkg ${virtual.latitude},${virtual.longitude}")
                     newCancellationSignal()
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "getCurrentLocation virtual callback failed, fallback to original", t)
@@ -279,8 +280,10 @@ class LocationHookAdapter(
             if (virtual != null) {
                 try {
                     val listener = chain.getArg(2) ?: return@register null
+                    val pkg = chain.getArg(3) as? String ?: "?"
                     hookListenerOnLocationChanged(listener, virtual)
                     pushVirtualLocation(listener, virtual)
+                    ZLog.i(TAG_SCOPE, "registerLocationListener pkg=$pkg listener=${listener.javaClass.name} pushed virtual")
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "registerLocationListener virtual push failed", t)
                 }

@@ -30,6 +30,18 @@ class PhoneInterfaceManagerHookAdapter(
         private const val CLASS_NAME = "com.android.phone.PhoneInterfaceManager"
     }
 
+    /** 节流：同一调用点 5s 内只打一条 I 级观测日志。 */
+    private val lastCallLog = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun logCallOnce(key: String, msg: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = lastCallLog[key] ?: 0L
+        if (now - last >= 5000L) {
+            lastCallLog[key] = now
+            ZLog.i(TAG_SCOPE, msg)
+        }
+    }
+
     fun install(classLoader: ClassLoader): Int {
         var hooked = 0
         hooked += hookGetAllCellInfo(classLoader)
@@ -68,9 +80,10 @@ class PhoneInterfaceManagerHookAdapter(
                 }
                 try {
                     val callback = chain.getArg(1)
+                    val pkg = chain.getArg(2) as? String ?: "?"
                     val cells = buildVirtualCells()
                     invokeCellInfoCallback(callback, cells)
-                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate -> virtual ${cells.size} cells")
+                    ZLog.i(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate pkg=$pkg -> virtual ${cells.size} cells")
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate virtual failed, fallback", t)
                     chain.proceed()
@@ -130,6 +143,7 @@ class PhoneInterfaceManagerHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
+            val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null
             // 优先按 cell 配置生成对应类型（LTE/GSM/NR/WCDMA）；无配置但虚拟定位启用时
             // 回退 CDMA（带虚拟经纬度，供网络定位 SDK 换算坐标）。
             val cellData = cache.currentCell()
@@ -137,7 +151,7 @@ class PhoneInterfaceManagerHookAdapter(
                 try {
                     val list = VirtualCellFactory.buildCellInfoList(cellData)
                     if (list.isNotEmpty()) {
-                        ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> virtual ${list.size} cells from config")
+                        logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> virtual ${list.size} cells from config")
                         return@register list
                     }
                 } catch (t: Throwable) {
@@ -156,7 +170,10 @@ class PhoneInterfaceManagerHookAdapter(
                     VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
                 }
                 if (cells.isNotEmpty()) {
-                    ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo -> $cellCount virtual cells (${cache.locationLat()},${cache.locationLon()})")
+                    logCallOnce(
+                        "all|$pkg",
+                        "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> $cellCount virtual cells (${cache.locationLat()},${cache.locationLon()})"
+                    )
                     cells
                 } else {
                     ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo virtual cell build failed, fallback empty")

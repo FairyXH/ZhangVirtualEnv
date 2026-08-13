@@ -1,5 +1,6 @@
 package io.github.fairyxh.VirtualEnv.hook
 
+import android.os.SystemClock
 import io.github.fairyxh.VirtualEnv.core.Backend
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.util.concurrent.ConcurrentHashMap
@@ -63,11 +64,17 @@ class GnssDataBlockHookAdapter(
     /** listener -> 周期任务（NMEA 注入）。 */
     private val nmeaTasks = ConcurrentHashMap<Any, java.util.concurrent.ScheduledFuture<*>>()
 
+    /** 节流：每个 listener 每 5s 最多打一条投递日志（release 保留 I 级）。 */
+    private val lastStatusLog = ConcurrentHashMap<Any, Long>()
+    private val lastNmeaLog = ConcurrentHashMap<Any, Long>()
+
     fun install(classLoader: ClassLoader): Int {
         val clazz = HookSupport.findClass(classLoader, MANAGER_CLASS) ?: return 0
         var hooked = 0
         hooked += hookGnssStatusRegister(classLoader, clazz)
+        hooked += hookGnssStatusUnregister(classLoader, clazz)
         hooked += hookNmeaRegister(classLoader, clazz)
+        hooked += hookNmeaUnregister(classLoader, clazz)
         hooked += blockRegister(classLoader, clazz, "addGnssNavigationMessageListener", 4)
         hooked += blockRegister(classLoader, clazz, "addGnssMeasurementsListener", 5)
         return hooked
@@ -89,8 +96,9 @@ class GnssDataBlockHookAdapter(
             }
             try {
                 val listener = chain.getArg(0)
+                val pkg = chain.getArg(1) as? String ?: "?"
                 startStatusInject(listener)
-                ZLog.d(TAG_SCOPE, "GnssStatus callback taken over (virtual)")
+                ZLog.i(TAG_SCOPE, "GnssStatus callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "GnssStatus takeover failed, fallback", t)
                 chain.proceed()
@@ -99,6 +107,34 @@ class GnssDataBlockHookAdapter(
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.registerGnssStatusCallback")
+            return 1
+        }
+        return 0
+    }
+
+    /** 注销时取消注入任务，避免旧 listener 持续收到虚拟数据（含观测日志）。 */
+    private fun hookGnssStatusUnregister(classLoader: ClassLoader, clazz: Class<*>): Int {
+        val method = HookSupport.findMethods(clazz, "unregisterGnssStatusCallback")
+            .firstOrNull { it.parameterCount == 1 }
+        if (method == null) {
+            ZLog.w(TAG_SCOPE, "unregisterGnssStatusCallback not found in $MANAGER_CLASS")
+            return 0
+        }
+        val ok = registrar.register(method) { chain ->
+            try {
+                val listener = chain.getArg(0)
+                statusTasks.remove(listener)?.cancel(false)
+                if (listener != null) {
+                    ZLog.i(TAG_SCOPE, "GnssStatus callback unregistered, task cancelled (${listener.javaClass.name})")
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "GnssStatus unregister hook failed", t)
+            }
+            chain.proceed()
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.unregisterGnssStatusCallback")
             return 1
         }
         return 0
@@ -127,6 +163,14 @@ class GnssDataBlockHookAdapter(
             } ?: return
             method.isAccessible = true
             method.invoke(listener, status)
+            val now = SystemClock.elapsedRealtime()
+            val last = lastStatusLog[listener] ?: 0L
+            if (now - last >= 5000L) {
+                lastStatusLog[listener] = now
+                val cfg = backend.gnssEngine.currentData()
+                val used = cfg?.optInt("usedInFix", DEFAULT_USED_IN_FIX) ?: DEFAULT_USED_IN_FIX
+                ZLog.i(TAG_SCOPE, "GnssStatus delivered to ${listener.javaClass.name} usedInFix=$used")
+            }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "deliver virtual GnssStatus failed", t)
         }
@@ -206,8 +250,9 @@ class GnssDataBlockHookAdapter(
             }
             try {
                 val listener = chain.getArg(0)
+                val pkg = chain.getArg(1) as? String ?: "?"
                 startNmeaInject(listener)
-                ZLog.d(TAG_SCOPE, "GnssNmea callback taken over (virtual)")
+                ZLog.i(TAG_SCOPE, "GnssNmea callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "GnssNmea takeover failed, fallback", t)
                 chain.proceed()
@@ -216,6 +261,34 @@ class GnssDataBlockHookAdapter(
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.registerGnssNmeaCallback")
+            return 1
+        }
+        return 0
+    }
+
+    /** 注销时取消 NMEA 注入任务。 */
+    private fun hookNmeaUnregister(classLoader: ClassLoader, clazz: Class<*>): Int {
+        val method = HookSupport.findMethods(clazz, "unregisterGnssNmeaCallback")
+            .firstOrNull { it.parameterCount == 1 }
+        if (method == null) {
+            ZLog.w(TAG_SCOPE, "unregisterGnssNmeaCallback not found in $MANAGER_CLASS")
+            return 0
+        }
+        val ok = registrar.register(method) { chain ->
+            try {
+                val listener = chain.getArg(0)
+                nmeaTasks.remove(listener)?.cancel(false)
+                if (listener != null) {
+                    ZLog.i(TAG_SCOPE, "GnssNmea callback unregistered, task cancelled (${listener.javaClass.name})")
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "GnssNmea unregister hook failed", t)
+            }
+            chain.proceed()
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.unregisterGnssNmeaCallback")
             return 1
         }
         return 0
@@ -242,7 +315,16 @@ class GnssDataBlockHookAdapter(
                 it.name == "onNmeaReceived" && it.parameterCount == 2
             } ?: return
             method.isAccessible = true
-            method.invoke(listener, android.os.SystemClock.elapsedRealtimeNanos(), nmea)
+            method.invoke(listener, SystemClock.elapsedRealtimeNanos(), nmea)
+            val now = SystemClock.elapsedRealtime()
+            val last = lastNmeaLog[listener] ?: 0L
+            if (now - last >= 5000L) {
+                lastNmeaLog[listener] = now
+                ZLog.i(
+                    TAG_SCOPE,
+                    "GnssNmea delivered to ${listener.javaClass.name} ${String.format(java.util.Locale.US, "%.5f,%.5f", loc.latitude, loc.longitude)}"
+                )
+            }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "deliver virtual NMEA failed", t)
         }
