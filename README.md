@@ -66,7 +66,7 @@ Users are responsible for their own usage.
 |---|---|
 | 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动 |
 | 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳 |
+| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
 | 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（仿泡泡虚拟定位）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，百度地图摇杆移动实时生效（详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`） |
 | 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配百度地图等严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
@@ -361,6 +361,9 @@ adb logcat -s VirEnvDetector:I
 - **jadx CLI 反编译 framework.jar 很慢**：framework.jar 是 dex 且体积大；优先真机反射枚举
 - **LTE 值范围**：TAC 16 位、CI 28 位、PCI 0~503，random 生成必须落在范围内
 - **GNSS 真实回调覆盖**：必须拦截 `registerGnssStatusCallback`（不 proceed）并周期投递虚拟状态，否则真实卫星（几十颗）会覆盖虚拟值导致判定波动
+- **百度 NMEA 状态必须 V**：百度 `c.f.e(Location)` 对 NMEA 状态 A（ad=true）且坐标有效的 fix 返回 400 → 走 mock 分支 → 定位失败；状态 V（ad=false）才返回 0 走正常 GPS 路径（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）
+- **fix 必须带 `satellites` extras**：百度 `C0107f` 在 GnssStatus 未上报（`f.a==0`）时从 fix extras 读卫星数，缺失 → `a>2` 失败 → GPS 不上报；`LocationFresh.fresh()` 已统一补默认 12
+- **NMEA listener 注销后必须清理**：DeadObjectException 不处理会导致 `ab` 停更，fix 与 NMEA 间隔 ≥3s 触发百度状态重置（e() 返回 200/500）→ 定位失败；`GnssDataBlockHookAdapter` 已实现 dead listener 自愈
 - **百度摇杆实时性**：除了 provider 注入，还必须做**全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（`LocationHookAdapter`），否则百度等 SDK 在无真实 GPS fix 时收不到持续 fix，摇杆位移不生效（逆向泡泡虚拟定位所得，详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`）
 - **ApiServer 假死**：`acceptLoop` 单次 accept 异常不得 break（否则监听 socket 在但连接全挂，App 端显示 Backend 离线）；已改为异常重试 + socket 重建 + 固定线程池
 - **NetworkOnMainThread**：检测器 API 调用必须在后台线程，UI 更新回主线程
