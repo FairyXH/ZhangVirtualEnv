@@ -185,6 +185,8 @@ class VirtualEnvEntry : XposedModule() {
             // GNSS 原始数据流阻断：NMEA/导航消息/原始测量（百度 SDK 拉回真实位置根因）
             val gnssBlocked = GnssDataBlockHookAdapter(backend, registrar).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] gnss data block hooks installed hooked=$gnssBlocked")
+            // ColorOS 服务启动限制绕过（百度定位服务端进程 MapCoreService 概率性被拦）
+            OplusServiceStartBypass(registrar).install(param.classLoader)
             // 虚拟 fix 主动注入：百度/微信 gps 无 fix 时主动上报，GMS fused passive 缓存刷新
             VirtualFixInjector(backend, registrar).install(param.classLoader)
             // SubscriptionInfo 全局虚拟化（system_server 的 ISub.Stub 返回点，对任意 App 生效）

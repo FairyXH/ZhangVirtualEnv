@@ -246,7 +246,26 @@ class WifiServiceHookAdapter(
         } catch (t: Throwable) {
             returnType.getConstructor()
         }
-        return ctor.newInstance()
+        val info = ctor.newInstance()
+        // 确保 WifiSsid 非 null：系统进程（如 com.oplus.nas）会对 mWifiSsid.toString() NPE
+        try {
+            val ssidField = try {
+                info.javaClass.getDeclaredField("mWifiSsid")
+            } catch (t: Throwable) {
+                null
+            }
+            if (ssidField != null) {
+                ssidField.isAccessible = true
+                if (ssidField.get(info) == null) {
+                    val emptySsid = Class.forName("android.net.wifi.WifiSsid")
+                        .getDeclaredConstructor().also { it.isAccessible = true }.newInstance()
+                    ssidField.set(info, emptySsid)
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "empty wifi info ssid init failed", t)
+        }
+        return info
     }
 
     private fun buildVirtualWifiInfo(returnType: Class<*>, data: JSONObject): Any {
@@ -263,12 +282,32 @@ class WifiServiceHookAdapter(
                 // 直接 getField 全部失败导致返回空壳 WifiInfo → Oplus NAS 读 mWifiSsid NPE。
                 // 统一走公开 setter（hidden API，反射调用），跨 ROM 兼容。
                 if (ssid.isNotEmpty()) {
-                    val wifiSsid = Class.forName("android.net.wifi.WifiSsid")
-                        .getMethod("createFromAsciiEncoded", String::class.java)
-                        .invoke(null, ssid)
-                    info.javaClass.getMethod(
-                        "setSSID", Class.forName("android.net.wifi.WifiSsid")
-                    ).invoke(info, wifiSsid)
+                    try {
+                        val wifiSsid = Class.forName("android.net.wifi.WifiSsid")
+                            .getMethod("createFromAsciiEncoded", String::class.java)
+                            .invoke(null, ssid)
+                        try {
+                            info.javaClass.getMethod(
+                                "setSSID", Class.forName("android.net.wifi.WifiSsid")
+                            ).invoke(info, wifiSsid)
+                        } catch (t: Throwable) {
+                            // 部分 ROM 无 setSSID：直接写 mWifiSsid 字段
+                            info.javaClass.getDeclaredField("mWifiSsid")
+                                .also { it.isAccessible = true }.set(info, wifiSsid)
+                        }
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "build wifi ssid failed", t)
+                        // 兜底：至少写入非 null 的 WifiSsid，避免系统进程（如 com.oplus.nas）
+                        // 对 mWifiSsid.toString() 抛 NPE
+                        try {
+                            val emptySsid = Class.forName("android.net.wifi.WifiSsid")
+                                .getDeclaredConstructor().also { it.isAccessible = true }.newInstance()
+                            info.javaClass.getDeclaredField("mWifiSsid")
+                                .also { it.isAccessible = true }.set(info, emptySsid)
+                        } catch (t2: Throwable) {
+                            ZLog.w(TAG_SCOPE, "wifi ssid null fallback failed", t2)
+                        }
+                    }
                 }
                 info.javaClass.getMethod("setBSSID", String::class.java).invoke(info, bssid)
                 info.javaClass.getMethod("setRssi", Int::class.java).invoke(info, rssi)

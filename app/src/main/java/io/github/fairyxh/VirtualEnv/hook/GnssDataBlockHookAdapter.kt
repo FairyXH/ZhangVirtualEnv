@@ -64,6 +64,19 @@ class GnssDataBlockHookAdapter(
     /** listener -> 周期任务（NMEA 注入）。 */
     private val nmeaTasks = ConcurrentHashMap<Any, java.util.concurrent.ScheduledFuture<*>>()
 
+    /**
+     * 所有已注册的 GnssStatus listener（含虚拟定位启用前的真实注册）。
+     * value=true 表示当前由虚拟投递接管。
+     */
+    private val allStatusListeners = ConcurrentHashMap<Any, Boolean>()
+    /** 所有已注册的 NMEA listener（含虚拟定位启用前的真实注册）。 */
+    private val allNmeaListeners = ConcurrentHashMap<Any, Boolean>()
+
+    /** 全局监听：虚拟定位启用边沿对既有 listener 补齐虚拟投递，关闭边沿停止投递。 */
+    private val takeoverMonitor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-GnssTakeover").apply { isDaemon = true }
+    }
+
     /** 节流：每个 listener 每 5s 最多打一条投递日志（release 保留 I 级）。 */
     private val lastStatusLog = ConcurrentHashMap<Any, Long>()
     private val lastNmeaLog = ConcurrentHashMap<Any, Long>()
@@ -77,7 +90,106 @@ class GnssDataBlockHookAdapter(
         hooked += hookNmeaUnregister(classLoader, clazz)
         hooked += blockRegister(classLoader, clazz, "addGnssNavigationMessageListener", 4)
         hooked += blockRegister(classLoader, clazz, "addGnssMeasurementsListener", 5)
+        hooked += hookOldGpsStatusTransport(classLoader)
+        startTakeoverMonitor()
         return hooked
+    }
+
+    /**
+     * 旧 API addGpsStatusListener 的卫星数据写入点：
+     * system_server 的 GpsStatusListenerTransport 收到真实 GnssStatus 后构造 GpsStatus
+     * 并调用 GpsStatus.updateSatelliteStatus(...) 写入卫星数据，随后 Binder 回传给 App。
+     * 虚拟定位启用时替换为虚拟卫星数据，让走旧 API 的 SDK（百度地图 locSDK8b、老版
+     * BaiduLBS）getGpsStatus() 拿到虚拟卫星列表，usedInFix > 2 判定通过。
+     */
+    private fun hookOldGpsStatusTransport(classLoader: ClassLoader): Int {
+        val gpsStatusClass = HookSupport.findClass(classLoader, "android.location.GpsStatus")
+        if (gpsStatusClass == null) {
+            ZLog.i(TAG_SCOPE, "old-api GpsStatus class NOT FOUND (fail-open)")
+            return 0
+        }
+        // Android 15 的 GpsStatus 用 GpsStatus.create(GnssStatus, int) 工厂方法构造
+        // （旧 API addGpsStatusListener 的转换点），无 updateSatelliteStatus。
+        val methods = HookSupport.findMethods(gpsStatusClass, "create")
+        ZLog.i(TAG_SCOPE, "old-api GpsStatus found, create candidates=${methods.size}")
+        methods.forEach { method ->
+            if (method.parameterCount != 2) return@forEach
+            val ok = registrar.register(method) { chain ->
+                if (virtualLocationEnabled()) {
+                    try {
+                        val virtual = buildVirtualGnssStatus()
+                        if (virtual != null) {
+                            @Suppress("UNCHECKED_CAST")
+                            (chain.getArgs() as MutableList<Any>)[0] = virtual
+                            ZLog.i(TAG_SCOPE, "GpsStatus.create -> virtual GnssStatus (old-api bypass)")
+                        }
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "old-api gps status replace failed", t)
+                    }
+                }
+                chain.proceed()
+                null
+            }
+            if (ok) {
+                ZLog.i(TAG_SCOPE, "hooked old-api GpsStatus.create")
+                return 1
+            }
+        }
+        ZLog.d(TAG_SCOPE, "old-api GpsStatus.create not found (fail-open)")
+        return 0
+    }
+
+    /** 1s 轮询：虚拟定位启用/关闭边沿时对既有 listener 做接管/放行切换。 */
+    private fun startTakeoverMonitor() {
+        takeoverMonitor.scheduleWithFixedDelay(
+            {
+                try {
+                    val enabled = virtualLocationEnabled()
+                    if (enabled) {
+                        // 启用边沿：对未接管但已注册的 listener 启动虚拟投递
+                        allStatusListeners.forEach { (listener, injected) ->
+                            if (!injected && !statusTasks.containsKey(listener)) {
+                                allStatusListeners[listener] = true
+                                startStatusInject(listener)
+                                ZLog.i(
+                                    TAG_SCOPE,
+                                    "GnssStatus late takeover for ${listener.javaClass.name} (virtual enabled)"
+                                )
+                            }
+                        }
+                        allNmeaListeners.forEach { (listener, injected) ->
+                            if (!injected && !nmeaTasks.containsKey(listener)) {
+                                allNmeaListeners[listener] = true
+                                startNmeaInject(listener)
+                                ZLog.i(
+                                    TAG_SCOPE,
+                                    "GnssNmea late takeover for ${listener.javaClass.name} (virtual enabled)"
+                                )
+                            }
+                        }
+                    } else {
+                        // 关闭边沿：停止虚拟投递，listener 保持真实注册（未启用时真实状态照常到达）
+                        allStatusListeners.forEach { (listener, injected) ->
+                            if (injected) {
+                                allStatusListeners[listener] = false
+                                statusTasks.remove(listener)?.cancel(false)
+                            }
+                        }
+                        allNmeaListeners.forEach { (listener, injected) ->
+                            if (injected) {
+                                allNmeaListeners[listener] = false
+                                nmeaTasks.remove(listener)?.cancel(false)
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "gnss takeover monitor failed", t)
+                }
+            },
+            1000L,
+            1000L,
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
     }
 
     // ---------- GnssStatus：接管注册 + 周期注入虚拟卫星状态 ----------
@@ -90,18 +202,32 @@ class GnssDataBlockHookAdapter(
             return 0
         }
         val ok = registrar.register(method) { chain ->
-            if (!virtualLocationEnabled()) {
+            val listener = chain.getArg(0)
+            if (listener == null) {
                 chain.proceed()
                 return@register null
             }
-            try {
-                val listener = chain.getArg(0)
-                val pkg = chain.getArg(1) as? String ?: "?"
-                startStatusInject(listener)
-                ZLog.i(TAG_SCOPE, "GnssStatus callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "GnssStatus takeover failed, fallback", t)
-                chain.proceed()
+            if (virtualLocationEnabled()) {
+                try {
+                    val pkg = chain.getArg(1) as? String ?: "?"
+                    allStatusListeners[listener] = true
+                    startStatusInject(listener)
+                    ZLog.i(TAG_SCOPE, "GnssStatus callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "GnssStatus takeover failed, fallback", t)
+                    allStatusListeners[listener] = false
+                    chain.proceed()
+                }
+            } else {
+                // 虚拟定位未启用：真实注册并记录，启用后由 takeover monitor 补齐虚拟投递
+                try {
+                    allStatusListeners[listener] = false
+                    chain.proceed()
+                    ZLog.d(TAG_SCOPE, "GnssStatus registered (real) ${listener.javaClass.name}")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "GnssStatus real register failed", t)
+                    chain.proceed()
+                }
             }
             null
         }
@@ -125,6 +251,7 @@ class GnssDataBlockHookAdapter(
                 val listener = chain.getArg(0)
                 statusTasks.remove(listener)?.cancel(false)
                 if (listener != null) {
+                    allStatusListeners.remove(listener)
                     ZLog.i(TAG_SCOPE, "GnssStatus callback unregistered, task cancelled (${listener.javaClass.name})")
                 }
             } catch (t: Throwable) {
@@ -244,18 +371,32 @@ class GnssDataBlockHookAdapter(
             return 0
         }
         val ok = registrar.register(method) { chain ->
-            if (!virtualLocationEnabled()) {
+            val listener = chain.getArg(0)
+            if (listener == null) {
                 chain.proceed()
                 return@register null
             }
-            try {
-                val listener = chain.getArg(0)
-                val pkg = chain.getArg(1) as? String ?: "?"
-                startNmeaInject(listener)
-                ZLog.i(TAG_SCOPE, "GnssNmea callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "GnssNmea takeover failed, fallback", t)
-                chain.proceed()
+            if (virtualLocationEnabled()) {
+                try {
+                    val pkg = chain.getArg(1) as? String ?: "?"
+                    allNmeaListeners[listener] = true
+                    startNmeaInject(listener)
+                    ZLog.i(TAG_SCOPE, "GnssNmea callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "GnssNmea takeover failed, fallback", t)
+                    allNmeaListeners[listener] = false
+                    chain.proceed()
+                }
+            } else {
+                // 虚拟定位未启用：真实注册并记录，启用后由 takeover monitor 补齐虚拟投递
+                try {
+                    allNmeaListeners[listener] = false
+                    chain.proceed()
+                    ZLog.d(TAG_SCOPE, "GnssNmea registered (real) ${listener.javaClass.name}")
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "GnssNmea real register failed", t)
+                    chain.proceed()
+                }
             }
             null
         }
@@ -279,6 +420,7 @@ class GnssDataBlockHookAdapter(
                 val listener = chain.getArg(0)
                 nmeaTasks.remove(listener)?.cancel(false)
                 if (listener != null) {
+                    allNmeaListeners.remove(listener)
                     ZLog.i(TAG_SCOPE, "GnssNmea callback unregistered, task cancelled (${listener.javaClass.name})")
                 }
             } catch (t: Throwable) {
