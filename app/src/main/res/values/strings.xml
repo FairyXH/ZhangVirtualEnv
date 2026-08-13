@@ -3,6 +3,15 @@
     <string name="app_name">虚拟环境测试框架</string>
     <string name="module_description">基于 LSPosed 的 Android 环境模拟测试框架，用于应用开发调试与系统环境模拟测试。支持 Location API 测试、GNSS 场景模拟、传感器数据测试、网络环境测试、Telephony API 测试与蓝牙环境测试。仅供开发测试与教学研究使用。</string>
 
+    <!-- 开发者用途声明 -->
+    <string name="notice_title">Android Environment Simulation Framework</string>
+    <string name="notice_body">本工具用于 Android 开发测试和系统环境模拟研究。\n\n支持：\n- Location API 测试\n- GNSS 场景模拟\n- 传感器数据测试\n- 网络环境测试\n- Telephony API 测试\n- Bluetooth 环境测试\n\n适用场景：\n- 应用开发调试\n- 自动化测试\n- 设备兼容性测试\n- 隐私保护研究\n\n禁止用途：\n- 绕过第三方应用安全检测\n- 欺诈行为\n- 游戏作弊\n- 违反第三方服务协议\n\n用户需自行确保使用行为符合当地法律法规以及相关服务协议。</string>
+    <string name="notice_agree_continue">同意并继续</string>
+    <string name="notice_view_info">查看项目说明</string>
+    <string name="notice_back">返回</string>
+    <string name="notice_details_title">项目说明</string>
+    <string name="notice_details_body">项目名称：Android Environment Simulation Framework\n\n项目用途：\n这是一个面向开发者的 Android 系统环境模拟测试工具。\n\n通过模拟系统 API 返回数据，帮助开发者测试应用在不同环境下的运行行为。\n\n免责声明：\n模拟数据仅用于测试环境。\n启用模拟功能后，部分应用可能出现异常行为。\n开发者不保证第三方应用兼容性。\n用户需自行承担使用责任。</string>
+
     <!-- Bottom bar -->
     <string name="tab_home">主页</string>
     <string name="tab_location">位置</string>
@@ -232,6 +241,15 @@
     <string name="settings_backup_imported">配置已导入并生效</string>
     <string name="settings_backup_export_failed">导出失败：%1$s</string>
     <string name="settings_backup_import_failed">导入失败：%1$s</string>
+
+    <!-- 关于本项目 / 免责声明 -->
+    <string name="settings_about_title">关于本项目</string>
+    <string name="settings_about_name">项目名称：Android Environment Simulation Framework</string>
+    <string name="settings_about_purpose_title">项目用途</string>
+    <string name="settings_about_purpose">这是一个面向开发者的 Android 系统环境模拟测试工具。\n\n通过模拟系统 API 返回数据，帮助开发者测试应用在不同环境下的运行行为。</string>
+    <string name="settings_about_view_notice">查看开发者用途声明</string>
+    <string name="settings_disclaimer_title">免责声明</string>
+    <string name="settings_disclaimer_body">模拟数据仅用于测试环境。\n启用模拟功能后，部分应用可能出现异常行为。\n开发者不保证第三方应用兼容性。\n用户需自行承担使用责任。</string>
 
     <!-- Route -->
     <string name="route_title">路线模拟</string>

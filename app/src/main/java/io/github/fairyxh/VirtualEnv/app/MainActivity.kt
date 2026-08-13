@@ -49,6 +49,8 @@ import androidx.fragment.app.FragmentContainerView
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.fairyxh.VirtualEnv.R
+import io.github.fairyxh.VirtualEnv.app.DeveloperNoticeManager
+import io.github.fairyxh.VirtualEnv.app.ui.DeveloperNoticeDialog
 import io.github.fairyxh.VirtualEnv.app.ui.EnvFragment
 import io.github.fairyxh.VirtualEnv.app.ui.HomeFragment
 import io.github.fairyxh.VirtualEnv.app.ui.LocationSimFragment
@@ -199,6 +201,8 @@ class MainActivity : FragmentActivity() {
             )
         )
         setContentView(root)
+        // 首次启动必须主动确认开发者用途声明后才能进入主界面
+        maybeShowDeveloperNotice(root)
         // attach 后再消费窗口 insets：AndroidComposeView 默认把 insets 当作
         // contentPadding（ColorOS 曲面安全区 left=56px 会让整页从 x=56 开始、
         // 左侧漏底），root 消费后所有 Compose 内容真正全屏；insets 缓存在
@@ -265,6 +269,28 @@ class MainActivity : FragmentActivity() {
             currentTab = -1
             switchTab(0, false)
         }
+    }
+
+    /** 首次启动：展示开发者用途声明，用户点击「同意并继续」前弹窗不可关闭。 */
+    private fun maybeShowDeveloperNotice(root: ViewGroup) {
+        if (DeveloperNoticeManager.isAccepted(this)) return
+        val noticeView = ComposeView(this)
+        noticeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        noticeView.setContent {
+            DeveloperNoticeDialog(
+                onAgree = {
+                    DeveloperNoticeManager.setAccepted(this@MainActivity, true)
+                    root.removeView(noticeView)
+                }
+            )
+        }
+        root.addView(
+            noticeView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
