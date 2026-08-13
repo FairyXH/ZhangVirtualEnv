@@ -45,8 +45,6 @@ class SimSystemPropertyHookAdapter(
     }
 
     private val pollerStarted = AtomicBoolean(false)
-    @Volatile
-    private var lastFingerprint: Int = 0
 
     fun install(classLoader: ClassLoader): Int {
         val clazz = HookSupport.findClass(classLoader, CLASS_TELEPHONY_PROPERTIES) ?: return 0
@@ -159,16 +157,9 @@ class SimSystemPropertyHookAdapter(
         Thread {
             while (true) {
                 try {
-                    val data = currentSimData()
-                    if (data == null) {
-                        lastFingerprint = 0
-                    } else {
-                        val fp = data.toString().hashCode()
-                        if (fp != lastFingerprint) {
-                            lastFingerprint = fp
-                            applyCurrent(data)
-                        }
-                    }
+                    // 每 1s 按当前配置修正属性：电话栈（SIM 加载/网络注册）可能把属性重写回真实值，
+                    // 因此不能只在配置指纹变化时应用；applyCurrent 内部无差异时不会写。
+                    currentSimData()?.let { applyCurrent(it) }
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "sim property poll failed", t)
                 }
