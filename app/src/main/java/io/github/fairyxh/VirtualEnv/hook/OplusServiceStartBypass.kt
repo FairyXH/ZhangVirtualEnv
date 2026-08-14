@@ -5,13 +5,13 @@ import io.github.fairyxh.VirtualEnv.util.ZLog
 /**
  * ColorOS/Oplus 服务启动限制绕过（百度定位服务适配辅助）。
  *
- * 现象：百度地图定位服务端 com.baidu.location.f 声明在 :MapCoreService 进程，
+ * 现象：应用内置的百度定位服务 com.baidu.location.f 声明在独立进程，
  * ColorOS 的 FGS/后台启动限制（dumpsys 中 ServiceRecord.mAllowStart_byBindings=DENIED）
  * 会拦截 bindService 导致的进程创建，SDK 服务端永不启动 → BDLocation 167/66/67。
  *
  * 策略（仅对百度定位服务放行，其余服务完全放行原始行为，fail-open）：
- * 1. ServiceRecord.isFgsAllowedStart() → 百度定位服务返回 true（FGS 判定路径）
- * 2. ActiveServices.setFgsRestrictionLocked(...) → 百度定位服务跳过限制写入
+ * 1. ServiceRecord.isFgsAllowedStart() → 定位服务返回 true（FGS 判定路径）
+ * 2. ActiveServices.setFgsRestrictionLocked(...) → 定位服务跳过限制写入
  * 3. ActiveServices.bringUpServiceLocked(ServiceRecord, ...) → 强制
  *    mAllowStart_byBindings=ALLOWED（兜底）
  */
