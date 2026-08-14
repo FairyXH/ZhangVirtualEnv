@@ -95,8 +95,8 @@ data class CellInfo(
             }
             return CellInfo(
                 radio = obj.optString("radio", "").ifEmpty { null },
-                mcc = obj.optInt("mcc", -1).takeIf { it >= 0 },
-                mnc = obj.optInt("mnc", -1).takeIf { it >= 0 },
+                mcc = obj.optInt("mcc", -1).takeIf { it in 0..999 },
+                mnc = obj.optInt("mnc", -1).takeIf { it in 0..999 },
                 lac = obj.optInt("lac", -1).takeIf { it >= 0 },
                 tac = obj.optInt("tac", -1).takeIf { it >= 0 },
                 cellId = cellId,

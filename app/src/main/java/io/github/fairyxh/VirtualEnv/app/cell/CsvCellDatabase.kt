@@ -297,7 +297,8 @@ class CsvCellDatabase(private val context: Context) {
         val lon = parts[6].trim().toDoubleOrNull() ?: return null
         val lat = parts[7].trim().toDoubleOrNull() ?: return null
         if (abs(lat) > 90.0 || abs(lon) > 180.0) return null
-        if (mcc < 0 || mnc < 0 || cell < 0) return null
+        // MCC/MNC 限 0..999，防 CSV 脏数据（哨兵/溢出值）进入缓存与模拟
+        if (mcc !in 0..999 || mnc !in 0..999 || cell < 0) return null
         val range = parts[8].trim().toIntOrNull()?.takeIf { it > 0 }
         val samples = parts[9].trim().toIntOrNull()?.takeIf { it >= 0 }
         val changeable = parts.getOrNull(10)?.trim() == "1"

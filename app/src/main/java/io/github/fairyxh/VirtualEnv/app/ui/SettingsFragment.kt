@@ -1621,6 +1621,9 @@ class SettingsFragment : Fragment() {
             "\ntime=" + loc.time
     }
 
+    /** MCC/MNC：0..999 合法，越界/哨兵显示 unavail。 */
+    private fun fmtCellInt(v: Int): String = if (v in 0..999) v.toString() else "unavail"
+
     /** int 哨兵值（Integer.MAX_VALUE）显示为 unavail。 */
     private fun fmtInt(v: Int?): String {
         if (v == null || v == Int.MAX_VALUE || v == Integer.MAX_VALUE) return "unavail"
@@ -1658,8 +1661,8 @@ class SettingsFragment : Fragment() {
                 is CellInfoLte -> {
                     val id = info.cellIdentity
                     val sig = info.cellSignalStrength
-                    sb.append("LTE mcc=").append(id.mcc)
-                        .append(" mnc=").append(id.mnc)
+                    sb.append("LTE mcc=").append(fmtCellInt(id.mcc))
+                        .append(" mnc=").append(fmtCellInt(id.mnc))
                         .append(" tac=").append(fmtInt(id.tac))
                         .append(" ci=").append(fmtLong(id.ci.toLong()))
                         .append(" pci=").append(fmtInt(id.pci))
@@ -1694,8 +1697,8 @@ class SettingsFragment : Fragment() {
                 is CellInfoGsm -> {
                     val id = info.cellIdentity
                     val sig = info.cellSignalStrength
-                    sb.append("GSM mcc=").append(id.mcc)
-                        .append(" mnc=").append(id.mnc)
+                    sb.append("GSM mcc=").append(fmtCellInt(id.mcc))
+                        .append(" mnc=").append(fmtCellInt(id.mnc))
                         .append(" lac=").append(fmtInt(id.lac))
                         .append(" cid=").append(fmtInt(id.cid))
                     reflectCellInt(id, "getBsic")?.let { if (it >= 0) sb.append(" bsic=").append(it) }
@@ -1717,8 +1720,8 @@ class SettingsFragment : Fragment() {
                 is CellInfoWcdma -> {
                     val id = info.cellIdentity
                     val sig = info.cellSignalStrength
-                    sb.append("WCDMA mcc=").append(id.mcc)
-                        .append(" mnc=").append(id.mnc)
+                    sb.append("WCDMA mcc=").append(fmtCellInt(id.mcc))
+                        .append(" mnc=").append(fmtCellInt(id.mnc))
                         .append(" lac=").append(fmtInt(id.lac))
                         .append(" cid=").append(fmtInt(id.cid))
                     reflectCellInt(id, "getPsc")?.let { if (it >= 0) sb.append(" psc=").append(it) }

@@ -211,8 +211,8 @@ object VirtualCellFactory {
                 identityClass.getDeclaredConstructor(
                     Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
                 ).newInstance(
-                    c.optInt("mcc", 460),
-                    c.optInt("mnc", 0),
+                    sanitizeInt(c, "mcc", 0, 999, 460),
+                    sanitizeInt(c, "mnc", 0, 999, 0),
                     ci,
                     pci,
                     tac,
@@ -226,8 +226,8 @@ object VirtualCellFactory {
         } ?: identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
         ).newInstance(
-            c.optInt("mcc", 460),
-            c.optInt("mnc", 0),
+            sanitizeInt(c, "mcc", 0, 999, 460),
+            sanitizeInt(c, "mnc", 0, 999, 0),
             ci,
             pci,
             tac
@@ -269,8 +269,8 @@ object VirtualCellFactory {
         val info = infoClass.getDeclaredConstructor().newInstance()
 
         val identityClass = Class.forName("android.telephony.CellIdentityGsm")
-        val mcc = c.optInt("mcc", 460)
-        val mnc = c.optInt("mnc", 0)
+        val mcc = sanitizeInt(c, "mcc", 0, 999, 460)
+        val mnc = sanitizeInt(c, "mnc", 0, 999, 0)
         // Oplus 15 JADX 确认：CellIdentityGsm(int lac, int cid, int arfcn, int bsic,
         //   String mccStr, String mncStr, String alphal, String alphas, Collection)
         // 字段范围：lac/cid 0..65535、arfcn 0..65535、bsic 0..63
@@ -308,8 +308,8 @@ object VirtualCellFactory {
         val infoClass = Class.forName("android.telephony.CellInfoNr")
         val identityClass = Class.forName("android.telephony.CellIdentityNr")
         val signalClass = Class.forName("android.telephony.CellSignalStrengthNr")
-        val mcc = c.optInt("mcc", 460)
-        val mnc = c.optInt("mnc", 0)
+        val mcc = sanitizeInt(c, "mcc", 0, 999, 460)
+        val mnc = sanitizeInt(c, "mnc", 0, 999, 0)
         // Oplus 15 JADX 确认：CellIdentityNr(int pci, int tac, int nrArfcn, int[] bands,
         //   String mccStr, String mncStr, long nci, String alphal, String alphas, Collection)
         // 字段范围：pci 0..1007、tac 0..16777215、nrArfcn 0..3279165、nci 0..68719476735（36bit）
@@ -377,8 +377,8 @@ object VirtualCellFactory {
         val info = infoClass.getDeclaredConstructor().newInstance()
 
         val identityClass = Class.forName("android.telephony.CellIdentityWcdma")
-        val mcc = c.optInt("mcc", 460)
-        val mnc = c.optInt("mnc", 0)
+        val mcc = sanitizeInt(c, "mcc", 0, 999, 460)
+        val mnc = sanitizeInt(c, "mnc", 0, 999, 0)
         // Oplus 15 JADX 确认：CellIdentityWcdma(int lac, int cid, int psc, int uarfcn,
         //   String mccStr, String mncStr, String alphal, String alphas, Collection, ClosedSubscriberGroupInfo)
         // 字段范围：lac 0..65535、cid 0..268435455、psc 0..511、uarfcn 0..16383
