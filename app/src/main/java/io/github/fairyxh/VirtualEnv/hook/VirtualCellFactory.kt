@@ -121,6 +121,8 @@ object VirtualCellFactory {
                     "GSM" -> buildGsmCell(c)?.let { result.add(it) }
                     "NR" -> buildNrCell(c)?.let { result.add(it) }
                     "WCDMA" -> buildWcdmaCell(c)?.let { result.add(it) }
+                    "UMTS" -> buildWcdmaCell(c)?.let { result.add(it) }
+                    "CDMA" -> buildCdmaCell(c)?.let { result.add(it) }
                     "" -> buildLteCell(c)?.let { result.add(it) } // 缺省按 LTE
                 }
             } catch (t: Throwable) {
@@ -130,6 +132,61 @@ object VirtualCellFactory {
         return result
     }
 
+    /**
+     * 构建显式 CDMA 小区（用户配置 sid/nid/bid + 经纬度 + 信号）。
+     * 与自动 fallback 的区别：使用配置的 sid/nid/bid，不再从坐标派生。
+     */
+    fun buildCdmaCell(c: org.json.JSONObject): Any? {
+        return try {
+            val infoClass = Class.forName(CELL_INFO_CDMA)
+            val identityClass = Class.forName(CELL_IDENTITY_CDMA)
+            val signalClass = Class.forName(CELL_SIGNAL_CDMA)
+            // 经纬度：配置显式坐标优先，缺失时用虚拟位置（调用方已传入？这里由 cache 侧填 lat/lon）
+            val lat = c.optDouble("lat", c.optDouble("_cellLat", 0.0))
+            val lon = c.optDouble("lon", c.optDouble("_cellLon", 0.0))
+            val nid = sanitizeInt(c, "nid", 1, 65534, 1)
+            val sid = sanitizeInt(c, "sid", 1, 65534, 1)
+            val bid = sanitizeInt(c, "bid", 1, 65534, 1)
+            val lonQ = (lon * 14400.0).toInt()
+            val latQ = (lat * 14400.0).toInt()
+            val ctor = identityClass.getConstructor(
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java,
+                String::class.java
+            )
+            val identity: Any = ctor.newInstance(nid, sid, bid, lonQ, latQ, null, null)
+            val signal: Any = newInstance(signalClass) ?: return null
+            // CellSignalStrengthCdma 无公开 setter 且无参构造后字段为 0/MAX 哨兵，尝试反射设置
+            try {
+                signalClass.getMethod("setDbm", Int::class.javaPrimitiveType).invoke(signal, sanitizeInt(c, "dbm", -120, -40, -90))
+            } catch (_: Throwable) {
+            }
+            val info = try {
+                infoClass.getConstructor(
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                    Long::class.javaPrimitiveType,
+                    identityClass,
+                    signalClass
+                ).newInstance(0, true, System.nanoTime(), identity, signal)
+            } catch (_: NoSuchMethodException) {
+                newInstance(infoClass)?.also {
+                    call(it, "setCellIdentity", identity)
+                    call(it, "setCellSignalStrength", signal)
+                } ?: return null
+            }
+            ZLog.d(TAG_SCOPE, "CellInfoCdma configured nid=$nid sid=$sid bid=$bid lat=$lat lon=$lon")
+            info
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "build configured CdmaCell failed", t)
+            null
+        }
+    }
+
     private fun buildLteCell(c: org.json.JSONObject): Any? {
         val infoClass = Class.forName("android.telephony.CellInfoLte")
         val info = infoClass.getDeclaredConstructor().newInstance()
@@ -137,10 +194,36 @@ object VirtualCellFactory {
         val identityClass = Class.forName("android.telephony.CellIdentityLte")
         // Oplus 15 JADX 确认：CellIdentityLte(int mcc, int mnc, int ci, int pci, int tac)
         // 字段范围：ci 0..268435455（28bit）、pci 0..503、tac 0..16777215（24bit）
-        val ci = sanitizeInt(c, "ci", 0, 268435455)
+        // EARFCN 可选：优先 6 参构造 (mcc, mnc, ci, pci, tac, earfcn)，失败回退 5 参
+        val ciRaw = c.optLong("ci", c.optLong("eci", -1L))
+        val ci = if (ciRaw in 0..268435455L) ciRaw.toInt() else {
+            // eNodeB ID / Cell ID 组合：eNodeB<<8 | Cell
+            val enb = c.optLong("enodebId", -1L)
+            val cellPart = c.optLong("cellId", -1L)
+            if (enb >= 0 && cellPart >= 0) ((enb and 0xFFFFF) shl 8 or (cellPart and 0xFF)).toInt()
+            else 0
+        }
         val pci = sanitizeInt(c, "pci", 0, 503)
         val tac = sanitizeInt(c, "tac", 0, 16777215)
-        val identity = identityClass.getDeclaredConstructor(
+        val earfcn = sanitizeInt(c, "earfcn", 0, 262143, -1)
+        val identity: Any = try {
+            if (earfcn >= 0) {
+                identityClass.getDeclaredConstructor(
+                    Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
+                ).newInstance(
+                    c.optInt("mcc", 460),
+                    c.optInt("mnc", 0),
+                    ci,
+                    pci,
+                    tac,
+                    earfcn
+                )
+            } else {
+                null
+            }
+        } catch (_: Throwable) {
+            null
+        } ?: identityClass.getDeclaredConstructor(
             Int::class.java, Int::class.java, Int::class.java, Int::class.java, Int::class.java
         ).newInstance(
             c.optInt("mcc", 460),
@@ -148,7 +231,7 @@ object VirtualCellFactory {
             ci,
             pci,
             tac
-        )
+        ) as Any
         infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
 
         val signalClass = Class.forName("android.telephony.CellSignalStrengthLte")
@@ -160,10 +243,10 @@ object VirtualCellFactory {
         ).newInstance(
             Int.MAX_VALUE,
             sanitizeInt(c, "rsrp", -156, -31, -110),
+            sanitizeInt(c, "rsrq", -43, 20, -15),
+            sanitizeInt(c, "sinr", -23, 40, 20),
             Int.MAX_VALUE,
-            Int.MAX_VALUE,
-            Int.MAX_VALUE,
-            Int.MAX_VALUE
+            sanitizeInt(c, "ta", 0, 65535, 0)
         )
         infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
         return info
@@ -203,7 +286,7 @@ object VirtualCellFactory {
         ).newInstance(
             sanitizeInt(c, "rssi", -113, -51, -90),
             -1,
-            -1
+            sanitizeInt(c, "ta", 0, 63, -1)
         )
         infoClass.getMethod("setCellSignalStrength", signalClass).invoke(info, signal)
         return info

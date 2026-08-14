@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.telephony.CellIdentityCdma
 import android.telephony.CellIdentityGsm
 import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
@@ -135,7 +136,18 @@ class EnvironmentCollector(private val context: Context) {
                         item.put("mnc", CellInfoRead.mnc(id))
                         item.put("tac", id.tac)
                         item.put("ci", id.ci)
+                        item.put("eci", id.ci)
+                        item.put("enodebId", (id.ci.toLong() ushr 8) and 0xFFFFF)
+                        item.put("cellId", id.ci and 0xFF)
                         item.put("pci", id.pci)
+                        reflectInt(id, "getEarfcn")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("earfcn", it) }
+                        val sig = info.cellSignalStrength
+                        if (sig != null) {
+                            reflectInt(sig, "getRsrp")?.let { if (it != Int.MAX_VALUE) item.put("rsrp", it) }
+                            reflectInt(sig, "getRsrq")?.let { if (it != Int.MAX_VALUE) item.put("rsrq", it) }
+                            reflectInt(sig, "getRssnr")?.let { if (it != Int.MAX_VALUE) item.put("sinr", it) }
+                            reflectInt(sig, "getTimingAdvance")?.let { if (it != Int.MAX_VALUE) item.put("ta", it) }
+                        }
                     }
                     is CellIdentityNr -> {
                         item.put("type", "NR")
@@ -143,7 +155,15 @@ class EnvironmentCollector(private val context: Context) {
                         item.put("mnc", CellInfoRead.mnc(id))
                         item.put("tac", id.tac)
                         item.put("nci", id.nci)
+                        item.put("gnodebId", (id.nci ushr 8) and 0xFFFFFF)
                         item.put("pci", id.pci)
+                        reflectInt(id, "getNrArfcn")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("nrArfcn", it) }
+                        val sig = info.cellSignalStrength
+                        if (sig != null) {
+                            reflectInt(sig, "getSsRsrp")?.let { if (it != Int.MAX_VALUE) item.put("rsrp", it) }
+                            reflectInt(sig, "getSsRsrq")?.let { if (it != Int.MAX_VALUE) item.put("rsrq", it) }
+                            reflectInt(sig, "getSsSinr")?.let { if (it != Int.MAX_VALUE) item.put("sinr", it) }
+                        }
                     }
                     is CellIdentityGsm -> {
                         item.put("type", "GSM")
@@ -151,6 +171,12 @@ class EnvironmentCollector(private val context: Context) {
                         item.put("mnc", CellInfoRead.mnc(id))
                         item.put("lac", id.lac)
                         item.put("cid", id.cid)
+                        reflectInt(id, "getBsic")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("bsic", it) }
+                        val sig = info.cellSignalStrength
+                        if (sig != null) {
+                            reflectInt(sig, "getDbm")?.let { if (it != Int.MAX_VALUE) item.put("rssi", it) }
+                            reflectInt(sig, "getTimingAdvance")?.let { if (it != Int.MAX_VALUE) item.put("ta", it) }
+                        }
                     }
                     is CellIdentityWcdma -> {
                         item.put("type", "WCDMA")
@@ -158,6 +184,29 @@ class EnvironmentCollector(private val context: Context) {
                         item.put("mnc", CellInfoRead.mnc(id))
                         item.put("lac", id.lac)
                         item.put("cid", id.cid)
+                        reflectInt(id, "getPsc")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("psc", it) }
+                        val sig = info.cellSignalStrength
+                        if (sig != null) {
+                            reflectInt(sig, "getDbm")?.let { if (it != Int.MAX_VALUE) item.put("rssi", it) }
+                            reflectInt(sig, "getRscp")?.let { if (it != Int.MAX_VALUE) item.put("rscp", it) }
+                            reflectInt(sig, "getEcNo")?.let { if (it != Int.MAX_VALUE) item.put("ecno", it) }
+                        }
+                    }
+                    is CellIdentityCdma -> {
+                        item.put("type", "CDMA")
+                        reflectInt(id, "getSid")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("sid", it) }
+                        reflectInt(id, "getNid")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("nid", it) }
+                        reflectInt(id, "getBid")?.let { if (it != Int.MAX_VALUE && it >= 0) item.put("bid", it) }
+                        item.put("latitude", try {
+                            id.javaClass.getMethod("getLatitude").invoke(id) as? Double ?: 0.0
+                        } catch (_: Throwable) {
+                            0.0
+                        })
+                        item.put("longitude", try {
+                            id.javaClass.getMethod("getLongitude").invoke(id) as? Double ?: 0.0
+                        } catch (_: Throwable) {
+                            0.0
+                        })
                     }
                     else -> item.put("type", "OTHER")
                 }
@@ -170,6 +219,15 @@ class EnvironmentCollector(private val context: Context) {
             out.put("error", t.message)
         }
         return out
+    }
+
+    /** 反射读取 int getter（不同 ROM/API 隐藏方法兼容）。 */
+    private fun reflectInt(target: Any, methodName: String): Int? {
+        return try {
+            target.javaClass.getMethod(methodName).invoke(target) as? Int
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     @SuppressLint("MissingPermission")

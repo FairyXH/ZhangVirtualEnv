@@ -97,13 +97,39 @@ fun EnvDetailPanel(
     var detailStatus by remember { mutableStateOf("") }
     var autoManaged by remember { mutableStateOf(false) }
     var detailDialog by remember { mutableStateOf<JSONObject?>(null) }
-    var cellType by remember { mutableStateOf("") }
+    var cellType by remember { mutableStateOf("LTE") }
     var cellMcc by remember { mutableStateOf("") }
     var cellMnc by remember { mutableStateOf("") }
+    var cellLac by remember { mutableStateOf("") }
     var cellTac by remember { mutableStateOf("") }
-    var cellCi by remember { mutableStateOf("") }
+    var cellLat by remember { mutableStateOf("") }
+    var cellLon by remember { mutableStateOf("") }
     var cellPci by remember { mutableStateOf("") }
+    // GSM
+    var cellCid by remember { mutableStateOf("") }
+    var cellBsic by remember { mutableStateOf("") }
+    var cellTa by remember { mutableStateOf("") }
+    var cellRssi by remember { mutableStateOf("") }
+    // WCDMA
+    var cellPsc by remember { mutableStateOf("") }
+    var cellRscp by remember { mutableStateOf("") }
+    var cellEcno by remember { mutableStateOf("") }
+    // CDMA
+    var cellSid by remember { mutableStateOf("") }
+    var cellNid by remember { mutableStateOf("") }
+    var cellBid by remember { mutableStateOf("") }
+    // LTE
+    var cellEci by remember { mutableStateOf("") }
+    var cellEnodebId by remember { mutableStateOf("") }
+    var cellCellId by remember { mutableStateOf("") }
+    var cellEarfcn by remember { mutableStateOf("") }
     var cellRsrp by remember { mutableStateOf("") }
+    var cellRsrq by remember { mutableStateOf("") }
+    var cellSinr by remember { mutableStateOf("") }
+    // NR
+    var cellNci by remember { mutableStateOf("") }
+    var cellGnodebId by remember { mutableStateOf("") }
+    var cellNrArfcn by remember { mutableStateOf("") }
     var wifiSsid by remember { mutableStateOf("") }
     var wifiBssid by remember { mutableStateOf("") }
     var wifiRssi by remember { mutableStateOf("") }
@@ -164,22 +190,59 @@ fun EnvDetailPanel(
     fun readEntryForm(): JSONObject? {
         return when (type) {
             TYPE_CELL -> {
+                val netType = cellType.trim().ifEmpty { "LTE" }
                 val obj = JSONObject().apply {
-                    val netType = cellType.trim()
-                    put("type", if (netType.isEmpty()) "LTE" else netType)
-                    put("mcc", cellMcc.toIntOrNull() ?: -1)
-                    put("mnc", cellMnc.toIntOrNull() ?: -1)
-                    put("tac", cellTac.toIntOrNull() ?: -1)
-                    put("ci", cellCi.toLongOrNull() ?: -1L)
-                    // NR 的 CellIdentityNr 读 nci 键；LTE/GSM/WCDMA 读 ci 键。
-                    // 双写保证类型切换后字段不丢（工厂对 nci 越界/缺失会派生合法值）。
-                    put("nci", cellCi.toLongOrNull() ?: -1L)
-                    put("pci", cellPci.toIntOrNull() ?: -1)
-                    put("rsrp", cellRsrp.toIntOrNull() ?: -1)
+                    put("type", netType)
+                    // 公共参数（除经纬度外允许留空，缺省值由 Hook 工厂兜底）
+                    cellMcc.trim().toIntOrNull()?.let { put("mcc", it) }
+                    cellMnc.trim().toIntOrNull()?.let { put("mnc", it) }
+                    cellLac.trim().toIntOrNull()?.let { put("lac", it) }
+                    cellTac.trim().toIntOrNull()?.let { put("tac", it) }
+                    cellLat.trim().toDoubleOrNull()?.let { put("lat", it) }
+                    cellLon.trim().toDoubleOrNull()?.let { put("lon", it) }
+                    when (netType) {
+                        "GSM" -> {
+                            cellCid.trim().toIntOrNull()?.let { put("cid", it) }
+                            cellBsic.trim().toIntOrNull()?.let { put("bsic", it) }
+                            cellTa.trim().toIntOrNull()?.let { put("ta", it) }
+                            cellRssi.trim().toIntOrNull()?.let { put("rssi", it) }
+                        }
+                        "WCDMA" -> {
+                            cellCid.trim().toIntOrNull()?.let { put("cid", it) }
+                            cellPsc.trim().toIntOrNull()?.let { put("psc", it) }
+                            cellRscp.trim().toIntOrNull()?.let { put("rscp", it) }
+                            cellEcno.trim().toIntOrNull()?.let { put("ecno", it) }
+                        }
+                        "CDMA" -> {
+                            cellSid.trim().toIntOrNull()?.let { put("sid", it) }
+                            cellNid.trim().toIntOrNull()?.let { put("nid", it) }
+                            cellBid.trim().toIntOrNull()?.let { put("bid", it) }
+                        }
+                        "LTE" -> {
+                            // ECI 优先（28bit）；同时保留 enodebId/cellId 便于查看，工厂用 eci 合成 ci
+                            cellEci.trim().toLongOrNull()?.let { put("ci", it) }
+                            cellEnodebId.trim().toLongOrNull()?.let { put("enodebId", it) }
+                            cellCellId.trim().toLongOrNull()?.let { put("cellId", it) }
+                            cellPci.trim().toIntOrNull()?.let { put("pci", it) }
+                            cellEarfcn.trim().toIntOrNull()?.let { put("earfcn", it) }
+                            cellRsrp.trim().toIntOrNull()?.let { put("rsrp", it) }
+                            cellRsrq.trim().toIntOrNull()?.let { put("rsrq", it) }
+                            cellSinr.trim().toIntOrNull()?.let { put("sinr", it) }
+                            cellTa.trim().toIntOrNull()?.let { put("ta", it) }
+                        }
+                        "NR" -> {
+                            cellNci.trim().toLongOrNull()?.let { put("nci", it) }
+                            cellGnodebId.trim().toLongOrNull()?.let { put("gnodebId", it) }
+                            cellPci.trim().toIntOrNull()?.let { put("pci", it) }
+                            cellNrArfcn.trim().toIntOrNull()?.let { put("nrArfcn", it) }
+                            cellRsrp.trim().toIntOrNull()?.let { put("rsrp", it) }
+                            cellRsrq.trim().toIntOrNull()?.let { put("rsrq", it) }
+                            cellSinr.trim().toIntOrNull()?.let { put("sinr", it) }
+                        }
+                    }
                 }
-                if (obj.optInt("mcc", -1) < 0) {
-                    toast(fragment.getString(R.string.env_cell_mcc_required))
-                    return null
+                if (obj.length() <= 1) {
+                    // 只有 type 没有任何参数：允许（工厂会按默认值构造），不拦截
                 }
                 obj
             }
@@ -247,13 +310,33 @@ fun EnvDetailPanel(
     fun clearEntryForm() {
         when (type) {
             TYPE_CELL -> {
-                cellType = ""
+                cellType = "LTE"
                 cellMcc = ""
                 cellMnc = ""
+                cellLac = ""
                 cellTac = ""
-                cellCi = ""
-                cellPci = ""
+                cellLat = ""
+                cellLon = ""
+                cellCid = ""
+                cellBsic = ""
+                cellTa = ""
+                cellRssi = ""
+                cellPsc = ""
+                cellRscp = ""
+                cellEcno = ""
+                cellSid = ""
+                cellNid = ""
+                cellBid = ""
+                cellEci = ""
+                cellEnodebId = ""
+                cellCellId = ""
+                cellEarfcn = ""
                 cellRsrp = ""
+                cellRsrq = ""
+                cellSinr = ""
+                cellNci = ""
+                cellGnodebId = ""
+                cellNrArfcn = ""
             }
             TYPE_WIFI -> {
                 wifiSsid = ""
@@ -295,9 +378,19 @@ fun EnvDetailPanel(
                 val typeStr = entry.optString("type", "LTE")
                 val mcc = entry.optInt("mcc", -1)
                 val mnc = entry.optInt("mnc", -1)
-                val tac = entry.optInt("tac", -1)
-                val id = if (entry.has("nci")) entry.optLong("nci", -1L) else entry.optLong("ci", -1L)
-                fragment.getString(R.string.env_cell_entry_format, typeStr, mcc, mnc, tac, id)
+                val id = when (typeStr) {
+                    "NR" -> entry.optLong("nci", -1L)
+                    "GSM", "WCDMA" -> entry.optLong("cid", -1L)
+                    "CDMA" -> entry.optLong("bid", -1L)
+                    else -> entry.optLong("ci", -1L)
+                }
+                val lacTac = if (entry.has("tac")) entry.optInt("tac", -1) else entry.optInt("lac", -1)
+                val coord = if (entry.has("lat")) {
+                    String.format(" %.4f,%.4f", entry.optDouble("lat", 0.0), entry.optDouble("lon", 0.0))
+                } else {
+                    ""
+                }
+                fragment.getString(R.string.env_cell_entry_format, typeStr, mcc, mnc, lacTac, id) + coord
             }
             TYPE_WIFI -> {
                 val ssid = entry.optString("ssid", "")
@@ -346,19 +439,35 @@ fun EnvDetailPanel(
         val rnd = java.util.concurrent.ThreadLocalRandom.current()
         when (type) {
             TYPE_CELL -> {
-                val netType = listOf("LTE", "NR", "GSM", "WCDMA")[rnd.nextInt(4)]
+                val netType = listOf("LTE", "NR", "GSM", "WCDMA", "CDMA")[rnd.nextInt(5)]
                 cellType = netType
                 cellMcc = (440 + rnd.nextInt(30)).toString()
                 cellMnc = rnd.nextInt(100).toString()
+                cellLac = rnd.nextInt(65536).toString()
                 cellTac = rnd.nextInt(65536).toString()
-                // NR 的 NCI 是 36bit 值，直接生成合法范围，避免越界被归一化为 Long.MAX_VALUE
-                cellCi = if (netType == "NR") {
-                    rnd.nextLong(1, 68719476736L).toString()
-                } else {
-                    rnd.nextInt(1 shl 28).toString()
-                }
-                cellPci = rnd.nextInt(504).toString()
+                cellLat = String.format("%.6f", 24.4 + rnd.nextDouble(0.2))
+                cellLon = String.format("%.6f", 118.0 + rnd.nextDouble(0.2))
+                cellCid = rnd.nextInt(1 shl 28).toString()
+                cellBsic = rnd.nextInt(64).toString()
+                cellTa = rnd.nextInt(64).toString()
+                cellRssi = (-110 + rnd.nextInt(50)).toString()
+                cellPsc = rnd.nextInt(512).toString()
+                cellRscp = (-115 + rnd.nextInt(50)).toString()
+                cellEcno = (-24 + rnd.nextInt(25)).toString()
+                cellSid = (1 + rnd.nextInt(65534)).toString()
+                cellNid = (1 + rnd.nextInt(65534)).toString()
+                cellBid = (1 + rnd.nextInt(65534)).toString()
+                cellEci = rnd.nextInt(1 shl 28).toString()
+                cellEnodebId = rnd.nextInt(1 shl 20).toString()
+                cellCellId = rnd.nextInt(256).toString()
+                cellEarfcn = (1300 + rnd.nextInt(500)).toString()
                 cellRsrp = (-130 + rnd.nextInt(40)).toString()
+                cellRsrq = (-19 + rnd.nextInt(16)).toString()
+                cellSinr = (0 + rnd.nextInt(31)).toString()
+                // NR 的 NCI 是 36bit 值，直接生成合法范围，避免越界被归一化
+                cellNci = rnd.nextLong(1, 68719476736L).toString()
+                cellGnodebId = rnd.nextInt(1 shl 24).toString()
+                cellNrArfcn = (630000 + rnd.nextInt(10000)).toString()
             }
             TYPE_WIFI -> {
                 wifiSsid = "ZVE-Rand-${rnd.nextInt(1000)}"
@@ -896,13 +1005,64 @@ fun EnvDetailPanel(
                                 ) {
                                     RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 }
-                                EntryFormField("type", cellType, { cellType = it }, fragment.getString(R.string.env_cell_type_hint), backdrop)
-                                EntryFormField("mcc", cellMcc, { cellMcc = it }, fragment.getString(R.string.env_cell_mcc_hint), backdrop)
-                                EntryFormField("mnc", cellMnc, { cellMnc = it }, fragment.getString(R.string.env_cell_mnc_hint), backdrop)
-                                EntryFormField("tac", cellTac, { cellTac = it }, fragment.getString(R.string.env_cell_tac_hint), backdrop)
-                                EntryFormField("ci", cellCi, { cellCi = it }, fragment.getString(R.string.env_cell_ci_hint), backdrop)
-                                EntryFormField("pci", cellPci, { cellPci = it }, fragment.getString(R.string.env_cell_pci_hint), backdrop)
-                                EntryFormField("rsrp", cellRsrp, { cellRsrp = it }, fragment.getString(R.string.env_cell_rsrp_hint), backdrop)
+                                CellTypeDropdown(
+                                    selected = cellType,
+                                    onSelect = { cellType = it },
+                                    backdrop = backdrop
+                                )
+                                // 公共参数
+                                EntryFormField(fragment.getString(R.string.env_cell_mcc_label), cellMcc, { cellMcc = it }, fragment.getString(R.string.env_cell_mcc_hint), backdrop)
+                                EntryFormField(fragment.getString(R.string.env_cell_mnc_label), cellMnc, { cellMnc = it }, fragment.getString(R.string.env_cell_mnc_hint), backdrop)
+                                if (cellType != "CDMA") {
+                                    if (cellType == "LTE" || cellType == "NR") {
+                                        EntryFormField(fragment.getString(R.string.env_cell_tac_label), cellTac, { cellTac = it }, fragment.getString(R.string.env_cell_tac_hint), backdrop)
+                                    } else {
+                                        EntryFormField(fragment.getString(R.string.env_cell_lac_label), cellLac, { cellLac = it }, fragment.getString(R.string.env_cell_lac_hint), backdrop)
+                                    }
+                                }
+                                // 经纬度（所有制式都支持）
+                                EntryFormField(fragment.getString(R.string.env_cell_lat_label), cellLat, { cellLat = it }, "31.230400", backdrop)
+                                EntryFormField(fragment.getString(R.string.env_cell_lon_label), cellLon, { cellLon = it }, "121.473700", backdrop)
+                                // 按制式附加字段
+                                when (cellType) {
+                                    "GSM" -> {
+                                        EntryFormField(fragment.getString(R.string.env_cell_cid_label), cellCid, { cellCid = it }, "12345", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_bsic_label), cellBsic, { cellBsic = it }, "0-63", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_ta_label), cellTa, { cellTa = it }, "0-63", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rssi_label), cellRssi, { cellRssi = it }, "-113~-51", backdrop)
+                                    }
+                                    "WCDMA" -> {
+                                        EntryFormField(fragment.getString(R.string.env_cell_cid_label), cellCid, { cellCid = it }, "123456", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_psc_label), cellPsc, { cellPsc = it }, "0-511", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rscp_label), cellRscp, { cellRscp = it }, "-120~-25", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_ecno_label), cellEcno, { cellEcno = it }, "-24~0", backdrop)
+                                    }
+                                    "CDMA" -> {
+                                        EntryFormField(fragment.getString(R.string.env_cell_sid_label), cellSid, { cellSid = it }, "1-65534", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_nid_label), cellNid, { cellNid = it }, "1-65534", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_bid_label), cellBid, { cellBid = it }, "1-65534", backdrop)
+                                    }
+                                    "LTE" -> {
+                                        EntryFormField(fragment.getString(R.string.env_cell_eci_label), cellEci, { cellEci = it }, "0-268435455", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_enodeb_label), cellEnodebId, { cellEnodebId = it }, "可选", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_cellid_label), cellCellId, { cellCellId = it }, "可选", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_pci_label), cellPci, { cellPci = it }, "0-503", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_earfcn_label), cellEarfcn, { cellEarfcn = it }, "如 1650", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rsrp_label), cellRsrp, { cellRsrp = it }, "-156~-31", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rsrq_label), cellRsrq, { cellRsrq = it }, "-43~20", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_sinr_label), cellSinr, { cellSinr = it }, "-23~40", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_ta_label), cellTa, { cellTa = it }, "可选", backdrop)
+                                    }
+                                    "NR" -> {
+                                        EntryFormField(fragment.getString(R.string.env_cell_nci_label), cellNci, { cellNci = it }, "0-68719476735", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_gnodeb_label), cellGnodebId, { cellGnodebId = it }, "可选", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_pci_label), cellPci, { cellPci = it }, "0-1007", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_nrarfcn_label), cellNrArfcn, { cellNrArfcn = it }, "如 633334", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rsrp_label), cellRsrp, { cellRsrp = it }, "-156~-31", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_rsrq_label), cellRsrq, { cellRsrq = it }, "-43~20", backdrop)
+                                        EntryFormField(fragment.getString(R.string.env_cell_sinr_label), cellSinr, { cellSinr = it }, "-23~40", backdrop)
+                                    }
+                                }
                                 GlassButton(
                                     onClick = { addEntry() },
                                     backdrop = backdrop,
@@ -1280,6 +1440,69 @@ private fun EntryFormField(
             modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
             placeholder = placeholder
         )
+    }
+}
+
+/** 基站网络制式下拉选择（GSM / WCDMA / CDMA / LTE / NR）。 */
+@Composable
+private fun CellTypeDropdown(
+    selected: String,
+    onSelect: (String) -> Unit,
+    backdrop: Backdrop
+) {
+    val colors = glassColors()
+    var expanded by remember { mutableStateOf(false) }
+    val options = listOf(
+        "LTE" to "LTE (4G)",
+        "NR" to "NR (5G)",
+        "GSM" to "GSM (2G)",
+        "WCDMA" to "WCDMA/UMTS (3G)",
+        "CDMA" to "CDMA"
+    )
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+        BasicText(
+            "网络制式",
+            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+        )
+        GlassPill(
+            onClick = { expanded = !expanded },
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 2.dp).fillMaxWidth(),
+            selected = false,
+            containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+            height = 42.dp
+        ) {
+            BasicText(
+                (options.firstOrNull { it.first == selected }?.second ?: selected) + (if (expanded) " ▲" else " ▼"),
+                Modifier.padding(horizontal = 12.dp),
+                style = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            )
+        }
+        if (expanded) {
+            options.forEach { (key, label) ->
+                GlassPill(
+                    onClick = {
+                        onSelect(key)
+                        expanded = false
+                    },
+                    backdrop = backdrop,
+                    modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                    selected = key == selected,
+                    containerColor = if (key == selected) colors.accent.copy(alpha = 0.18f)
+                    else colors.bgTertiary.copy(alpha = 0.3f),
+                    height = 36.dp
+                ) {
+                    BasicText(
+                        label,
+                        Modifier.padding(horizontal = 12.dp),
+                        style = TextStyle(
+                            color = if (key == selected) colors.accent else colors.textPrimary,
+                            fontSize = 13.sp
+                        )
+                    )
+                }
+            }
+        }
     }
 }
 
