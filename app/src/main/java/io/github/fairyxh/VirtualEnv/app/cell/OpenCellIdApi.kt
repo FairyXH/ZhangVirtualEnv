@@ -74,12 +74,25 @@ object OpenCellIdApi {
         val resp = get("$BASE_URL/cell/getInArea?$query")
             ?: return Result.failure(ApiFailure("OpenCellID 服务暂时不可用"))
         if (resp.httpCode !in 200..299) {
-            return Result.failure(mapHttp(resp.httpCode, parseBodySafe(resp.body)))
+            val failure = mapHttp(resp.httpCode, parseBodySafe(resp.body))
+            ZLog.w(
+                TAG_SCOPE,
+                "getInArea failed http=${resp.httpCode} bbox=$bbox radio=$radio mcc=$mcc mnc=$mnc lac=$lac " +
+                    "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
+            )
+            return Result.failure(failure)
         }
         val body = resp.body ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
         val parsed = parseBody(body) ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
         // OpenCellID 对无效 Key / 权限不足等错误也返回 HTTP 200，错误在 body：{"error":"...","code":N}
-        parseApiError(parsed, resp.httpCode)?.let { return Result.failure(it) }
+        parseApiError(parsed, resp.httpCode)?.let { failure ->
+            ZLog.w(
+                TAG_SCOPE,
+                "getInArea business error code=${failure.code} bbox=$bbox radio=$radio mcc=$mcc mnc=$mnc lac=$lac " +
+                    "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
+            )
+            return Result.failure(failure)
+        }
         val cellsArr = parsed.optJSONArray("cells") ?: JSONArray()
         val cells = mutableListOf<CellInfo>()
         for (i in 0 until cellsArr.length()) {
@@ -252,16 +265,18 @@ object OpenCellIdApi {
     private fun mapHttp(httpCode: Int, body: JSONObject?): ApiFailure {
         val apiCode = body?.optInt("code", -1) ?: -1
         val apiError = body?.optString("error", "") ?: ""
+        // 所有分支都带出服务端 error 原文，便于用户调试
+        val detail = if (apiError.isNotEmpty()) "：$apiError" else ""
         return when {
             apiCode == 2 || httpCode == 401 -> ApiFailure(
                 if (apiError.isNotEmpty()) "API Key 无效：$apiError" else "API Key 无效",
                 httpCode, apiCode
             )
-            apiCode == 3 || httpCode == 400 -> ApiFailure("请求参数错误", httpCode, apiCode)
-            apiCode == 4 || httpCode == 403 -> ApiFailure("API Key 未获得社区 API 权限（需贡献数据或白名单）", httpCode, apiCode)
-            apiCode == 5 || httpCode == 500 -> ApiFailure("OpenCellID 服务暂时不可用", httpCode, apiCode)
-            apiCode == 6 || httpCode == 503 -> ApiFailure("请求过于频繁，请稍后重试", httpCode, apiCode)
-            apiCode == 7 || httpCode == 429 -> ApiFailure("今日 API 使用量已达到限制", httpCode, apiCode)
+            apiCode == 3 || httpCode == 400 -> ApiFailure("请求参数错误$detail", httpCode, apiCode)
+            apiCode == 4 || httpCode == 403 -> ApiFailure("API Key 未获得社区 API 权限$detail（需贡献数据或白名单）", httpCode, apiCode)
+            apiCode == 5 || httpCode == 500 -> ApiFailure("OpenCellID 服务暂时不可用$detail", httpCode, apiCode)
+            apiCode == 6 || httpCode == 503 -> ApiFailure("请求过于频繁，请稍后重试$detail", httpCode, apiCode)
+            apiCode == 7 || httpCode == 429 -> ApiFailure("今日 API 使用量已达到限制$detail", httpCode, apiCode)
             httpCode == -1 -> ApiFailure("网络请求失败，请检查网络连接")
             else -> ApiFailure(
                 if (apiError.isNotEmpty()) "OpenCellID 请求失败：$apiError" else "OpenCellID 请求失败（HTTP $httpCode）",
@@ -270,15 +285,18 @@ object OpenCellIdApi {
         }
     }
 
-    /** 经纬度 + 半径 → OpenCellID BBOX（latmin,lonmin,latmax,lonmax）。 */
+    /**
+     * 经纬度 + 半径 → OpenCellID BBOX（latmin,lonmin,latmax,lonmax）。
+     * 边界 clamp：纬度 ±90°、经度 ±180°，避免靠近极点/日期变更线时 BBOX 越界被服务端判参数错误（code 3）。
+     */
     private fun bboxFor(latitude: Double, longitude: Double, radiusMeters: Int): String {
         val radius = radiusMeters.coerceAtLeast(100)
         val latDelta = radius / 111_320.0
         val lonDelta = radius / (111_320.0 * cos(Math.toRadians(latitude)).coerceAtLeast(0.01))
-        val latMin = latitude - latDelta
-        val latMax = latitude + latDelta
-        val lonMin = longitude - lonDelta
-        val lonMax = longitude + lonDelta
+        val latMin = (latitude - latDelta).coerceIn(-90.0, 90.0)
+        val latMax = (latitude + latDelta).coerceIn(-90.0, 90.0)
+        val lonMin = (longitude - lonDelta).coerceIn(-180.0, 180.0)
+        val lonMax = (longitude + lonDelta).coerceIn(-180.0, 180.0)
         return String.format("%.6f,%.6f,%.6f,%.6f", latMin, lonMin, latMax, lonMax)
     }
 
