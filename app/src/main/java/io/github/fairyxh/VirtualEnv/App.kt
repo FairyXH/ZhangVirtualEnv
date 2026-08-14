@@ -1,6 +1,7 @@
 package io.github.fairyxh.VirtualEnv
 
 import android.app.Application
+import io.github.fairyxh.VirtualEnv.util.CrashCatcher
 import io.github.fairyxh.VirtualEnv.util.ZLog
 
 /**
@@ -13,6 +14,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 全局异常捕获需最早注册（任何页面 / 线程崩溃都能弹窗 + 落盘）。
+        CrashCatcher.install(this)
         io.github.fairyxh.VirtualEnv.app.ApiClient.initTokenFromAssets(this)
         ZLog.i("App", "ZhangVirtualEnvironment control app started")
     }

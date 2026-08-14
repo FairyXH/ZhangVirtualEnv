@@ -79,6 +79,12 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- 全局崩溃报告弹窗（透明，不依赖主界面） -->
+        <activity
+            android:name=".app.CrashReportActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Dialog" />
+
         <service
             android:name=".app.FloatControlService"
             android:exported="false" />

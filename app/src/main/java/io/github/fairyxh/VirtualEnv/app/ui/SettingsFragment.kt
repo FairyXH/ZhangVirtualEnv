@@ -53,6 +53,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
+import kotlinx.coroutines.delay
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.Executors
@@ -143,6 +145,9 @@ class SettingsFragment : Fragment() {
     private var jitterEnabled by mutableStateOf(true)
     private var hookStatusSummary by mutableStateOf("")
     private var hookStatusDetail by mutableStateOf("")
+    /** 运行日志卡片：崩溃记录 + 最近日志预览 + 刷新计数。 */
+    private var logPreview by mutableStateOf("")
+    private var logRefreshTick by mutableStateOf(0)
 
     private fun setJitterSwitch(enabled: Boolean) {
         jitterEnabled = enabled
@@ -309,6 +314,43 @@ class SettingsFragment : Fragment() {
         exportReportLauncher.launch(
             "ZVE_HookReport_${io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.settings_hook_status_title))}.json"
         )
+    }
+
+    /** 运行日志导出：SAF 创建 TXT 文件后写入日志 + 崩溃记录。 */
+    private val exportLogLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) exportLogTo(uri)
+    }
+
+    private fun onExportLog() {
+        exportLogLauncher.launch(
+            "ZVE_Log_${io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.settings_log_card_title))}.txt"
+        )
+    }
+
+    private fun exportLogTo(uri: android.net.Uri) {
+        Thread {
+            try {
+                val ctx = requireContext()
+                val out = ctx.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("open output stream failed")
+                out.use {
+                    it.write(io.github.fairyxh.VirtualEnv.util.LogStore.exportText().toByteArray(StandardCharsets.UTF_8))
+                }
+                runOnUi {
+                    Toast.makeText(requireContext(), R.string.settings_log_exported, Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                runOnUi {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.crash_report_export_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }.start()
     }
 
     /** 拉取后端完整调试报告并写入 SAF 文件。 */
@@ -487,6 +529,13 @@ class SettingsFragment : Fragment() {
                     .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 130.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // 定时刷新运行日志卡片（LogStore 无状态，手动 tick 触发重组）
+                LaunchedEffect(logRefreshTick) {
+                    logPreview = io.github.fairyxh.VirtualEnv.util.LogStore.snapshot().takeLast(40)
+                        .joinToString("\n")
+                    kotlinx.coroutines.delay(2000L)
+                    logRefreshTick++
+                }
                 val colors = glassColors()
                 BasicText(
                     getString(R.string.settings_title),
@@ -1045,6 +1094,77 @@ class SettingsFragment : Fragment() {
                                 BasicText(
                                     getString(R.string.settings_hook_status_export),
                                     style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 运行日志卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_log_card_title))
+                        SectionDesc(getString(R.string.settings_log_card_desc))
+                        // 崩溃记录区
+                        BasicText(
+                            getString(R.string.settings_log_crash_section),
+                            Modifier.padding(top = 8.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        )
+                        val crashText = io.github.fairyxh.VirtualEnv.util.LogStore.crashRecords().joinToString("\n") { c ->
+                            "[${c.id}] ${c.time} ${c.thread}\n${c.summary}"
+                        }.ifEmpty { getString(R.string.settings_log_empty) }
+                        BasicText(
+                            crashText,
+                            Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        )
+                        // 最近日志区
+                        BasicText(
+                            getString(R.string.settings_log_runtime_section),
+                            Modifier.padding(top = 10.dp),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        )
+                        val logLines = fragment.logPreview
+                        BasicText(
+                            if (logLines.isEmpty()) getString(R.string.settings_log_empty)
+                            else logLines,
+                            Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.onExportLog() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_log_export),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = {
+                                    io.github.fairyxh.VirtualEnv.util.LogStore.clear()
+                                    Toast.makeText(requireContext(), R.string.settings_log_cleared, Toast.LENGTH_SHORT).show()
+                                },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_log_clear),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 )
                             }
                         }
