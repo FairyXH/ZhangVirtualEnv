@@ -73,3 +73,44 @@ logcat -s ZVirtualEnv         -> matched baidu loc service pkg=com.zzw.october
 ```
 
 再使用 `VirEnvDetector` 读取位置、GNSS、WiFi、基站和 Hook 观测日志判断虚拟环境是否生效；不使用截图作为证据。若系统层 Hook 更新需要重启，安装后必须暂停，等待用户确认设备已重启再继续检测。
+
+## 6. 第二轮修复（重启后仍无效）
+
+重启后 `com.zzw.october:remote` 仍未启动，日志持续：
+
+```text
+isBaiduLocService reflect failed: No field name in class android.content.pm.ServiceInfo
+```
+
+同时用户反馈：不开基站模拟读真实位置；开基站模拟定位到几内亚湾（约 0,0）。
+
+### 6.1 服务放行失败：`getDeclaredField("name")` 抛 NoSuchFieldException
+
+`ServiceInfo.name` 字段声明在基类 `android.content.pm.PackageItemInfo`（继承链
+`ServiceInfo → ComponentInfo → PackageItemInfo`），`getDeclaredField` 只在 `ServiceInfo`
+自身声明字段里找，必然抛 `NoSuchFieldException`。异常被外层 `catch` 吞掉直接返回
+`false`，后面的 `intent.component` 兜底永远执行不到。
+
+修复：新增 `fieldValue()` 沿父类链向上查找字段；组件类名优先取 `intent.component.className`
+（`dumpsys` 中 `cmp=com.zzw.october/com.baidu.location.f`），其次 `serviceInfo.name`。
+
+### 6.2 开基站定位到几内亚湾：CDMA 坐标被构造成 (0,0)
+
+`VirtualCellFactory.buildCdmaCell` 原来只读 `lat`/`lon`/`_cellLat`/`_cellLon`，且缺失时
+默认 `0.0`。但：
+
+- UI 手动配置写入 `lat`/`lon`；
+- 采集快照（`EnvironmentCollector`）写入 `latitude`/`longitude`；
+- 两套键不一致时 CDMA 条目坐标读取失败 → 默认 0。
+
+于是 `CellIdentityCdma(nid,sid,bid,lonQ=0,latQ=0)` 被构造，百度网络定位按 `&cdmall=0|0`
+反算到 (0,0) 几内亚湾。
+
+修复：
+
+- `buildCellInfoList(data, defaultLat, defaultLon)` 增加默认坐标参数；
+- `buildCdmaCell` 用 `coord()` 兼容 `lat/lon` 与 `latitude/longitude` 两套键，缺失时回退
+  传入的虚拟位置坐标；
+- 三个调用方（`FrameworkEnvHookAdapter`、`PhoneInterfaceManagerHookAdapter`、
+  `RilDefensiveHookAdapter`）统一传入 `cache.locationLat()/locationLon()`。
+
