@@ -148,11 +148,18 @@ class FrameworkEnvHookAdapter(
             // 虚拟定位未启用：放行真实基站（检测器/普通场景不误判）
             if (!cache.isLocationEnabled()) return@register original
             try {
-                val list = VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
-                    // 配置存在但构建为空：回退带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
-                    listOfNotNull(
-                        VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
-                    )
+                val entries = virtual.optJSONArray("entries") ?: virtual.optJSONArray("cells") ?: org.json.JSONArray()
+                val list = if (entries.length() == 0) {
+                    // 空基站配置：尊重 0 基站，返回空列表（不 fallback CDMA）
+                    ZLog.d(TAG_SCOPE, "getAllCellInfo -> empty (0 cells configured)")
+                    emptyList()
+                } else {
+                    VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
+                        // 配置非空但构建为空：回退带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
+                        listOfNotNull(
+                            VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
+                        )
+                    }
                 }
                 ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
                 return@register list

@@ -99,16 +99,21 @@ class PhoneInterfaceManagerHookAdapter(
         return hooked
     }
 
-    /** 构造虚拟基站列表：仅当基站模拟配置可用时生成；否则返回空（调用方放行真实数据）。 */
+    /** 构造虚拟基站列表：尊重空配置（0 基站返回空列表）；仅非空配置构建失败时才回退 CDMA。 */
     private fun buildVirtualCells(): List<Any> {
         val cellData = cache.currentCell() ?: return emptyList()
+        val entries = cellData.optJSONArray("entries") ?: cellData.optJSONArray("cells") ?: org.json.JSONArray()
+        if (entries.length() == 0) {
+            ZLog.d(TAG_SCOPE, "requestCellInfoUpdate -> empty (0 cells configured)")
+            return emptyList()
+        }
         try {
             val list = VirtualCellFactory.buildCellInfoList(cellData)
             if (list.isNotEmpty()) return list
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "requestCellInfoUpdate config build failed, fallback cdma", t)
         }
-        val cellCount = cellData.optJSONArray("entries")?.length()?.coerceIn(1, 16) ?: 1
+        val cellCount = entries.length().coerceIn(1, 16)
         return (0 until cellCount).mapNotNull {
             VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
         }
@@ -148,6 +153,12 @@ class PhoneInterfaceManagerHookAdapter(
             if (cellData == null) {
                 logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> real (cell sim off)")
                 return@register original
+            }
+            val entries = cellData.optJSONArray("entries") ?: cellData.optJSONArray("cells") ?: org.json.JSONArray()
+            if (entries.length() == 0) {
+                // 空基站配置：尊重 0 基站，返回空列表（不 fallback CDMA）
+                logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> empty (0 cells configured)")
+                return@register emptyList<Any>()
             }
             try {
                 val list = VirtualCellFactory.buildCellInfoList(cellData)
