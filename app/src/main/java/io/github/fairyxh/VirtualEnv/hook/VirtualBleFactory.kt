@@ -59,7 +59,13 @@ object VirtualBleFactory {
 
             val result = mutableListOf<Any>()
             val seen = HashSet<String>()
-            fun addEntry(d: JSONObject) {
+            // mode=classic 的设备只在经典发现中出现，不进 BLE 扫描结果；bonded 保持兼容全部加入
+            fun isBleVisible(d: JSONObject): Boolean {
+                val mode = d.optString("mode", "").lowercase()
+                return mode != "classic"
+            }
+            fun addEntry(d: JSONObject, filterClassicOnly: Boolean) {
+                if (filterClassicOnly && !isBleVisible(d)) return
                 val address = d.optString("address", "").uppercase()
                 if (address.isBlank() || !seen.add(address)) return
                 try {
@@ -79,10 +85,10 @@ object VirtualBleFactory {
                 }
             }
             data.optJSONArray("devices")?.let { arr ->
-                for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
+                for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue, true)
             }
             data.optJSONArray("bonded")?.let { arr ->
-                for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue)
+                for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue, false)
             }
             result
         } catch (t: Throwable) {

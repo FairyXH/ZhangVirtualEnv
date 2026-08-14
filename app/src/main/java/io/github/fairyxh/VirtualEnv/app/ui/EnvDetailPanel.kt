@@ -137,6 +137,10 @@ fun EnvDetailPanel(
     var bleName by remember { mutableStateOf("") }
     var bleAddress by remember { mutableStateOf("") }
     var bleRssi by remember { mutableStateOf("") }
+    // 经典/双模：bleMode = ble / classic / dual；classOfDevice 与 classicRssi 仅经典通道使用
+    var bleMode by remember { mutableStateOf("dual") }
+    var bleClassOfDevice by remember { mutableStateOf("") }
+    var bleClassicRssi by remember { mutableStateOf("") }
     var sensorStep by remember { mutableStateOf("") }
     var gnssCount by remember { mutableStateOf("") }
     var gnssUsed by remember { mutableStateOf("") }
@@ -265,10 +269,15 @@ fun EnvDetailPanel(
                     toast(fragment.getString(R.string.env_ble_address_required))
                     return null
                 }
+                val mode = bleMode.trim().ifEmpty { "dual" }
                 JSONObject().apply {
                     put("name", bleName.trim())
                     put("address", address)
                     put("rssi", bleRssi.toIntOrNull() ?: -70)
+                    put("mode", mode)
+                    // 经典/双模附加字段（可选）
+                    bleClassOfDevice.trim().toIntOrNull()?.let { put("classOfDevice", it) }
+                    bleClassicRssi.trim().toIntOrNull()?.let { put("classicRssi", it) }
                 }
             }
             TYPE_SIM -> {
@@ -348,6 +357,9 @@ fun EnvDetailPanel(
                 bleName = ""
                 bleAddress = ""
                 bleRssi = ""
+                bleMode = "dual"
+                bleClassOfDevice = ""
+                bleClassicRssi = ""
             }
             TYPE_SIM -> {
                 simSlot = (entries.size).toString()
@@ -402,7 +414,12 @@ fun EnvDetailPanel(
                 val name = entry.optString("name", "").ifEmpty { entry.optString("address", "") }
                 val address = entry.optString("address", "")
                 val rssi = entry.optInt("rssi", -70)
-                fragment.getString(R.string.env_ble_entry_format, name, address, rssi)
+                val modeTag = when (entry.optString("mode", "ble").lowercase()) {
+                    "classic" -> " · 经典"
+                    "dual" -> " · 双模"
+                    else -> ""
+                }
+                fragment.getString(R.string.env_ble_entry_format, name, address, rssi) + modeTag
             }
             TYPE_SIM -> {
                 val slot = entry.optInt("slotIndex", -1)
@@ -479,6 +496,9 @@ fun EnvDetailPanel(
                 bleName = "ZVE-Device-${rnd.nextInt(1000)}"
                 bleAddress = String.format("AA:BB:CC:%02X:%02X:%02X", rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256))
                 bleRssi = (-90 + rnd.nextInt(40)).toString()
+                bleMode = listOf("ble", "classic", "dual")[rnd.nextInt(3)]
+                bleClassOfDevice = listOf("2360324", "2550136832", "0")[rnd.nextInt(3)]
+                bleClassicRssi = (-90 + rnd.nextInt(40)).toString()
             }
             TYPE_SENSOR -> {
                 sensorStep = (90 + rnd.nextInt(91)).toString()
@@ -1134,6 +1154,42 @@ fun EnvDetailPanel(
                                 EntryFormField("name", bleName, { bleName = it }, fragment.getString(R.string.env_ble_name_hint), backdrop)
                                 EntryFormField("address", bleAddress, { bleAddress = it }, fragment.getString(R.string.env_ble_address_hint), backdrop)
                                 EntryFormField("rssi", bleRssi, { bleRssi = it }, fragment.getString(R.string.env_ble_rssi_hint), backdrop)
+                                // 模式：BLE 仅 / 经典仅 / 双模
+                                Column(Modifier.padding(top = 8.dp).fillMaxWidth()) {
+                                    BasicText(
+                                        "连接模式",
+                                        style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                    )
+                                    Row(
+                                        Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf("ble" to "BLE", "classic" to "经典", "dual" to "双模").forEach { (key, label) ->
+                                            GlassPill(
+                                                onClick = { bleMode = key },
+                                                backdrop = backdrop,
+                                                modifier = Modifier.weight(1f),
+                                                selected = bleMode == key,
+                                                containerColor = if (bleMode == key) colors.accent.copy(alpha = 0.18f)
+                                                else colors.bgTertiary.copy(alpha = 0.3f),
+                                                height = 36.dp
+                                            ) {
+                                                BasicText(
+                                                    label,
+                                                    Modifier.padding(horizontal = 8.dp),
+                                                    style = TextStyle(
+                                                        color = if (bleMode == key) colors.accent else colors.textPrimary,
+                                                        fontSize = 13.sp
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (bleMode != "ble") {
+                                    EntryFormField("classOfDevice", bleClassOfDevice, { bleClassOfDevice = it }, "可选，如 2360324（音频）", backdrop)
+                                    EntryFormField("classicRssi", bleClassicRssi, { bleClassicRssi = it }, "可选，默认同 RSSI", backdrop)
+                                }
                                 GlassButton(
                                     onClick = { addEntry() },
                                     backdrop = backdrop,
