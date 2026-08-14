@@ -79,12 +79,14 @@ Users are responsible for their own usage.
 | Hook 层观测 | 采集真实环境时在各 Hook 点记录**未虚拟化前的真实数据**（位置/基站/WiFi/GNSS），采集包附带 `hookObserve` 字段用于 Hook 层检验（不只普通 App 视角）；一键采集位置自动保存到“已保存地点/位置模拟”；基站采集 mcc/mnc 优先字符串 getter（Oplus 15 旧 int getter 不可靠，详见 `docs/reverse/hook-observe-and-collect-fixes.md`） |
 | 配置状态预设 | 主页一键保存当前完整测试配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
 | 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
+| 模块总开关（总闸） | 主页“模块状态”卡一键停用模块**所有**功能（位置/路线/摇杆/WiFi/基站/BLE/GNSS/传感器/SIM 固化），Hook 全部放行真实数据；重新开启恢复关闭前完整状态（持久化，重启保持） |
+| Hook 状态与调试报告 | 设置页展示**各作用域 Hook 点状态**（成功/失败/跳过明细，如 `system 46/46`、`com.android.phone 59/60`），一键 SAF 导出完整调试 JSON（Hook 状态 + 全引擎状态 + 配置 + Hook 层观测 + 测试报告）；检测器“导出报告”落盘完整检测报告 |
 | 隐私/外观 | 桌面图标隐藏（仅 LSPosed 入口）、地图选点 GCJ-02→WGS-84 自动转换 |
 
 ### 设计原则
 
 - **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
-- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、GMS）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。
+- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.google.android.gms`、`com.android.location.fused`、`com.oplus.location`）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。GMS 为必要系统服务（提供定位/位置服务），与 VirtualRegion 的 GMS 处理对照见 `docs/reverse/virtualregion-gms-hook-comparison.md`。
 - **API 保密**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开，不暴露接口存在。
 - **fail-open**：任何 Hook 点异常时放行原始逻辑，避免影响宿主稳定性。
 
