@@ -1428,22 +1428,66 @@ class SettingsFragment : Fragment() {
         return if (results[0] <= tolerance) Verdict.PASS else Verdict.FAIL
     }
 
-    /** 基站判定：配置 entries（mcc/mnc/tac/ci）在 App 读到文本中出现。 */
+    /** 基站判定：按配置 entries 逐条匹配 App 读到文本（支持空配置=0 基站）。 */
     private fun judgeCell(): Verdict {
         val data = envData("cell") ?: return Verdict.NOT_ENABLED
         val entries = data.optJSONArray("entries") ?: return Verdict.FAIL
-        if (entries.length() == 0) return Verdict.FAIL
+        if (entries.length() == 0) {
+            // 空基站配置合法：App 读到 0 基站（无基站/空列表）才算通过
+            return if (lastCellText.contains("无基站") || lastCellText.isBlank()) Verdict.PASS else Verdict.FAIL
+        }
         for (i in 0 until entries.length()) {
             val e = entries.optJSONObject(i) ?: continue
             val mcc = e.optInt("mcc", -1)
             val mnc = e.optInt("mnc", -1)
-            val tac = e.optLong("tac", -1L)
-            val ci = e.optLong("ci", -1L)
+            val type = e.optString("type", "LTE").uppercase()
             if (mcc >= 0 && mnc >= 0 &&
                 lastCellText.contains("mcc=$mcc") && lastCellText.contains("mnc=$mnc")
             ) {
-                if (tac < 0 || ci < 0) return Verdict.PASS
-                if (lastCellText.contains("tac=$tac") && lastCellText.contains("ci=$ci")) {
+                val hit = when (type) {
+                    "NR" -> {
+                        val nci = e.optLong("nci", -1L)
+                        if (nci < 0) true
+                        else lastCellText.contains("nci=$nci")
+                    }
+                    "GSM", "WCDMA" -> {
+                        val cid = e.optLong("cid", -1L)
+                        val lac = e.optLong("lac", -1L)
+                        if (cid < 0 && lac < 0) true
+                        else (cid < 0 || lastCellText.contains("cid=$cid")) &&
+                            (lac < 0 || lastCellText.contains("lac=$lac"))
+                    }
+                    "CDMA" -> {
+                        val sid = e.optInt("sid", -1)
+                        val nid = e.optInt("nid", -1)
+                        val bid = e.optInt("bid", -1)
+                        if (sid < 0 && nid < 0 && bid < 0) true
+                        else (sid < 0 || lastCellText.contains("sid=$sid")) &&
+                            (nid < 0 || lastCellText.contains("nid=$nid")) &&
+                            (bid < 0 || lastCellText.contains("bid=$bid"))
+                    }
+                    else -> {
+                        val tac = e.optLong("tac", -1L)
+                        val ci = e.optLong("ci", -1L)
+                        if (tac < 0 && ci < 0) true
+                        else (tac < 0 || lastCellText.contains("tac=$tac")) &&
+                            (ci < 0 || lastCellText.contains("ci=$ci"))
+                    }
+                }
+                if (hit) {
+                    // 可选新字段：配置了才校验（earfcn/psc/bsic 等）
+                    if (e.has("earfcn") && e.optInt("earfcn") >= 0 &&
+                        !lastCellText.contains("earfcn=${e.optInt("earfcn")}")
+                    ) return Verdict.FAIL
+                    if (e.has("psc") && e.optInt("psc") >= 0 &&
+                        !lastCellText.contains("psc=${e.optInt("psc")}")
+                    ) return Verdict.FAIL
+                    if (e.has("bsic") && e.optInt("bsic") >= 0 &&
+                        !lastCellText.contains("bsic=${e.optInt("bsic")}")
+                    ) return Verdict.FAIL
+                    if (e.has("nrArfcn") && e.optInt("nrArfcn") >= 0 &&
+                        !lastCellText.contains("nrArfcn=${e.optInt("nrArfcn")}")
+                    ) return Verdict.FAIL
                     return Verdict.PASS
                 }
             }
@@ -1530,6 +1574,27 @@ class SettingsFragment : Fragment() {
             "\ntime=" + loc.time
     }
 
+    /** int 哨兵值（Integer.MAX_VALUE）显示为 unavail。 */
+    private fun fmtInt(v: Int?): String {
+        if (v == null || v == Int.MAX_VALUE || v == Integer.MAX_VALUE) return "unavail"
+        return v.toString()
+    }
+
+    /** long 哨兵值（Long.MAX_VALUE / CellInfo.UNAVAILABLE_LONG）显示为 unavail。 */
+    private fun fmtLong(v: Long): String {
+        if (v == Long.MAX_VALUE || v == 2147483647L) return "unavail"
+        return v.toString()
+    }
+
+    /** 反射读取 int getter（不同 ROM/API 隐藏方法兼容），失败返回 null。 */
+    private fun reflectCellInt(target: Any, methodName: String): Int? {
+        return try {
+            target.javaClass.getMethod(methodName).invoke(target) as? Int
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     @android.annotation.SuppressLint("MissingPermission", "NewApi")
     private fun buildCellText(): String {
         val tm = telephonyManager ?: return "TelephonyManager 不可用"
@@ -1545,45 +1610,77 @@ class SettingsFragment : Fragment() {
             when (info) {
                 is CellInfoLte -> {
                     val id = info.cellIdentity
+                    val sig = info.cellSignalStrength
                     sb.append("LTE mcc=").append(id.mcc)
                         .append(" mnc=").append(id.mnc)
-                        .append(" tac=").append(id.tac)
-                        .append(" ci=").append(id.ci)
-                        .append(" pci=").append(id.pci)
-                        .append(" rsrp=").append(info.cellSignalStrength?.dbm).append("\n")
+                        .append(" tac=").append(fmtInt(id.tac))
+                        .append(" ci=").append(fmtLong(id.ci.toLong()))
+                        .append(" pci=").append(fmtInt(id.pci))
+                    reflectCellInt(id, "getEarfcn")?.let { if (it >= 0) sb.append(" earfcn=").append(it) }
+                    if (sig != null) {
+                        sb.append(" rsrp=").append(fmtInt(reflectCellInt(sig, "getRsrp")))
+                        sb.append(" rsrq=").append(fmtInt(reflectCellInt(sig, "getRsrq")))
+                        sb.append(" sinr=").append(fmtInt(reflectCellInt(sig, "getRssnr")))
+                        sb.append(" ta=").append(fmtInt(reflectCellInt(sig, "getTimingAdvance")))
+                    }
+                    sb.append("\n")
                 }
                 is CellInfoNr -> {
                     val id = info.cellIdentity as? android.telephony.CellIdentityNr
+                    val sig = info.cellSignalStrength
                     sb.append("NR")
                     if (id != null) {
                         sb.append(" mcc=").append(id.mccString)
                             .append(" mnc=").append(id.mncString)
-                            .append(" tac=").append(id.tac)
-                            .append(" nci=").append(id.nci)
+                            .append(" tac=").append(fmtInt(id.tac))
+                            .append(" nci=").append(fmtLong(id.nci))
+                            .append(" pci=").append(fmtInt(id.pci))
+                        reflectCellInt(id, "getNrArfcn")?.let { if (it >= 0) sb.append(" nrArfcn=").append(it) }
                     }
-                    sb.append(" ss=").append(info.cellSignalStrength?.dbm).append("\n")
+                    if (sig != null) {
+                        sb.append(" ssRsrp=").append(fmtInt(reflectCellInt(sig, "getSsRsrp")))
+                        sb.append(" ssRsrq=").append(fmtInt(reflectCellInt(sig, "getSsRsrq")))
+                        sb.append(" ssSinr=").append(fmtInt(reflectCellInt(sig, "getSsSinr")))
+                    }
+                    sb.append("\n")
                 }
                 is CellInfoGsm -> {
                     val id = info.cellIdentity
+                    val sig = info.cellSignalStrength
                     sb.append("GSM mcc=").append(id.mcc)
                         .append(" mnc=").append(id.mnc)
-                        .append(" lac=").append(id.lac)
-                        .append(" cid=").append(id.cid)
-                        .append(" asu=").append(info.cellSignalStrength?.asuLevel).append("\n")
+                        .append(" lac=").append(fmtInt(id.lac))
+                        .append(" cid=").append(fmtInt(id.cid))
+                    reflectCellInt(id, "getBsic")?.let { if (it >= 0) sb.append(" bsic=").append(it) }
+                    if (sig != null) {
+                        sb.append(" rssi=").append(fmtInt(reflectCellInt(sig, "getDbm")))
+                        sb.append(" ta=").append(fmtInt(reflectCellInt(sig, "getTimingAdvance")))
+                    }
+                    sb.append("\n")
                 }
                 is CellInfoCdma -> {
                     val id = info.cellIdentity
                     sb.append("CDMA lat=").append(id.latitude)
                         .append(" lon=").append(id.longitude)
-                        .append("\n")
+                    reflectCellInt(id, "getSid")?.let { if (it >= 0) sb.append(" sid=").append(it) }
+                    reflectCellInt(id, "getNid")?.let { if (it >= 0) sb.append(" nid=").append(it) }
+                    reflectCellInt(id, "getBid")?.let { if (it >= 0) sb.append(" bid=").append(it) }
+                    sb.append("\n")
                 }
                 is CellInfoWcdma -> {
                     val id = info.cellIdentity
+                    val sig = info.cellSignalStrength
                     sb.append("WCDMA mcc=").append(id.mcc)
                         .append(" mnc=").append(id.mnc)
-                        .append(" lac=").append(id.lac)
-                        .append(" cid=").append(id.cid)
-                        .append(" asu=").append(info.cellSignalStrength?.asuLevel).append("\n")
+                        .append(" lac=").append(fmtInt(id.lac))
+                        .append(" cid=").append(fmtInt(id.cid))
+                    reflectCellInt(id, "getPsc")?.let { if (it >= 0) sb.append(" psc=").append(it) }
+                    if (sig != null) {
+                        sb.append(" rssi=").append(fmtInt(reflectCellInt(sig, "getDbm")))
+                        sb.append(" rscp=").append(fmtInt(reflectCellInt(sig, "getRscp")))
+                        sb.append(" ecno=").append(fmtInt(reflectCellInt(sig, "getEcNo")))
+                    }
+                    sb.append("\n")
                 }
                 else -> sb.append(info.javaClass.simpleName).append("\n")
             }
