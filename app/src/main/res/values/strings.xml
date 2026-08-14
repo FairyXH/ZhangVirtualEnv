@@ -384,7 +384,7 @@
 
     <!-- Env -->
     <string name="env_title">环境模拟</string>
-    <string name="env_subtitle">基站 / WiFi / 蓝牙 / 传感器 / GNSS 环境模拟入口</string>
+    <string name="env_subtitle">设备环境信息模拟</string>
     <string name="env_pending">待开发</string>
     <string name="env_status_active">使用中</string>
     <string name="env_status_inactive">未使用</string>
