@@ -263,7 +263,8 @@ class SettingsFragment : Fragment() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val name = result.scanRecord?.deviceName ?: device.name ?: "(no name)"
-            val line = "${name} ${device.address} ${result.rssi}dBm"
+            val rawHex = result.scanRecord?.bytes?.take(16)?.joinToString("") { "%02X".format(it) }
+            val line = "${name} ${device.address} ${result.rssi}dBm" + (if (!rawHex.isNullOrEmpty()) " raw=$rawHex" else "")
             synchronized(bleFound) {
                 bleFound[device.address] = line
                 while (bleFound.size > BLE_RESULTS_LIMIT) {
@@ -1559,6 +1560,12 @@ class SettingsFragment : Fragment() {
             val bssid = n.optString("bssid", "").uppercase()
             if (ssid.isNotEmpty() && lastWifiText.contains(ssid)) return Verdict.PASS
             if (bssid.isNotEmpty() && lastWifiText.contains(bssid)) return Verdict.PASS
+            // 已连接状态：条目 connected=true 时要求检测文本出现 [已连接] + 同 ssid/bssid
+            if (n.optBoolean("connected", false)) {
+                if (!lastWifiText.contains("[已连接]")) return Verdict.FAIL
+                if (ssid.isNotEmpty() && lastWifiText.contains(ssid)) return Verdict.PASS
+                if (bssid.isNotEmpty() && lastWifiText.contains(bssid)) return Verdict.PASS
+            }
         }
         return Verdict.FAIL
     }
@@ -1760,8 +1767,21 @@ class SettingsFragment : Fragment() {
         } catch (t: Throwable) {
             return "读取失败: ${t.message}"
         }
-        if (results.isEmpty()) return "无 WiFi 结果（虚拟 WiFi 未启用或未扫描）"
+        if (results.isEmpty() && wm.connectionInfo?.ssid.isNullOrBlank()) return "无 WiFi 结果（虚拟 WiFi 未启用或未扫描）"
         val sb = StringBuilder()
+        // 已连接状态（虚拟 WiFi 已连接模拟时 connectionInfo 返回 COMPLETED/IP）
+        try {
+            val conn = wm.connectionInfo
+            if (conn != null && !conn.ssid.isNullOrBlank()) {
+                sb.append("[已连接] ").append(conn.ssid?.removeSurrounding("\"")).append(" ").append(conn.bssid)
+                    .append(" ").append(conn.rssi).append("dBm")
+                    .append(" ").append(conn.linkSpeed).append("Mbps")
+                    .append(" ").append(conn.supplicantState?.name)
+                    .append(" ").append(android.text.format.Formatter.formatIpAddress(conn.ipAddress))
+                    .append("\n")
+            }
+        } catch (_: Throwable) {
+        }
         results.sortedByDescending { it.level }.take(10).forEach { r ->
             val ssid = r.SSID.ifEmpty { "(hidden)" }
             sb.append(ssid).append(" ").append(r.BSSID)
