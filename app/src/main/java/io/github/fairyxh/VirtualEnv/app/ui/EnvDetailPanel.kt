@@ -137,6 +137,8 @@ fun EnvDetailPanel(
     var wifiConnected by remember { mutableStateOf(false) }
     var wifiLinkSpeed by remember { mutableStateOf("") }
     var wifiIp by remember { mutableStateOf("") }
+    /** 「从已保存 WiFi 选择」展开状态。 */
+    var wifiPickExpanded by remember { mutableStateOf(false) }
     var bleName by remember { mutableStateOf("") }
     var bleAddress by remember { mutableStateOf("") }
     var bleRssi by remember { mutableStateOf("") }
@@ -800,6 +802,29 @@ fun EnvDetailPanel(
         }
     }
 
+    /** 从已保存 WiFi 快照加载网络列表到当前条目（替换当前 WiFi 条目）。 */
+    fun loadWifiFromSaved(item: JSONObject) {
+        val data = item.optJSONObject("data") ?: return
+        val networks = data.optJSONArray("networks") ?: return
+        if (networks.length() == 0) return
+        entries.clear()
+        for (i in 0 until networks.length()) {
+            val n = networks.optJSONObject(i) ?: continue
+            entries.add(JSONObject().apply {
+                put("ssid", n.optString("ssid", ""))
+                put("bssid", n.optString("bssid", ""))
+                put("rssi", n.optInt("rssi", -60))
+                put("frequency", n.optInt("frequency", 2412))
+                if (n.optBoolean("connected", false)) {
+                    put("connected", true)
+                    n.optInt("linkSpeed", 0).takeIf { it > 0 }?.let { put("linkSpeed", it) }
+                    n.optString("ipAddress", "").takeIf { it.isNotBlank() }?.let { put("ipAddress", it) }
+                }
+            })
+        }
+        toast("已从「${item.optString("name", "")}」加载 ${entries.size} 个 WiFi 网络")
+    }
+
     /** 一键使用 = 切换到该配置（Hook 层随即生效）。 */
     fun useConfig(item: JSONObject) {
         val id = item.optLong("id")
@@ -1138,7 +1163,61 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
-                                RandomButtonRow(fragment, backdrop) { randomFillForm() }
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    RandomButtonRow(fragment, backdrop) { randomFillForm() }
+                                    GlassPill(
+                                        onClick = { wifiPickExpanded = !wifiPickExpanded },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.padding(start = 8.dp),
+                                        selected = wifiPickExpanded,
+                                        containerColor = if (wifiPickExpanded) colors.accent.copy(alpha = 0.18f)
+                                        else colors.bgTertiary.copy(alpha = 0.3f),
+                                        height = 36.dp
+                                    ) {
+                                        BasicText(
+                                            "从已保存 WiFi 选择",
+                                            Modifier.padding(horizontal = 10.dp),
+                                            style = TextStyle(
+                                                color = if (wifiPickExpanded) colors.accent else colors.textPrimary,
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                    }
+                                }
+                                if (wifiPickExpanded) {
+                                    val wifiSaved = savedItems.filter { it.optString("type") == TYPE_WIFI }
+                                    if (wifiSaved.isEmpty()) {
+                                        BasicText(
+                                            "暂无已保存 WiFi 配置（先在上方保存一条）",
+                                            Modifier.padding(top = 8.dp),
+                                            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                        )
+                                    }
+                                    wifiSaved.forEach { item ->
+                                        val data = item.optJSONObject("data")
+                                        val networks = data?.optJSONArray("networks")?.length() ?: 0
+                                        GlassPill(
+                                            onClick = {
+                                                loadWifiFromSaved(item)
+                                                wifiPickExpanded = false
+                                            },
+                                            backdrop = backdrop,
+                                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                            selected = false,
+                                            containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                            height = 36.dp
+                                        ) {
+                                            BasicText(
+                                                item.optString("name", "未命名") + "（$networks 个网络）",
+                                                Modifier.padding(horizontal = 12.dp),
+                                                style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                            )
+                                        }
+                                    }
+                                }
                                 EntryFormField("ssid", wifiSsid, { wifiSsid = it }, fragment.getString(R.string.env_wifi_ssid_hint), backdrop)
                                 EntryFormField("bssid", wifiBssid, { wifiBssid = it }, fragment.getString(R.string.env_wifi_bssid_hint), backdrop)
                                 EntryFormField("rssi", wifiRssi, { wifiRssi = it }, fragment.getString(R.string.env_wifi_rssi_hint), backdrop)
