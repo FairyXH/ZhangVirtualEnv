@@ -154,7 +154,7 @@ class FrameworkEnvHookAdapter(
                     ZLog.d(TAG_SCOPE, "getAllCellInfo -> empty (0 cells configured)")
                     emptyList()
                 } else {
-                    VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
+                    VirtualCellFactory.buildCellInfoList(virtual, cache.locationLat(), cache.locationLon()).ifEmpty {
                         // 配置非空但构建为空：回退带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
                         listOfNotNull(
                             VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())

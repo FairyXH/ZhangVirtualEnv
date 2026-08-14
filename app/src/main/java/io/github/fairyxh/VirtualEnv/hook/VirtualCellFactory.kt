@@ -110,7 +110,7 @@ object VirtualCellFactory {
     // ---------- 按 cell 配置构建对应类型虚拟基站（LTE/GSM/NR/WCDMA，App 层与 phone 栈共用） ----------
 
     /** 兼容两种数据键：采集包用 cells[]，环境模拟配置页用 entries[]。 */
-    fun buildCellInfoList(data: org.json.JSONObject): List<Any> {
+    fun buildCellInfoList(data: org.json.JSONObject, defaultLat: Double = 0.0, defaultLon: Double = 0.0): List<Any> {
         val cells = data.optJSONArray("cells") ?: data.optJSONArray("entries") ?: return emptyList()
         val result = mutableListOf<Any>()
         for (i in 0 until cells.length()) {
@@ -122,7 +122,7 @@ object VirtualCellFactory {
                     "NR" -> buildNrCell(c)?.let { result.add(it) }
                     "WCDMA" -> buildWcdmaCell(c)?.let { result.add(it) }
                     "UMTS" -> buildWcdmaCell(c)?.let { result.add(it) }
-                    "CDMA" -> buildCdmaCell(c)?.let { result.add(it) }
+                    "CDMA" -> buildCdmaCell(c, defaultLat, defaultLon)?.let { result.add(it) }
                     "" -> buildLteCell(c)?.let { result.add(it) } // 缺省按 LTE
                 }
             } catch (t: Throwable) {
@@ -136,14 +136,15 @@ object VirtualCellFactory {
      * 构建显式 CDMA 小区（用户配置 sid/nid/bid + 经纬度 + 信号）。
      * 与自动 fallback 的区别：使用配置的 sid/nid/bid，不再从坐标派生。
      */
-    fun buildCdmaCell(c: org.json.JSONObject): Any? {
+    fun buildCdmaCell(c: org.json.JSONObject, defaultLat: Double = 0.0, defaultLon: Double = 0.0): Any? {
         return try {
             val infoClass = Class.forName(CELL_INFO_CDMA)
             val identityClass = Class.forName(CELL_IDENTITY_CDMA)
             val signalClass = Class.forName(CELL_SIGNAL_CDMA)
-            // 经纬度：配置显式坐标优先，缺失时用虚拟位置（调用方已传入？这里由 cache 侧填 lat/lon）
-            val lat = c.optDouble("lat", c.optDouble("_cellLat", 0.0))
-            val lon = c.optDouble("lon", c.optDouble("_cellLon", 0.0))
+            // 经纬度：配置显式坐标优先（lat/lon 与 latitude/longitude 两套键都兼容），
+            // 缺失时回退虚拟位置坐标，避免 CDMA 被构造成 (0,0) 让网络定位反算到几内亚湾。
+            val lat = coord(c, defaultLat, "lat", "latitude", "_cellLat")
+            val lon = coord(c, defaultLon, "lon", "longitude", "_cellLon")
             val nid = sanitizeInt(c, "nid", 1, 65534, 1)
             val sid = sanitizeInt(c, "sid", 1, 65534, 1)
             val bid = sanitizeInt(c, "bid", 1, 65534, 1)
@@ -417,6 +418,16 @@ object VirtualCellFactory {
     // ---------- 数值消毒 ----------
 
     private const val MAX_NCI = 68719476735L // 2^36-1，CellIdentityNr.MAX_NCI
+
+    /** 读取坐标字段（兼容 lat/lon 与 latitude/longitude 两套键），缺失/非法回退默认值。 */
+    private fun coord(c: org.json.JSONObject, default: Double, vararg keys: String): Double {
+        for (k in keys) {
+            if (!c.has(k)) continue
+            val v = c.optDouble(k, Double.NaN)
+            if (!v.isNaN()) return v
+        }
+        return default
+    }
 
     /** 读配置 int 并夹到合法范围；缺失/非法时返回 [defaultValue]。 */
     private fun sanitizeInt(c: org.json.JSONObject, key: String, min: Int, max: Int, defaultValue: Int = min): Int {

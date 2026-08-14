@@ -101,7 +101,7 @@ class RilDefensiveHookAdapter(
         var hooked = 0
         // 基站：requestCellInfoUpdate / requestCellInfoList / getCellInfoList 等
         hooked += hookByMethodName(clazz, "CellInfo", { cache.currentCell() }) { data ->
-            val list = VirtualCellFactory.buildCellInfoList(data)
+            val list = VirtualCellFactory.buildCellInfoList(data, cache.locationLat(), cache.locationLon())
             if (list.isEmpty()) null else ArrayList(list)
         }
         // 信号强度：requestSignalStrength / requestCurrentSignalStrength 等

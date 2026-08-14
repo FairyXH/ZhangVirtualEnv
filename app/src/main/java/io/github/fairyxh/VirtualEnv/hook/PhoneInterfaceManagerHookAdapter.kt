@@ -108,7 +108,7 @@ class PhoneInterfaceManagerHookAdapter(
             return emptyList()
         }
         try {
-            val list = VirtualCellFactory.buildCellInfoList(cellData)
+            val list = VirtualCellFactory.buildCellInfoList(cellData, cache.locationLat(), cache.locationLon())
             if (list.isNotEmpty()) return list
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "requestCellInfoUpdate config build failed, fallback cdma", t)
@@ -161,7 +161,7 @@ class PhoneInterfaceManagerHookAdapter(
                 return@register emptyList<Any>()
             }
             try {
-                val list = VirtualCellFactory.buildCellInfoList(cellData)
+                val list = VirtualCellFactory.buildCellInfoList(cellData, cache.locationLat(), cache.locationLon())
                 if (list.isNotEmpty()) {
                     logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> virtual ${list.size} cells from config")
                     return@register list
