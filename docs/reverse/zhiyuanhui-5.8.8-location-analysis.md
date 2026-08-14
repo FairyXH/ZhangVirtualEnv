@@ -114,3 +114,56 @@ isBaiduLocService reflect failed: No field name in class android.content.pm.Serv
 - 三个调用方（`FrameworkEnvHookAdapter`、`PhoneInterfaceManagerHookAdapter`、
   `RilDefensiveHookAdapter`）统一传入 `cache.locationLat()/locationLon()`。
 
+## 7. 第三轮修复（mAllowStart 放行后仍不启动）
+
+`forceAllowStart` 改写 `PROC_STATE_TOP(12)` 后，`com.baidu.location.f` 的
+`mAllowStart_*`/`mAllowWiu_*` 全部变成 `PROC_STATE_TOP`（放行生效），但
+`com.zzw.october:remote` 进程仍未启动，`app=null`，`bringUpServiceLocked` hook 不命中。
+
+JADX 逆向 `services.jar` 的 `bringUpServiceInnerLocked` 发现**另一个独立拦截点**：
+
+```java
+if (mActiveServicesExt.interceptBringUpServices(r, mAm, callingUid, callingPid)) {
+    bringDownServiceLocked(r, enqueueOomAdj);
+    return null;   // 服务进程不启动
+}
+```
+
+`mActiveServicesExt` 的实际实现是 `oplus-services.jar` 里的
+`com.android.server.am.ActiveServicesExtImpl`：
+
+```java
+public boolean interceptBringUpServices(ServiceRecord sr, ActivityManagerService ams,
+        int callingUid, int callingPid) {
+    if (((IOplusAppStartupManager) OplusFeatureCache.get(IOplusAppStartupManager.DEFAULT))
+            .validStartProcess(sr.packageName, sr.userId, "service")) {
+        return true;   // 拦截
+    }
+    return false;
+}
+```
+
+而 `OplusAppStartupManager.validStartProcess(pkg, userId, type)`：
+
+```java
+if (!"activity".equals(type) && mOplusStartupStrategy.isPackageRestricted(pkg)) {
+    if (!OplusAppStartupConfig.getInstance().getmStartInfoWhiteList().contains(pkg)) {
+        return true;   // 未加入自启动白名单 → 拦截
+    }
+}
+```
+
+即 ColorOS 的**自启动管理**：志愿汇 `isPackageRestricted` 且不在
+`getmStartInfoWhiteList()`，其 `:remote` 服务进程被禁止启动。
+
+### 7.1 修复
+
+新增 Hook `ActiveServicesExtImpl.interceptBringUpServices`，对百度定位服务
+（`com.baidu.location.f`）直接返回 `false`（放行），其余服务维持原始行为
+（fail-open）。这是 ColorOS 自启动管理的真正拦截点，与 `mAllowStart`（FGS 限制）
+是两个独立门槛，必须同时绕过。
+
+同时 `forceAllowStart` 仍写 `12`（`PROC_STATE_TOP`），覆盖 `mAllowStart_*` 与
+`mAllowWiu_*` 共 6 个字段。
+
+
