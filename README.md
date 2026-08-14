@@ -67,7 +67,7 @@ Users are responsible for their own usage.
 | 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动；**摇杆松手保留当前位置**（不溜回原点），斜向移动经方向平滑 + 注入频率对齐（摇杆启用时 fix/push 加速至 ~200-250ms）后顺滑无锯齿；**随机抖动可在设置页关闭**（`/api/settings/jitter`） |
 | 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | OpenCellID 基站数据库 | BYOK 模式接入 OpenCellID：设置页填写/测试 API Key（明文显示，与高德 Key 一致；仅日志脱敏）；**CSV 离线数据库**支持导入多个 OpenCellID 官方下载 CSV（如 460.csv，行偏移+网格索引随机读行，无需 API Key），查询模式三选一：**离线 / 在线 / 混合（离线优先，无结果自动转在线）**；位置页**可收起「基站查询」卡片**按当前选点查询附近基站（BBOX 面积受限自动分片拼接 + Haversine 二次过滤 + 结果分页/经纬度/估算信号），一键保存到基站模拟（信号强度由距离/覆盖半径/样本数算法估算）；可选**为 OpenCellID 社区贡献真实测量数据**（默认关闭：一键采集结果下方显示上传结果；**录像持续采集出现新基站自动实时上传**，会话级去重；仅挂起窗口内的真实观测，虚拟数据严禁上传；详见 `docs/reverse/opencellid-integration.md`） |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
+| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）；志愿汇 5.8.8 内置百度定位服务的 Oplus 启动限制适配见 `docs/reverse/zhiyuanhui-5.8.8-location-analysis.md` |
 | 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
 | 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（仿泡泡虚拟定位）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，百度地图摇杆移动实时生效（详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`） |
 | 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配百度地图等严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
@@ -88,6 +88,7 @@ Users are responsible for their own usage.
 
 - **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
 - **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.google.android.gms`、`com.android.location.fused`、`com.oplus.location`）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。GMS 为必要系统服务（提供定位/位置服务），与 VirtualRegion 的 GMS 处理对照见 `docs/reverse/virtualregion-gms-hook-comparison.md`。
+- **志愿汇适配仍是系统层**：志愿汇包 `com.zzw.october` 内置 `com.baidu.location.f`，Oplus 启动限制 Hook 按服务组件类名匹配并在 `system_server` 放行，不把志愿汇或任何第三方应用加入 `scope.list`。
 - **API 保密**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开，不暴露接口存在。
 - **fail-open**：任何 Hook 点异常时放行原始逻辑，避免影响宿主稳定性。
 
