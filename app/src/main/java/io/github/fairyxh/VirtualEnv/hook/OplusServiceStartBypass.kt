@@ -151,31 +151,51 @@ class OplusServiceStartBypass(
     private fun isBaiduLocService(self: Any?): Boolean {
         if (self == null) return false
         return try {
-            val pkg = self.javaClass.getDeclaredField("packageName").also { it.isAccessible = true }.get(self) as? String
-            // 优先 serviceInfo.name（ComponentName），兜底 intent component
-            val serviceInfo = self.javaClass.getDeclaredField("serviceInfo").also { it.isAccessible = true }.get(self)
+            val pkg = fieldValue(self, "packageName") as? String
+            // 组件类名优先取 intent.component（dumpsys 中 cmp=host/com.baidu.location.f），
+            // 其次 serviceInfo.name。name 继承自 PackageItemInfo，必须沿父类查找；
+            // 直接 getDeclaredField 在 ServiceInfo 上会抛 NoSuchFieldException 导致误判。
+            val intent = fieldValue(self, "intent") as? android.content.Intent
+            val cmp = intent?.component
+            if (cmp != null && cmp.className == TARGET_SERVICE) {
+                ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg (intent)")
+                return true
+            }
+            val serviceInfo = fieldValue(self, "serviceInfo")
             if (serviceInfo != null) {
                 val cn = serviceInfo as? android.content.ComponentName
                 if (cn != null && cn.className == TARGET_SERVICE) {
-                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
+                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg (component)")
                     return true
                 }
-                val name = serviceInfo.javaClass.getDeclaredField("name").also { it.isAccessible = true }.get(serviceInfo) as? String
+                val name = fieldValue(serviceInfo, "name") as? String
                 if (name == TARGET_SERVICE) {
-                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
+                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg (serviceInfo.name)")
                     return true
                 }
             }
-            val intent = self.javaClass.getDeclaredField("intent").also { it.isAccessible = true }.get(self) as? android.content.Intent
-            if (intent?.component?.className == TARGET_SERVICE) {
-                ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
-                true
-            } else {
-                false
-            }
+            false
         } catch (t: Throwable) {
             ZLog.d(TAG_SCOPE, "isBaiduLocService reflect failed: ${t.message}")
             false
         }
+    }
+
+    /** 沿类继承链向上查找字段（覆盖父类声明字段，如 ServiceInfo.name 声明在 PackageItemInfo）。 */
+    private fun fieldValue(obj: Any, name: String): Any? {
+        var cls: Class<*>? = obj.javaClass
+        while (cls != null) {
+            try {
+                val f = cls.getDeclaredField(name)
+                f.isAccessible = true
+                return f.get(obj)
+            } catch (_: NoSuchFieldException) {
+                cls = cls.superclass
+            } catch (t: Throwable) {
+                ZLog.d(TAG_SCOPE, "fieldValue $name failed: ${t.message}")
+                return null
+            }
+        }
+        return null
     }
 }
