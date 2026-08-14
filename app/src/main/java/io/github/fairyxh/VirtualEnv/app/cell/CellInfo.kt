@@ -60,6 +60,13 @@ data class CellInfo(
         return haversineMeters(latitude, longitude, otherLat, otherLon)
     }
 
+    /** 小区身份键（跨分片去重用）。 */
+    fun dedupeKey(): String {
+        return listOf(
+            radio, mcc, mnc, lac, tac, cellId ?: cid, pci
+        ).joinToString("|")
+    }
+
     /** 显示用摘要：radio + MCC/MNC/LAC/TAC + CID。 */
     fun summary(): String {
         val radioStr = radio ?: "?"

@@ -10,6 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlin.math.ceil
 import kotlin.math.cos
 
 /**
@@ -27,6 +28,11 @@ object OpenCellIdApi {
     private const val CONNECT_TIMEOUT_MS = 10000
     private const val READ_TIMEOUT_MS = 20000
     private const val MAX_UPLOAD_BATCH = 50
+
+    /** 单片 BBOX 边长（米）：面积约 3.24 km²，低于服务端 4,000,000 m² 限制，留安全余量。 */
+    private const val TILE_METERS = 1800
+    /** 分片总数上限：超过说明查询范围过大，拒绝（约支持半径 4.5km 内）。 */
+    private const val MAX_TILES = 25
 
     /** 用户可读错误。 */
     class ApiFailure(
@@ -59,53 +65,71 @@ object OpenCellIdApi {
         limit: Int = DEFAULT_LIMIT
     ): Result<List<CellInfo>> {
         if (apiKey.isBlank()) return Result.failure(ApiFailure("请先在设置中填写 OpenCellID API Key"))
-        val bbox = bboxFor(latitude, longitude, radiusMeters)
-
-        val query = StringBuilder("key=").append(urlEncode(apiKey))
-            // BBOX 逗号分隔：逗号在 query 中合法，不 URL 编码（编码 %2C 可能被部分服务端原样解析）
-            .append("&BBOX=").append(bbox)
-            .append("&limit=").append(limit.coerceIn(1, DEFAULT_LIMIT))
-            .append("&format=json")
-        radio?.takeIf { it.isNotBlank() }?.let { query.append("&radio=").append(urlEncode(it.uppercase())) }
-        mcc?.takeIf { it >= 0 }?.let { query.append("&mcc=").append(it) }
-        mnc?.takeIf { it >= 0 }?.let { query.append("&mnc=").append(it) }
-        lac?.takeIf { it >= 0 }?.let { query.append("&lac=").append(it) }
-
-        val resp = get("$BASE_URL/cell/getInArea?$query")
-            ?: return Result.failure(ApiFailure("OpenCellID 服务暂时不可用"))
-        if (resp.httpCode !in 200..299) {
-            val failure = mapHttp(resp.httpCode, parseBodySafe(resp.body))
-            ZLog.w(
-                TAG_SCOPE,
-                "getInArea failed http=${resp.httpCode} bbox=$bbox radio=$radio mcc=$mcc mnc=$mnc lac=$lac " +
-                    "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
-            )
+        // BBOX 面积限制（服务端实测：单次 ≤ 4,000,000 m²，约 2km×2km）。
+        // 目标范围超限时按网格分片逐片查询后合并。
+        val tiles = bboxTiles(latitude, longitude, radiusMeters)
+        if (tiles.isEmpty()) {
+            val failure = ApiFailure("查询范围过大，请缩小查询半径（单次在线查询约支持半径 4.5km 内）")
+            ZLog.w(TAG_SCOPE, "getInArea rejected radius=$radiusMeters -> ${failure.message}")
             return Result.failure(failure)
         }
-        val body = resp.body ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
-        val parsed = parseBody(body) ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
-        // OpenCellID 对无效 Key / 权限不足等错误也返回 HTTP 200，错误在 body：{"error":"...","code":N}
-        parseApiError(parsed, resp.httpCode)?.let { failure ->
-            ZLog.w(
-                TAG_SCOPE,
-                "getInArea business error code=${failure.code} bbox=$bbox radio=$radio mcc=$mcc mnc=$mnc lac=$lac " +
-                    "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
-            )
-            return Result.failure(failure)
-        }
-        val cellsArr = parsed.optJSONArray("cells") ?: JSONArray()
-        val cells = mutableListOf<CellInfo>()
-        for (i in 0 until cellsArr.length()) {
-            val obj = cellsArr.optJSONObject(i) ?: continue
-            val cell = CellInfo.fromJson(obj)
-            if (cell.latitude == 0.0 && cell.longitude == 0.0) continue
-            // BBOX 是矩形，再按真实距离过滤，保证 radius 语义
-            if (cell.distanceMeters(latitude, longitude) <= radiusMeters) {
-                cells.add(cell)
+        ZLog.i(
+            TAG_SCOPE,
+            "getInArea radius=$radiusMeters -> ${tiles.size} tile(s) (key=${OpenCellIdSettings.logSafe(apiKey)})"
+        )
+        val all = mutableListOf<CellInfo>()
+        tiles.forEachIndexed { index, bbox ->
+            val query = StringBuilder("key=").append(urlEncode(apiKey))
+                // BBOX 逗号分隔：逗号在 query 中合法，不 URL 编码（编码 %2C 可能被部分服务端原样解析）
+                .append("&BBOX=").append(bbox)
+                .append("&limit=").append(limit.coerceIn(1, DEFAULT_LIMIT))
+                .append("&format=json")
+            radio?.takeIf { it.isNotBlank() }?.let { query.append("&radio=").append(urlEncode(it.uppercase())) }
+            mcc?.takeIf { it >= 0 }?.let { query.append("&mcc=").append(it) }
+            mnc?.takeIf { it >= 0 }?.let { query.append("&mnc=").append(it) }
+            lac?.takeIf { it >= 0 }?.let { query.append("&lac=").append(it) }
+
+            val resp = get("$BASE_URL/cell/getInArea?$query")
+                ?: return Result.failure(ApiFailure("OpenCellID 服务暂时不可用"))
+            if (resp.httpCode !in 200..299) {
+                val failure = mapHttp(resp.httpCode, parseBodySafe(resp.body))
+                ZLog.w(
+                    TAG_SCOPE,
+                    "getInArea tile[$index/$tiles.size] failed http=${resp.httpCode} bbox=$bbox " +
+                        "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
+                )
+                return Result.failure(failure)
             }
+            val body = resp.body ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
+            val parsed = parseBody(body) ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
+            // OpenCellID 对无效 Key / 权限不足等错误也返回 HTTP 200，错误在 body：{"error":"...","code":N}
+            parseApiError(parsed, resp.httpCode)?.let { failure ->
+                ZLog.w(
+                    TAG_SCOPE,
+                    "getInArea tile[$index/$tiles.size] business error code=${failure.code} bbox=$bbox " +
+                        "body=${resp.body?.take(300)} key=${OpenCellIdSettings.logSafe(apiKey)} -> ${failure.message}"
+                )
+                return Result.failure(failure)
+            }
+            val cellsArr = parsed.optJSONArray("cells") ?: JSONArray()
+            var tileCount = 0
+            for (i in 0 until cellsArr.length()) {
+                val obj = cellsArr.optJSONObject(i) ?: continue
+                val cell = CellInfo.fromJson(obj)
+                if (cell.latitude == 0.0 && cell.longitude == 0.0) continue
+                // BBOX 是矩形，再按真实距离过滤，保证 radius 语义
+                if (cell.distanceMeters(latitude, longitude) <= radiusMeters) {
+                    all.add(cell)
+                    tileCount++
+                }
+            }
+            ZLog.d(TAG_SCOPE, "getInArea tile[$index/$tiles.size] bbox=$bbox -> $tileCount cells")
         }
-        ZLog.i(TAG_SCOPE, "getInArea radius=$radiusMeters -> ${cells.size} cells (key=${OpenCellIdSettings.logSafe(apiKey)})")
-        return Result.success(cells)
+        // 分片边界可能重复命中同一小区，按小区身份去重
+        val seen = HashSet<String>()
+        val deduped = all.filter { seen.add(it.dedupeKey()) }
+        ZLog.i(TAG_SCOPE, "getInArea merged ${deduped.size} cells (raw ${all.size}) radius=$radiusMeters key=${OpenCellIdSettings.logSafe(apiKey)}")
+        return Result.success(deduped)
     }
 
     /** 测试 API Key：用小 BBOX 请求 getInArea，仅校验鉴权与配额，不返回业务数据。 */
@@ -286,18 +310,46 @@ object OpenCellIdApi {
     }
 
     /**
-     * 经纬度 + 半径 → OpenCellID BBOX（latmin,lonmin,latmax,lonmax）。
-     * 边界 clamp：纬度 ±90°、经度 ±180°，避免靠近极点/日期变更线时 BBOX 越界被服务端判参数错误（code 3）。
+     * 按 OpenCellID BBOX 面积限制（单次 ≤ 4,000,000 m²，约 2km×2km）把目标范围切分为网格分片。
+     *
+     * 单片边长 [TILE_METERS]（留安全余量），行/列向上取整，每片都是独立合法 BBOX；
+     * 半径 ≤ [TILE_METERS] 时单片即可。分片总数超 [MAX_TILES] 返回空（调用方拒绝过大范围）。
      */
-    private fun bboxFor(latitude: Double, longitude: Double, radiusMeters: Int): String {
+    private fun bboxTiles(latitude: Double, longitude: Double, radiusMeters: Int): List<String> {
         val radius = radiusMeters.coerceAtLeast(100)
-        val latDelta = radius / 111_320.0
-        val lonDelta = radius / (111_320.0 * cos(Math.toRadians(latitude)).coerceAtLeast(0.01))
-        val latMin = (latitude - latDelta).coerceIn(-90.0, 90.0)
-        val latMax = (latitude + latDelta).coerceIn(-90.0, 90.0)
-        val lonMin = (longitude - lonDelta).coerceIn(-180.0, 180.0)
-        val lonMax = (longitude + lonDelta).coerceIn(-180.0, 180.0)
-        return String.format("%.6f,%.6f,%.6f,%.6f", latMin, lonMin, latMax, lonMax)
+        val latSpanMeters = radius * 2.0
+        val latMetersPerDeg = 111_320.0
+        val lonMetersPerDeg = latMetersPerDeg * cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
+        val rows = ceil(latSpanMeters / TILE_METERS).toInt().coerceAtLeast(1)
+        val cols = ceil(latSpanMeters / TILE_METERS).toInt().coerceAtLeast(1)
+        if (rows * cols > MAX_TILES) return emptyList()
+        val latMinBase = latitude - radius / latMetersPerDeg
+        val lonMinBase = longitude - radius / lonMetersPerDeg
+        val tiles = mutableListOf<String>()
+        for (r in 0 until rows) {
+            val latMin = latMinBase + r * TILE_METERS / latMetersPerDeg
+            val latMax = minOf(
+                latMinBase + (r + 1) * TILE_METERS / latMetersPerDeg,
+                latitude + radius / latMetersPerDeg
+            )
+            for (c in 0 until cols) {
+                val lonMin = lonMinBase + c * TILE_METERS / lonMetersPerDeg
+                val lonMax = minOf(
+                    lonMinBase + (c + 1) * TILE_METERS / lonMetersPerDeg,
+                    longitude + radius / lonMetersPerDeg
+                )
+                tiles.add(
+                    String.format(
+                        "%.6f,%.6f,%.6f,%.6f",
+                        latMin.coerceIn(-90.0, 90.0),
+                        lonMin.coerceIn(-180.0, 180.0),
+                        latMax.coerceIn(-90.0, 90.0),
+                        lonMax.coerceIn(-180.0, 180.0)
+                    )
+                )
+            }
+        }
+        return tiles
     }
 
     private fun urlEncode(value: String): String = URLEncoder.encode(value, "UTF-8")
