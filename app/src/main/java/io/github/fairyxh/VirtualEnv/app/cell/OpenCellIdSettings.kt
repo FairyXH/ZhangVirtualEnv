@@ -14,6 +14,18 @@ object OpenCellIdSettings {
     private const val PREFS = "opencellid_config"
     private const val KEY_API_KEY = "api_key"
     private const val KEY_CONTRIBUTE = "contribute_enabled"
+    private const val KEY_QUERY_MODE = "query_mode"
+
+    /** 查询模式。 */
+    enum class QueryMode(val key: String) {
+        ONLINE("online"),
+        OFFLINE("offline"),
+        HYBRID("hybrid");
+
+        companion object {
+            fun fromKey(key: String?): QueryMode = entries.firstOrNull { it.key == key } ?: HYBRID
+        }
+    }
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,6 +47,14 @@ object OpenCellIdSettings {
 
     fun setContributeEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_CONTRIBUTE, enabled).apply()
+    }
+
+    /** 查询模式（默认混合：离线优先，失败转在线）。 */
+    fun getQueryMode(context: Context): QueryMode =
+        QueryMode.fromKey(prefs(context).getString(KEY_QUERY_MODE, null))
+
+    fun setQueryMode(context: Context, mode: QueryMode) {
+        prefs(context).edit().putString(KEY_QUERY_MODE, mode.key).apply()
     }
 
     /** 脱敏显示：只保留前 4 位，其余打码。 */

@@ -21,7 +21,16 @@ class CellRepository(private val context: Context) {
     private val cache = OpenCellIdCache(context)
     private val uploader = OpenCellIdUploader(context)
 
-    /** 查询附近基站（带缓存）。 */
+    /** CSV 离线数据库（支持多文件导入）。 */
+    val csvDb = CsvCellDatabase(context)
+
+    /**
+     * 查询附近基站（按设置页查询模式路由）。
+     *
+     * - OFFLINE：仅查询本地 CSV 数据库（无需 API Key）；
+     * - ONLINE：仅查询 OpenCellID API；
+     * - HYBRID：先查离线，命中返回；无结果再转在线。
+     */
     fun queryNearbyCells(
         latitude: Double,
         longitude: Double,
@@ -32,9 +41,31 @@ class CellRepository(private val context: Context) {
         lac: Int? = null,
         useCache: Boolean = true
     ): Result<List<CellInfo>> {
+        val mode = OpenCellIdSettings.getQueryMode(context)
+        val offlineCells = if (mode != OpenCellIdSettings.QueryMode.ONLINE) {
+            val cells = csvDb.queryNearby(latitude, longitude, radiusMeters)
+            filterCells(cells, radio, mcc, mnc, lac)
+        } else {
+            emptyList()
+        }
+        if (mode == OpenCellIdSettings.QueryMode.OFFLINE) {
+            val cells = CellSignalCalculator.dedupe(offlineCells, latitude, longitude)
+            return Result.success(cells)
+        }
+        if (mode == OpenCellIdSettings.QueryMode.HYBRID && offlineCells.isNotEmpty()) {
+            val cells = CellSignalCalculator.dedupe(offlineCells, latitude, longitude)
+            ZLog.i(TAG_SCOPE, "hybrid offline hit ${cells.size} cells")
+            return Result.success(cells)
+        }
+        // ONLINE 或 HYBRID 离线未命中 → API
         val apiKey = OpenCellIdSettings.getApiKey(context)
         if (apiKey.isNullOrBlank()) {
-            return Result.failure(OpenCellIdApi.ApiFailure("请先在设置中填写 OpenCellID API Key"))
+            return Result.failure(
+                OpenCellIdApi.ApiFailure(
+                    if (offlineCells.isEmpty()) "请先在设置中填写 OpenCellID API Key 或导入 CSV 数据库"
+                    else "离线数据库无结果，且未配置 OpenCellID API Key"
+                )
+            )
         }
         if (useCache) {
             cache.get(apiKey, latitude, longitude, radio, mcc, mnc, lac)?.let { cached ->
@@ -51,6 +82,21 @@ class CellRepository(private val context: Context) {
             return Result.success(cells)
         }
         return result
+    }
+
+    private fun filterCells(
+        cells: List<CellInfo>,
+        radio: String?,
+        mcc: Int?,
+        mnc: Int?,
+        lac: Int?
+    ): List<CellInfo> {
+        return cells.filter { cell ->
+            (radio == null || radio.isBlank() || cell.radio.equals(radio, ignoreCase = true)) &&
+                (mcc == null || cell.mcc == mcc) &&
+                (mnc == null || cell.mnc == mnc) &&
+                (lac == null || cell.lac == lac || cell.tac == lac)
+        }
     }
 
     /** 测试 API Key。 */

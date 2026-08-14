@@ -42,6 +42,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -51,6 +52,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +72,8 @@ import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.cell.OpenCellIdApi
 import io.github.fairyxh.VirtualEnv.app.cell.OpenCellIdSettings
+import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
+import io.github.fairyxh.VirtualEnv.app.cell.CsvCellDatabase
 import io.github.fairyxh.VirtualEnv.app.ui.glass.AppBackground
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
@@ -130,6 +134,10 @@ class SettingsFragment : Fragment() {
     private var openCellIdContribute by mutableStateOf(false)
     private var openCellIdTestStatus by mutableStateOf("")
     private var openCellIdTesting by mutableStateOf(false)
+    private var openCellIdQueryMode by mutableStateOf(OpenCellIdSettings.QueryMode.HYBRID)
+    private val openCellIdCsvDatabases = mutableStateListOf<CsvCellDatabase.DbMeta>()
+    private var openCellIdCsvImporting by mutableStateOf(false)
+    private var openCellIdCsvStatus by mutableStateOf("")
     private var launcherHidden by mutableStateOf(false)
     private var showDeveloperNotice by mutableStateOf(false)
     private var jitterEnabled by mutableStateOf(true)
@@ -711,6 +719,98 @@ class SettingsFragment : Fragment() {
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
                         }
+                        SectionLabel(getString(R.string.settings_opencellid_mode_label))
+                        Row(
+                            Modifier
+                                .padding(top = 6.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OpenCellIdModePill(
+                                text = getString(R.string.settings_opencellid_mode_offline),
+                                selected = openCellIdQueryMode == OpenCellIdSettings.QueryMode.OFFLINE,
+                                backdrop = backdrop,
+                                onClick = { fragment.changeOpenCellIdQueryMode(OpenCellIdSettings.QueryMode.OFFLINE) }
+                            )
+                            OpenCellIdModePill(
+                                text = getString(R.string.settings_opencellid_mode_online),
+                                selected = openCellIdQueryMode == OpenCellIdSettings.QueryMode.ONLINE,
+                                backdrop = backdrop,
+                                onClick = { fragment.changeOpenCellIdQueryMode(OpenCellIdSettings.QueryMode.ONLINE) }
+                            )
+                            OpenCellIdModePill(
+                                text = getString(R.string.settings_opencellid_mode_hybrid),
+                                selected = openCellIdQueryMode == OpenCellIdSettings.QueryMode.HYBRID,
+                                backdrop = backdrop,
+                                onClick = { fragment.changeOpenCellIdQueryMode(OpenCellIdSettings.QueryMode.HYBRID) }
+                            )
+                        }
+                        BasicText(
+                            getString(R.string.settings_opencellid_mode_desc),
+                            Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                        )
+                        SectionLabel(getString(R.string.settings_opencellid_csv_title))
+                        GlassButton(
+                            onClick = { fragment.importOpenCellIdCsv() },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                            isInteractive = !openCellIdCsvImporting,
+                            surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                        ) {
+                            BasicText(
+                                getString(R.string.settings_opencellid_csv_import),
+                                style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                        if (openCellIdCsvStatus.isNotEmpty()) {
+                            BasicText(
+                                openCellIdCsvStatus,
+                                Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                            )
+                        }
+                        if (openCellIdCsvDatabases.isEmpty()) {
+                            BasicText(
+                                getString(R.string.settings_opencellid_csv_empty),
+                                Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                            )
+                        } else {
+                            openCellIdCsvDatabases.forEach { db ->
+                                Row(
+                                    Modifier
+                                        .padding(top = 6.dp)
+                                        .fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        BasicText(
+                                            db.displayName,
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                        )
+                                        BasicText(
+                                            getString(R.string.settings_opencellid_csv_rows, db.rowCount),
+                                            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                                        )
+                                    }
+                                    GlassPill(
+                                        onClick = { fragment.deleteOpenCellIdCsv(db.id) },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.padding(start = 8.dp),
+                                        selected = false,
+                                        containerColor = colors.danger.copy(alpha = 0.25f),
+                                        height = 30.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.settings_opencellid_csv_delete),
+                                            Modifier.padding(horizontal = 12.dp),
+                                            style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Row(
                             Modifier
                                 .padding(top = 10.dp)
@@ -1021,6 +1121,35 @@ class SettingsFragment : Fragment() {
             Modifier.padding(top = 12.dp),
             style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
         )
+    }
+
+    @Composable
+    private fun RowScope.OpenCellIdModePill(
+        text: String,
+        selected: Boolean,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onClick: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onClick,
+            backdrop = backdrop,
+            modifier = Modifier.weight(1f),
+            selected = selected,
+            containerColor = if (selected) colors.accent.copy(alpha = 0.82f)
+            else colors.bgTertiary.copy(alpha = 0.4f),
+            height = 38.dp
+        ) {
+            BasicText(
+                text,
+                Modifier.padding(horizontal = 8.dp),
+                style = TextStyle(
+                    color = if (selected) Color.White else colors.textPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                )
+            )
+        }
     }
 
     // ---------- 环境实时测试（普通 App 视角，不 Suspend） ----------
@@ -1779,7 +1908,9 @@ class SettingsFragment : Fragment() {
         val saved = OpenCellIdSettings.getApiKey(requireContext())
         openCellIdKey = if (saved.isNullOrBlank()) "" else OpenCellIdSettings.maskKey(saved)
         openCellIdContribute = OpenCellIdSettings.isContributeEnabled(requireContext())
+        openCellIdQueryMode = OpenCellIdSettings.getQueryMode(requireContext())
         openCellIdTestStatus = ""
+        refreshOpenCellIdCsv()
     }
 
     private fun saveOpenCellIdConfig() {
@@ -1837,6 +1968,113 @@ class SettingsFragment : Fragment() {
         } catch (t: Throwable) {
             Toast.makeText(requireContext(), R.string.settings_no_browser, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    // ---------- OpenCellID CSV 离线数据库 ----------
+
+    private fun changeOpenCellIdQueryMode(mode: OpenCellIdSettings.QueryMode) {
+        if (openCellIdQueryMode == mode) return
+        openCellIdQueryMode = mode
+        OpenCellIdSettings.setQueryMode(requireContext(), mode)
+        Toast.makeText(
+            requireContext(),
+            getString(
+                when (mode) {
+                    OpenCellIdSettings.QueryMode.OFFLINE -> R.string.settings_opencellid_mode_offline_toast
+                    OpenCellIdSettings.QueryMode.ONLINE -> R.string.settings_opencellid_mode_online_toast
+                    OpenCellIdSettings.QueryMode.HYBRID -> R.string.settings_opencellid_mode_hybrid_toast
+                }
+            ),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun refreshOpenCellIdCsv() {
+        openCellIdCsvDatabases.clear()
+        openCellIdCsvDatabases.addAll(
+            CellRepository(requireContext()).csvDb.listDatabases()
+        )
+    }
+
+    private fun importOpenCellIdCsv() {
+        if (openCellIdCsvImporting) return
+        try {
+            csvImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/octet-stream", "*/*"))
+        } catch (t: Throwable) {
+            Toast.makeText(requireContext(), "无法打开文件选择器：${t.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val csvImportLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                importCsvFromUri(uri)
+            }
+        }
+
+    private fun importCsvFromUri(uri: android.net.Uri) {
+        if (openCellIdCsvImporting) return
+        openCellIdCsvImporting = true
+        openCellIdCsvStatus = getString(R.string.settings_opencellid_csv_importing)
+        val displayName = try {
+            requireContext().contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "OpenCellID CSV"
+        } catch (t: Throwable) {
+            "OpenCellID CSV"
+        }
+        Thread {
+            try {
+                val result = CellRepository(requireContext()).csvDb.importDatabase(
+                    uri, displayName,
+                    onProgress = { parsed, _ ->
+                        activity?.runOnUiThread {
+                            openCellIdCsvStatus = getString(R.string.settings_opencellid_csv_importing_rows, parsed)
+                        }
+                    }
+                )
+                activity?.runOnUiThread {
+                    openCellIdCsvImporting = false
+                    if (result.isSuccess) {
+                        val meta = result.getOrThrow()
+                        openCellIdCsvStatus = getString(R.string.settings_opencellid_csv_imported, meta.displayName, meta.rowCount)
+                        refreshOpenCellIdCsv()
+                    } else {
+                        openCellIdCsvStatus = getString(
+                            R.string.settings_opencellid_csv_import_failed,
+                            result.exceptionOrNull()?.message ?: "未知错误"
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "csv import failed", t)
+                activity?.runOnUiThread {
+                    openCellIdCsvImporting = false
+                    openCellIdCsvStatus = "导入失败：${t.message}"
+                }
+            }
+        }.start()
+    }
+
+    private fun deleteOpenCellIdCsv(id: String) {
+        Thread {
+            try {
+                CellRepository(requireContext()).csvDb.deleteDatabase(id)
+                activity?.runOnUiThread {
+                    openCellIdCsvStatus = getString(R.string.settings_opencellid_csv_deleted)
+                    refreshOpenCellIdCsv()
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "csv delete failed: ${t.message}")
+                activity?.runOnUiThread {
+                    openCellIdCsvStatus = "删除失败：${t.message}"
+                }
+            }
+        }.start()
     }
 
     // ---------- 桌面图标隐藏 ----------
