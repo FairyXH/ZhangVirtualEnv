@@ -148,6 +148,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     private val points = mutableListOf<LatLng>()
     private val markers = mutableListOf<Marker>()
+    /** 路线绘制撤销栈：每次加点压入该点（WGS-84），撤销即弹出并移除最后一点。 */
+    private val undoStack = ArrayDeque<LatLng>()
     private var polyline: Polyline? = null
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -678,6 +680,18 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                 )
                             }
                             GlassButton(
+                                onClick = { fragment.undoLastPoint() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                isInteractive = mapReady,
+                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.route_undo),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
                                 onClick = { fragment.saveRoute() },
                                 backdrop = backdrop,
                                 modifier = Modifier.weight(1f),
@@ -897,6 +911,8 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
     private fun setupMap() {
         amap?.let { map ->
             map.setOnMapClickListener { latLng -> addPoint(latLng) }
+            // 地图 POI 标注/文字会吞掉底图点击事件：POI 点击同样视为加点
+            map.setOnPOIClickListener { poi -> addPoint(poi.coordinate) }
             map.moveCamera(CameraUpdateFactory.newLatLngZoom(DEFAULT_CENTER, DEFAULT_ZOOM))
             map.uiSettings.apply {
                 isZoomControlsEnabled = true
@@ -916,7 +932,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         )
         markers.add(marker)
         // 业务层坐标统一 WGS-84（虚拟定位输出），地图显示层需要 GCJ-02
-        points.add(io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng))
+        val wgs = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(latLng)
+        points.add(wgs)
+        undoStack.addLast(wgs)
         redrawPolyline()
         drawHint = getString(R.string.route_points_count, points.size)
         ZLog.d(TAG_SCOPE, "add point ${points.size}: gcj=${latLng.latitude},${latLng.longitude}")
@@ -944,9 +962,25 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
         markers.forEach { it.remove() }
         markers.clear()
         points.clear()
+        undoStack.clear()
         polyline?.remove()
         polyline = null
         drawHint = getString(R.string.route_draw_hint)
+    }
+
+    /** 撤销最后一步绘制（可多次撤销）：移除最后一个点与其 marker。 */
+    private fun undoLastPoint() {
+        if (points.isEmpty() || markers.isEmpty() || undoStack.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.route_undo_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        undoStack.removeLast()
+        points.removeAt(points.size - 1)
+        markers.removeAt(markers.size - 1).remove()
+        redrawPolyline()
+        drawHint = getString(R.string.route_points_count, points.size)
+        Toast.makeText(requireContext(), R.string.route_undo_done, Toast.LENGTH_SHORT).show()
+        ZLog.d(TAG_SCOPE, "undo point, remaining=${points.size}")
     }
 
     private fun saveRoute() {
@@ -1190,7 +1224,7 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     // ---------- 定位 ----------
 
-    /** 定位到当前位置（高德定位 SDK，一次定位）。 */
+    /** 定位到当前位置（优先读模块当前生效位置，避免依赖高德 SDK 一次定位竞态/闪退）。 */
     private fun locateCurrentPosition() {
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -1203,6 +1237,40 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
+        // 1) 优先用模块当前生效位置（虚拟定位/路线等 Hook 层数据），不依赖高德 SDK
+        try {
+            Thread {
+                try {
+                    val result = ApiClient.getLocationStatus()
+                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                        val data = result.data ?: return@Thread
+                        val lat = data.optDouble("latitude", 0.0)
+                        val lon = data.optDouble("longitude", 0.0)
+                        if (lat != 0.0 && lon != 0.0) {
+                            val display = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(lat, lon)
+                            requireActivity().runOnUiThread {
+                                amap?.moveCamera(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(display.first, display.second), 16f)
+                                )
+                                Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
+                            }
+                            return@Thread
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+                // 2) 回退：高德 SDK 一次定位
+                locateByAmap()
+            }.start()
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "backend locate failed", t)
+            locateByAmap()
+        }
+    }
+
+    /** 高德 SDK 一次定位（原逻辑拆分，便于失败回退到系统定位）。 */
+    private fun locateByAmap() {
+        val context = requireContext()
         try {
             if (locationClient == null) {
                 locationClient = AMapLocationClient(context)

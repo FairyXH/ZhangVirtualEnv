@@ -1290,6 +1290,18 @@ class LocationSimFragment : Fragment() {
             map.setOnMapClickListener { latLng ->
                 selectOnMap(latLng)
             }
+            // 地图 POI 标注/文字会吞掉底图点击事件：POI 点击同样视为选点
+            map.setOnPOIClickListener { poi ->
+                selectOnMap(poi.coordinate)
+            }
+            // 已选 marker 点击：进入信息窗并允许点击选点（拖拽由 UI 各自处理）
+            map.setOnMarkerClickListener { marker ->
+                selectOnMap(marker.position)
+                true
+            }
+            map.setOnInfoWindowClickListener { marker ->
+                selectOnMap(marker.position)
+            }
             map.moveCamera(CameraUpdateFactory.newLatLngZoom(DEFAULT_CENTER, DEFAULT_ZOOM))
             map.uiSettings.apply {
                 isZoomControlsEnabled = true
@@ -1537,7 +1549,7 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /** 定位到当前位置并在地图上显示（失败时回退最近已知位置）。 */
+    /** 定位到当前位置并在地图上显示（优先读模块当前生效位置，失败时回退高德/系统最近已知位置）。 */
     private fun locateCurrentPosition() {
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -1550,6 +1562,44 @@ class LocationSimFragment : Fragment() {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
+        // 1) 优先用模块当前生效位置（虚拟定位/路线等 Hook 层数据），不依赖高德 SDK
+        try {
+            Thread {
+                try {
+                    val result = ApiClient.getLocationStatus()
+                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                        val data = result.data ?: return@Thread
+                        val lat = data.optDouble("latitude", 0.0)
+                        val lon = data.optDouble("longitude", 0.0)
+                        if (lat != 0.0 && lon != 0.0) {
+                            val display = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(lat, lon)
+                            requireActivity().runOnUiThread {
+                                selectOnMap(com.amap.api.maps.model.LatLng(display.first, display.second))
+                                amap?.moveCamera(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        com.amap.api.maps.model.LatLng(display.first, display.second),
+                                        16f
+                                    )
+                                )
+                                Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
+                            }
+                            return@Thread
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+                // 2) 回退：高德 SDK 一次定位
+                locateByAmap()
+            }.start()
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "backend locate failed", t)
+            locateByAmap()
+        }
+    }
+
+    /** 高德 SDK 一次定位（原逻辑拆分，便于失败回退到系统定位）。 */
+    private fun locateByAmap() {
+        val context = requireContext()
         try {
             val client = amapLocationClient
                 ?: com.amap.api.location.AMapLocationClient(context).also { amapLocationClient = it }

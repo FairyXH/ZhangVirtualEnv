@@ -368,6 +368,9 @@
     <string name="route_started">路线模拟已启动：%1$s</string>
     <string name="route_stopped">路线模拟已停止</string>
     <string name="route_clear">清空</string>
+    <string name="route_undo">撤销</string>
+    <string name="route_undo_done">已撤销上一步</string>
+    <string name="route_undo_empty">没有可撤销的步</string>
     <string name="route_save">保存路线</string>
     <string name="route_name_required">请输入路线名称</string>
     <string name="route_points_required">至少需要 2 个路径点</string>
@@ -376,6 +379,7 @@
     <string name="route_locate">当前位置</string>
     <string name="route_locating">正在定位…</string>
     <string name="route_locate_failed">定位失败，请检查定位权限</string>
+    <string name="route_located">已定位到当前位置</string>
     <string name="route_location_permission">需要定位权限才能获取当前位置</string>
 
     <!-- Env -->
