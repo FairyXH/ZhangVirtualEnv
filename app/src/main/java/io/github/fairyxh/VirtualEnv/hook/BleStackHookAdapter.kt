@@ -69,6 +69,7 @@ class BleStackHookAdapter(
     /** 经典/双模虚拟发现进行中（阻断真实 HAL 发现与真实 deviceFoundCallback）。 */
     private val virtualDiscoveryActive = AtomicBoolean(false)
     private val classicQueue = mutableListOf<JSONObject>()
+    private val callingPackages = mutableListOf<String>()
     private var discoveryHandler: Handler? = null
     private var discoveryService: Any? = null
 
@@ -251,7 +252,13 @@ class BleStackHookAdapter(
                 ?.let { method ->
                     val ok = registrar.register(method) { chain ->
                         val service = chain.getThisObject()
-                        if (startVirtualDiscovery(service)) {
+                        val caller = try {
+                            val attr = chain.getArg(0)
+                            attr?.javaClass?.getMethod("getPackageName")?.invoke(attr) as? String
+                        } catch (_: Throwable) {
+                            null
+                        }
+                        if (startVirtualDiscovery(service, caller)) {
                             return@register true
                         }
                         chain.proceed()
@@ -302,7 +309,7 @@ class BleStackHookAdapter(
     }
 
     /** 启动虚拟经典发现；无经典设备返回 false（调用方放行真实发现）。 */
-    private fun startVirtualDiscovery(service: Any): Boolean {
+    private fun startVirtualDiscovery(service: Any, callerPackage: String?): Boolean {
         val virtual = cache.currentBle() ?: return false
         val devices = virtual.optJSONArray("devices") ?: return false
         synchronized(classicQueue) {
@@ -312,6 +319,11 @@ class BleStackHookAdapter(
                 if (isClassicDevice(d)) classicQueue.add(d)
             }
             if (classicQueue.isEmpty()) return false
+        }
+        synchronized(callingPackages) {
+            if (!callerPackage.isNullOrBlank() && !callingPackages.contains(callerPackage)) {
+                callingPackages.add(callerPackage)
+            }
         }
         virtualDiscoveryActive.set(true)
         discoveryService = service
@@ -352,6 +364,7 @@ class BleStackHookAdapter(
 
     private fun finishVirtualDiscovery(service: Any) {
         synchronized(classicQueue) { classicQueue.clear() }
+        synchronized(callingPackages) { callingPackages.clear() }
         virtualDiscoveryActive.set(false)
         discoveryHandler?.removeCallbacksAndMessages(null)
         discoveryHandler = null
@@ -370,6 +383,7 @@ class BleStackHookAdapter(
     private fun deliverClassicDevice(service: Any, deviceJson: JSONObject) {
         try {
             val address = deviceJson.optString("address", "")
+            ZLog.d(TAG_SCOPE, "deliver classic device start addr=$address")
             if (address.isBlank()) return
             val name = deviceJson.optString("name", "")
             val rssi = deviceJson.optInt("classicRssi", deviceJson.optInt("rssi", -60))
@@ -391,13 +405,10 @@ class BleStackHookAdapter(
             intent.putExtra(BluetoothDevice.EXTRA_RSSI, rssi)
             if (name.isNotBlank()) intent.putExtra(BluetoothDevice.EXTRA_NAME, name)
 
-            val packages = invokeGetDiscoveringPackages(service) ?: return
+            val packages = invokeGetDiscoveringPackages(service)
             var delivered = 0
-            for (pkg in packages) {
+            fun deliverToPackage(pkgName: String, permission: String?) {
                 try {
-                    val p = pkg ?: continue
-                    val pkgName = p.javaClass.getMethod("getPackageName").invoke(p) as? String ?: continue
-                    val permission = p.javaClass.getMethod("getPermission").invoke(p) as? String
                     intent.setPackage(pkgName)
                     val perms = if (permission.isNullOrBlank()) {
                         arrayOf(PERM_BLUETOOTH_SCAN)
@@ -407,8 +418,25 @@ class BleStackHookAdapter(
                     invokeSendBroadcastMultiplePermissions(service, intent, perms)
                     delivered++
                 } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "deliver classic device to package failed", t)
+                    ZLog.w(TAG_SCOPE, "deliver classic device to package $pkgName failed", t)
                 }
+            }
+            if (packages != null) {
+                for (pkg in packages) {
+                    try {
+                        val p = pkg ?: continue
+                        val pkgName = p.javaClass.getMethod("getPackageName").invoke(p) as? String ?: continue
+                        val permission = p.javaClass.getMethod("getPermission").invoke(p) as? String
+                        deliverToPackage(pkgName, permission)
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "read discovering package failed", t)
+                    }
+                }
+            } else {
+                // hook 拦截 startDiscovery 时 DiscoveringPackage 未注册（原方法未执行），
+                // 用调用侧记录的包名兜底投递
+                val callers = synchronized(callingPackages) { callingPackages.toList() }
+                callers.forEach { deliverToPackage(it, null) }
             }
             logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble virtual classic device $name $address rssi=$rssi delivered=$delivered")
             ZLog.i(TAG_SCOPE, "virtual classic device $name $address rssi=$rssi delivered=$delivered")
