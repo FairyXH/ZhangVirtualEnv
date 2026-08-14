@@ -183,6 +183,24 @@
     <string name="location_point_applied">已应用：%1$s</string>
     <string name="location_point_remark_format">备注：%1$s</string>
     <string name="location_point_coord_format">%1$.6f, %2$.6f</string>
+    <!-- 基站查询（OpenCellID） -->
+    <string name="location_cell_query_title">基站查询</string>
+    <string name="location_cell_query_desc">通过 OpenCellID 查询当前选点附近的基站，一键保存到基站模拟</string>
+    <string name="location_cell_query_expand">展开</string>
+    <string name="location_cell_query_collapse">收起</string>
+    <string name="location_cell_query_no_coord">请先在地图上选点或输入经纬度</string>
+    <string name="location_cell_query_button">查询</string>
+    <string name="location_cell_query_radius_hint">查询半径（米），默认 1500；每次查询按返回小区数消耗 OpenCellID credits</string>
+    <string name="location_cell_query_running">正在查询附近基站…</string>
+    <string name="location_cell_query_found">找到 %1$d 个基站（半径 %2$d 米），点击条目可取消选择</string>
+    <string name="location_cell_query_empty">附近未找到基站，可尝试增大查询半径</string>
+    <string name="location_cell_query_results_hint">点击条目切换选中；信号强度由距离/覆盖半径/样本数算法估算</string>
+    <string name="location_cell_query_save">保存选中基站到基站模拟</string>
+    <string name="location_cell_query_saving">正在保存到基站模拟…</string>
+    <string name="location_cell_query_saved">已将 %1$d 个基站保存到基站模拟</string>
+    <string name="location_cell_query_none_selected">请先选择要保存的基站</string>
+    <string name="location_cell_query_selected">已选</string>
+    <string name="location_cell_query_unselected">未选</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
@@ -218,6 +236,21 @@
     <string name="settings_launcher_toast">桌面图标已隐藏，可通过 LSPosed 模块界面重新打开设置</string>
     <string name="settings_launcher_show_toast">桌面图标已恢复显示</string>
     <string name="settings_amap_key_empty">请输入 API Key</string>
+    <!-- OpenCellID 基站数据库 -->
+    <string name="settings_opencellid_title">OpenCellID 基站数据库</string>
+    <string name="settings_opencellid_desc">BYOK 模式：自行在 opencellid.org 注册并填写 API Key，用于基站查询与真实数据贡献</string>
+    <string name="settings_opencellid_key_label">API Key</string>
+    <string name="settings_opencellid_key_hint">请输入 OpenCellID API Key</string>
+    <string name="settings_opencellid_show_key">显示 Key</string>
+    <string name="settings_opencellid_test">测试 API Key</string>
+    <string name="settings_opencellid_testing">正在测试…</string>
+    <string name="settings_opencellid_contribute">为 opencellid 社区贡献数据</string>
+    <string name="settings_opencellid_contribute_desc">开启后，环境采集时会顺带把设备真实观测到的基站标识、地理位置、信号信息与测量时间上传到 OpenCellID（默认关闭；虚拟基站与虚拟坐标不会上传）</string>
+    <string name="settings_opencellid_save">保存配置</string>
+    <string name="settings_opencellid_saved">OpenCellID 配置已保存</string>
+    <string name="settings_opencellid_cleared">OpenCellID 配置已清空</string>
+    <string name="settings_opencellid_key_empty">请输入 OpenCellID API Key</string>
+    <string name="settings_opencellid_attribution">数据来源 OpenCellID（CC BY-SA 4.0）· opencellid.org</string>
     <string name="settings_env_test_title">环境实时测试</string>
     <string name="settings_env_test_desc">以普通 App 的视角持续读取位置、基站、蓝牙、WiFi、传感器、GNSS，结合模拟配置判定是否符合预期，点击结束停止。由于模块无法作用于自身，传感器数据请使用独立检测器进行测试。</string>
     <string name="settings_env_test_start">开始</string>

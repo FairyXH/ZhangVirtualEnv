@@ -40,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
 import io.github.fairyxh.VirtualEnv.app.collect.StreamEnvironmentSampler
@@ -1230,6 +1231,29 @@ class HomeFragment : Fragment() {
                 ApiClient.resumeEnv()
                 if (observe != null) {
                     result.put("hookObserve", observe)
+                }
+                // OpenCellID 数据贡献：采集包中 location/cell 均为挂起期间的真实观测
+                if (io.github.fairyxh.VirtualEnv.app.cell.OpenCellIdSettings.isContributeEnabled(requireContext())) {
+                    Thread {
+                        try {
+                            val contribute = CellRepository(requireContext()).contribute(result)
+                            ZLog.i(
+                                TAG_SCOPE,
+                                "opencellid contribute success=${contribute.success} queued=${contribute.queued} msg=${contribute.message}"
+                            )
+                            if (contribute.success && isAdded) {
+                                requireActivity().runOnUiThread {
+                                    Toast.makeText(
+                                        requireContext(),
+                                        "OpenCellID 贡献：${contribute.message}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "opencellid contribute failed: ${t.message}")
+                        }
+                    }.start()
                 }
                 lastCollectResult = result
                 requireActivity().runOnUiThread {

@@ -69,6 +69,9 @@ import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.MainActivity
+import io.github.fairyxh.VirtualEnv.app.cell.CellInfo
+import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
+import io.github.fairyxh.VirtualEnv.app.cell.CellSignalCalculator
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -130,6 +133,16 @@ class LocationSimFragment : Fragment() {
     private val savedPoints = mutableStateListOf<SavedPoint>()
     private val searchResults = mutableStateListOf<Pair<String, com.amap.api.services.core.PoiItem>>()
     private var searchResultsVisible by mutableStateOf(false)
+
+    // ---------- OpenCellID 基站查询 ----------
+    private var cellQueryCollapsed by mutableStateOf(true)
+    private var cellQueryRadius by mutableStateOf("1500")
+    private var cellQueryBusy by mutableStateOf(false)
+    private var cellQueryStatus by mutableStateOf("")
+    private val cellQueryResults = mutableStateListOf<CellInfo>()
+    private val cellQuerySelected = androidx.compose.runtime.mutableStateMapOf<Int, Boolean>()
+    private var cellQueryResultLat by mutableStateOf(0.0)
+    private var cellQueryResultLon by mutableStateOf(0.0)
 
     // ---------- 高德地图 ----------
 
@@ -646,7 +659,126 @@ class LocationSimFragment : Fragment() {
                         }
                     }
                 }
-                } // if (!fragment.mapFullscreen) 结束（卡片2/3/4 仅非全屏显示）
+                // 卡片5：基站查询（OpenCellID，可收起）
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.location_cell_query_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.location_cell_query_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                            }
+                            GlassPill(
+                                onClick = { fragment.toggleCellQueryCollapsed() },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(end = 6.dp),
+                                selected = cellQueryCollapsed,
+                                containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                height = 34.dp
+                            ) {
+                                BasicText(
+                                    getString(if (cellQueryCollapsed) R.string.location_cell_query_expand else R.string.location_cell_query_collapse),
+                                    Modifier.padding(horizontal = 14.dp),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                        if (!cellQueryCollapsed) {
+                            if (latitudeText.toDoubleOrNull() == null || longitudeText.toDoubleOrNull() == null) {
+                                BasicText(
+                                    getString(R.string.location_cell_query_no_coord),
+                                    Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                                )
+                            }
+                            Row(
+                                Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassField(
+                                    value = cellQueryRadius,
+                                    onValueChange = { cellQueryRadius = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    placeholder = "1500"
+                                )
+                                GlassButton(
+                                    onClick = { fragment.queryNearbyCells() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.width(112.dp),
+                                    isInteractive = !cellQueryBusy,
+                                    tint = colors.accent
+                                ) {
+                                    BasicText(
+                                        getString(R.string.location_cell_query_button),
+                                        style = TextStyle(
+                                            color = if (cellQueryBusy) colors.textSecondary else Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                            BasicText(
+                                getString(R.string.location_cell_query_radius_hint),
+                                Modifier.padding(top = 2.dp).fillMaxWidth(),
+                                style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                            )
+                            if (cellQueryStatus.isNotEmpty()) {
+                                BasicText(
+                                    cellQueryStatus,
+                                    Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                            }
+                            if (cellQueryResults.isNotEmpty()) {
+                                BasicText(
+                                    getString(R.string.location_cell_query_results_hint),
+                                    Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                                )
+                                cellQueryResults.forEachIndexed { index, cell ->
+                                    CellQueryRow(
+                                        index = index,
+                                        cell = cell,
+                                        queryLat = cellQueryResultLat,
+                                        queryLon = cellQueryResultLon,
+                                        selected = cellQuerySelected[index] ?: true,
+                                        onToggle = { fragment.toggleCellQuerySelection(index) },
+                                        backdrop = backdrop
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = { fragment.saveCellsToSimulation() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    isInteractive = !cellQueryBusy && cellQuerySelected.values.any { it },
+                                    tint = colors.accent
+                                ) {
+                                    BasicText(
+                                        getString(R.string.location_cell_query_save),
+                                        style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                } // if (!fragment.mapFullscreen) 结束（卡片2/3/4/5 仅非全屏显示）
             }
             // 搜索框输入实时搜索提示（300ms 防抖；全屏时暂停）
             LaunchedEffect(searchText, fragment.mapFullscreen) {
@@ -784,6 +916,145 @@ class LocationSimFragment : Fragment() {
                         getString(R.string.home_recording_delete),
                         style = TextStyle(color = colors.danger, fontSize = 12.sp)
                     )
+                }
+            }
+        }
+    }
+
+    // ---------- OpenCellID 基站查询 ----------
+
+    @Composable
+    private fun CellQueryRow(
+        index: Int,
+        cell: CellInfo,
+        queryLat: Double,
+        queryLon: Double,
+        selected: Boolean,
+        onToggle: () -> Unit,
+        backdrop: com.kyant.backdrop.Backdrop
+    ) {
+        val colors = glassColors()
+        GlassPill(
+            onClick = onToggle,
+            backdrop = backdrop,
+            modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+            selected = selected,
+            containerColor = if (selected) colors.accent.copy(alpha = 0.16f)
+            else colors.bgTertiary.copy(alpha = 0.3f),
+            height = 56.dp
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        cell.summary(),
+                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    )
+                    BasicText(
+                        CellSignalCalculator.describe(cell, queryLat, queryLon),
+                        style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+                    )
+                }
+                BasicText(
+                    getString(if (selected) R.string.location_cell_query_selected else R.string.location_cell_query_unselected),
+                    style = TextStyle(
+                        color = if (selected) colors.accent else colors.textTertiary,
+                        fontSize = 11.sp
+                    )
+                )
+            }
+        }
+    }
+
+    private fun toggleCellQueryCollapsed() {
+        cellQueryCollapsed = !cellQueryCollapsed
+    }
+
+    private fun queryNearbyCells() {
+        if (cellQueryBusy) return
+        val lat = latitudeText.toDoubleOrNull()
+        val lon = longitudeText.toDoubleOrNull()
+        if (lat == null || lon == null) {
+            Toast.makeText(requireContext(), R.string.location_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val radius = cellQueryRadius.toIntOrNull()?.coerceIn(200, 50000) ?: 1500
+        cellQueryRadius = radius.toString()
+        cellQueryBusy = true
+        cellQueryStatus = getString(R.string.location_cell_query_running)
+        executor.execute {
+            try {
+                val repository = CellRepository(requireContext())
+                val result = repository.queryNearbyCells(lat, lon, radius)
+                requireActivity().runOnUiThread {
+                    cellQueryBusy = false
+                    if (result.isSuccess) {
+                        val cells = result.getOrThrow()
+                        cellQueryResults.clear()
+                        cellQueryResults.addAll(cells)
+                        cellQuerySelected.clear()
+                        cells.indices.forEach { cellQuerySelected[it] = true }
+                        cellQueryResultLat = lat
+                        cellQueryResultLon = lon
+                        cellQueryStatus = if (cells.isEmpty()) {
+                            getString(R.string.location_cell_query_empty)
+                        } else {
+                            getString(R.string.location_cell_query_found, cells.size, radius)
+                        }
+                    } else {
+                        cellQueryResults.clear()
+                        cellQueryStatus = "查询失败：${result.exceptionOrNull()?.message ?: "未知错误"}"
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "cell query failed", t)
+                requireActivity().runOnUiThread {
+                    cellQueryBusy = false
+                    cellQueryStatus = "查询失败：${t.message}"
+                }
+            }
+        }
+    }
+
+    private fun toggleCellQuerySelection(index: Int) {
+        val current = cellQuerySelected[index] ?: true
+        cellQuerySelected[index] = !current
+    }
+
+    private fun saveCellsToSimulation() {
+        if (cellQueryBusy) return
+        val lat = cellQueryResultLat
+        val lon = cellQueryResultLon
+        val selected = cellQueryResults.filterIndexed { index, _ -> cellQuerySelected[index] ?: true }
+        if (selected.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.location_cell_query_none_selected, Toast.LENGTH_SHORT).show()
+            return
+        }
+        cellQueryBusy = true
+        cellQueryStatus = getString(R.string.location_cell_query_saving)
+        executor.execute {
+            try {
+                val config = CellSignalCalculator.buildCellConfig(selected, lat, lon)
+                val result = ApiClient.setEnvData("cell", config)
+                requireActivity().runOnUiThread {
+                    cellQueryBusy = false
+                    if (result.code == ApiResult.CODE_OK) {
+                        cellQueryStatus = getString(R.string.location_cell_query_saved, selected.size)
+                        Toast.makeText(requireContext(), getString(R.string.location_cell_query_saved, selected.size), Toast.LENGTH_SHORT).show()
+                    } else {
+                        cellQueryStatus = "保存失败：${result.message}"
+                        Toast.makeText(requireContext(), "保存失败：${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "cell save failed", t)
+                requireActivity().runOnUiThread {
+                    cellQueryBusy = false
+                    cellQueryStatus = "保存失败：${t.message}"
                 }
             }
         }
