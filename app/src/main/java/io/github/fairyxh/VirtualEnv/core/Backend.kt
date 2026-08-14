@@ -109,6 +109,32 @@ class Backend private constructor(private val dataDir: File) {
 
     fun getTestReport(): org.json.JSONObject? = testReport
 
+    // ---------- Hook 层真实数据观测（采集检验） ----------
+
+    /** 开启 Hook 层观测：清空快照并开始记录各 Hook 点经手的真实数据。 */
+    fun beginHookObserve() {
+        HookObserver.begin()
+    }
+
+    /** 结束 Hook 层观测（保留最后一次快照供读取）。 */
+    fun endHookObserve() {
+        HookObserver.end()
+    }
+
+    /**
+     * 读取 Hook 层观测快照。
+     *
+     * 采集挂起（suspendAll 生效）时补充拉取真实基站：system_server 直连 phone
+     * Binder（ITelephony.getAllCellInfo），phone 进程 Hook 在虚拟化关闭时放行
+     * 原始真实数据，保证基站采集也有 Hook 层证据而不依赖 TelephonyRegistry 推送。
+     */
+    fun hookObserveSnapshotJson(): org.json.JSONObject {
+        if (isSuspended()) {
+            HookObserver.pullRealCellsFromPhone()
+        }
+        return HookObserver.snapshotJson()
+    }
+
     private fun start() {
         configManager = ConfigManager(dataDir)
         databaseManager = DatabaseManager(File(dataDir, "zve.db"))

@@ -100,6 +100,10 @@ class LocationHookAdapter(
         val ok = registrar.register(method) { chain ->
             // after：先走原始逻辑，再决定是否替换返回值
             val original = chain.proceed()
+            // Hook 层真实数据观测：原始返回值（虚拟替换前）
+            if (original is Location) {
+                io.github.fairyxh.VirtualEnv.core.HookObserver.recordLocation(original)
+            }
             val virtual = currentVirtual()
             if (virtual != null) {
                 ZLog.d(TAG_SCOPE, "getLastLocation -> virtual ${virtual.latitude},${virtual.longitude}")
@@ -179,6 +183,8 @@ class LocationHookAdapter(
         if (locationResultClass == null) return
 
         val ok = registrar.register(method) { chain ->
+            // Hook 层真实数据观测：provider 上报的原始 LocationResult（虚拟替换前）
+            io.github.fairyxh.VirtualEnv.core.HookObserver.recordLocationResult(chain.getArg(0))
             val virtual: Location? = currentVirtual()
             if (virtual != null) {
                 try {
@@ -215,6 +221,10 @@ class LocationHookAdapter(
             return
         }
         val ok = registrar.register(method) { chain ->
+            // Hook 层真实数据观测：GNSS HAL 上报的真实位置（虚拟替换前）
+            (chain.getArg(1) as? Location)?.let {
+                io.github.fairyxh.VirtualEnv.core.HookObserver.recordLocation(it)
+            }
             // before：替换上报位置为虚拟位置，然后继续原始分发链路
             val virtual: Location? = currentVirtual()
             if (virtual != null) {

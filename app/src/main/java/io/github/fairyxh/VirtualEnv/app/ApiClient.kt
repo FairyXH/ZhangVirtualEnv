@@ -250,6 +250,15 @@ object ApiClient {
     /** 上报环境实时测试结果报告（供自动化验证/修正 Hook）。 */
     fun postTestReport(report: org.json.JSONObject): ApiResult = post("/api/test/report", report)
 
+    /** 开启 Hook 层真实数据观测（采集前调用）。 */
+    fun startHookObserve(): ApiResult = post("/api/debug/observe/start", JSONObject())
+
+    /** 结束 Hook 层真实数据观测。 */
+    fun endHookObserve(): ApiResult = post("/api/debug/observe/end", JSONObject())
+
+    /** 读取 Hook 层观测快照（采集挂起期间含实时真实基站）。 */
+    fun getHookObserve(): JSONObject? = get("/api/debug/observe/snapshot").data
+
     /** 临时停用全部虚拟环境（采集真实环境前调用，可嵌套）。 */
     fun suspendEnv(): ApiResult = post("/api/env/suspend", JSONObject())
 

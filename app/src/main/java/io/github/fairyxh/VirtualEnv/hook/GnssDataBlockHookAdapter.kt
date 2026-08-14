@@ -91,6 +91,7 @@ class GnssDataBlockHookAdapter(
         hooked += blockRegister(classLoader, clazz, "addGnssNavigationMessageListener", 4)
         hooked += blockRegister(classLoader, clazz, "addGnssMeasurementsListener", 5)
         hooked += hookOldGpsStatusTransport(classLoader)
+        hooked += hookRealSvStatus(classLoader)
         startTakeoverMonitor()
         return hooked
     }
@@ -115,6 +116,8 @@ class GnssDataBlockHookAdapter(
         methods.forEach { method ->
             if (method.parameterCount != 2) return@forEach
             val ok = registrar.register(method) { chain ->
+                // Hook 层真实数据观测：旧 API 转换前的真实 GnssStatus
+                io.github.fairyxh.VirtualEnv.core.HookObserver.recordGnssStatus(chain.getArg(0))
                 if (virtualLocationEnabled()) {
                     try {
                         val virtual = buildVirtualGnssStatus()
@@ -136,6 +139,37 @@ class GnssDataBlockHookAdapter(
             }
         }
         ZLog.d(TAG_SCOPE, "old-api GpsStatus.create not found (fail-open)")
+        return 0
+    }
+
+    /**
+     * Hook 层真实数据观测：GnssLocationProvider.onReportSvStatus(GnssStatus)。
+     *
+     * 这是 GNSS HAL 向 system_server 上报真实卫星状态的入口（services.jar JADX 确认），
+     * 无论虚拟定位是否启用都会先经过这里，采集/检测期间可拿到真实卫星数。
+     */
+    private fun hookRealSvStatus(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(
+            classLoader,
+            "com.android.server.location.gnss.GnssLocationProvider"
+        ) ?: return 0
+        val method = HookSupport.findMethods(clazz, "onReportSvStatus")
+            .firstOrNull {
+                it.parameterCount == 1 && it.parameterTypes[0].name == "android.location.GnssStatus"
+            }
+        if (method == null) {
+            ZLog.d(TAG_SCOPE, "GnssLocationProvider.onReportSvStatus not found (observe skip)")
+            return 0
+        }
+        val ok = registrar.register(method) { chain ->
+            io.github.fairyxh.VirtualEnv.core.HookObserver.recordGnssStatus(chain.getArg(0))
+            chain.proceed()
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked GnssLocationProvider.onReportSvStatus (observe)")
+            return 1
+        }
         return 0
     }
 

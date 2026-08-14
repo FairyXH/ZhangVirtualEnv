@@ -1170,15 +1170,25 @@ class HomeFragment : Fragment() {
         collectResult = getString(R.string.home_collect_running)
         Toast.makeText(requireContext(), R.string.home_collect_suspend_notice, Toast.LENGTH_LONG).show()
         executor.execute {
+            // Hook 层真实数据检验：先开启观测（各 Hook 点记录真实数据），再挂起虚拟环境
+            ApiClient.startHookObserve()
             ApiClient.suspendEnv()
             collector?.collectAll { result ->
+                // 仍在挂起状态读取 Hook 层观测（挂起期间自动补拉真实基站），再恢复虚拟环境
+                val observe = ApiClient.getHookObserve()
                 ApiClient.resumeEnv()
+                if (observe != null) {
+                    result.put("hookObserve", observe)
+                }
                 lastCollectResult = result
                 requireActivity().runOnUiThread {
                     collectButtonEnabled = true
                     saveCollectEnabled = true
                     collectResult = summarize(result)
-                    ZLog.i(TAG_SCOPE, "collect done: ${result.length()}")
+                    ZLog.i(
+                        TAG_SCOPE,
+                        "collect done: ${result.length()} hookObserve=${observe?.length() ?: -1}"
+                    )
                 }
             }
         }

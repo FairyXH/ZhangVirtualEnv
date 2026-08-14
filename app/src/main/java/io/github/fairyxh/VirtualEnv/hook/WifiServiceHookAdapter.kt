@@ -114,6 +114,8 @@ class WifiServiceHookAdapter(
         val ok = registrar.register(method) { chain ->
             // after：先走原始逻辑（含权限校验），再决定是否替换返回值
             val original = chain.proceed()
+            // Hook 层真实数据观测：系统真实扫描列表（虚拟替换前）
+            io.github.fairyxh.VirtualEnv.core.HookObserver.recordWifiSlice(original)
             try {
                 val virtual = backend.wifiEngine.currentData()
                 val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null

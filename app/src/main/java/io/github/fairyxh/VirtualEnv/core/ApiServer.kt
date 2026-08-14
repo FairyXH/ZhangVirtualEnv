@@ -238,6 +238,9 @@ class ApiServer(
                 path == "/api/sim/set" && method == "POST" -> envSet("sim", body)
                 path == "/api/profile/status" && method == "GET" -> profileStatus()
                 path == "/api/debug/random-env" && method == "POST" -> randomEnv()
+                path == "/api/debug/observe/start" && method == "POST" -> observeStart()
+                path == "/api/debug/observe/end" && method == "POST" -> observeEnd()
+                path == "/api/debug/observe/snapshot" && method == "GET" -> observeSnapshot()
                 path == "/api/test/report" && method == "POST" -> testReportSet(body)
                 path == "/api/test/report" && method == "GET" -> testReportGet()
                 path == "/api/recording/start" && method == "POST" -> recordingStart(body)
@@ -560,6 +563,23 @@ class ApiServer(
     private fun randomEnv(): ApiResult {
         val data = backend.generateRandomEnv()
         return ApiResult.ok("ok", data)
+    }
+
+    /** 开启 Hook 层真实数据观测（采集检验）。 */
+    private fun observeStart(): ApiResult {
+        backend.beginHookObserve()
+        return ApiResult.ok("ok", backend.hookObserveSnapshotJson())
+    }
+
+    /** 结束 Hook 层观测（保留最后一次快照）。 */
+    private fun observeEnd(): ApiResult {
+        backend.endHookObserve()
+        return ApiResult.ok("ok", backend.hookObserveSnapshotJson())
+    }
+
+    /** 读取 Hook 层观测快照（挂起期间自动补拉真实基站）。 */
+    private fun observeSnapshot(): ApiResult {
+        return ApiResult.ok("ok", backend.hookObserveSnapshotJson())
     }
 
     /** App 环境实时测试上报报告。 */
