@@ -262,6 +262,8 @@ curl -X POST http://127.0.0.1:18790/api/debug/random-env \
 - **Hook 层观测区块**：显示模块 Hook 点最近经手的真实数据（`/api/debug/observe/snapshot`）
 - **实时同步实时计算**：location/GNSS/sensor/BLE 回调到达即渲染判定，不等待 1s 刷新周期；点“开始检测”立即拉取期望配置
 - **结束按钮清空全部数据结果**（不再保留最后一次快照）
+- **基站全字段适配**：显示并校验 LTE（EARFCN/RSRQ/SINR/TA）、NR（NRARFCN/SS-RSRP/SS-RSRQ/SS-SINR）、GSM（BSIC/RSSI/TA）、WCDMA（PSC/RSSI/RSCP/EcNo）、CDMA（SID/NID/BID）；**空基站配置（0 基站）判定为 PASS**（读到 0 基站即通过）
+- **内置检测器同步**：模块设置页「环境实时测试」内置检测器与独立检测器同一套字段显示/判定逻辑（`SettingsFragment.buildCellText/judgeCell`）
 
 ### 4.2 使用
 
