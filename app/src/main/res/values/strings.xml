@@ -206,8 +206,11 @@
     <string name="location_cell_query_truncated">结果较多，已按距离取最近 300 条（可缩小查询半径）</string>
     <string name="location_cell_query_results_hint">点击条目切换选中；信号强度由距离/覆盖半径/样本数算法估算</string>
     <string name="location_cell_query_save">保存选中基站到基站模拟</string>
+    <string name="location_cell_query_save_name_hint">配置名称，如：公司门口基站组</string>
+    <string name="location_cell_query_save_remark_hint">备注（可选）</string>
     <string name="location_cell_query_saving">正在保存到基站模拟…</string>
-    <string name="location_cell_query_saved">已将 %1$d 个基站保存到基站模拟</string>
+    <string name="location_cell_query_saved">已将 %1$d 个基站保存到基站模拟（%2$s）</string>
+    <string name="location_cell_query_save_empty">所选基站没有可保存的有效条目（CDMA 走系统回退，可尝试其他制式）</string>
     <string name="location_cell_query_none_selected">请先选择要保存的基站</string>
     <string name="location_cell_query_selected">已选</string>
     <string name="location_cell_query_unselected">未选</string>

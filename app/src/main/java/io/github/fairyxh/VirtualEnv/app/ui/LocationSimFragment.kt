@@ -148,6 +148,8 @@ class LocationSimFragment : Fragment() {
     private var cellQueryResultLon by mutableStateOf(0.0)
     private var cellQueryPage by mutableStateOf(0)
     private var cellQueryTruncated by mutableStateOf(false)
+    private var cellQuerySaveName by mutableStateOf("")
+    private var cellQuerySaveRemark by mutableStateOf("")
 
     // ---------- 高德地图 ----------
 
@@ -834,6 +836,20 @@ class LocationSimFragment : Fragment() {
                                         )
                                     }
                                 }
+                                GlassField(
+                                    value = cellQuerySaveName,
+                                    onValueChange = { cellQuerySaveName = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    placeholder = getString(R.string.location_cell_query_save_name_hint)
+                                )
+                                GlassField(
+                                    value = cellQuerySaveRemark,
+                                    onValueChange = { cellQuerySaveRemark = it },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    placeholder = getString(R.string.location_cell_query_save_remark_hint)
+                                )
                                 GlassButton(
                                     onClick = { fragment.saveCellsToSimulation() },
                                     backdrop = backdrop,
@@ -1078,6 +1094,9 @@ class LocationSimFragment : Fragment() {
                     cellQueryResultLon = lon
                     cellQueryPage = 0
                     cellQueryTruncated = query.truncated
+                    if (cellQuerySaveName.isBlank()) {
+                        cellQuerySaveName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.location_cell_query_title))
+                    }
                     cellQuerySourceText = buildSourceText(query)
                     cellQueryStatus = buildResultStatus(query, lat, lon, radius)
                     if (query.cells.isEmpty()) {
@@ -1152,20 +1171,41 @@ class LocationSimFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.location_cell_query_none_selected, Toast.LENGTH_SHORT).show()
             return
         }
+        val name = cellQuerySaveName.trim().ifEmpty {
+            io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.location_cell_query_title))
+        }
+        val remark = cellQuerySaveRemark.trim()
         cellQueryBusy = true
         cellQueryStatus = getString(R.string.location_cell_query_saving)
         executor.execute {
             try {
                 val config = CellSignalCalculator.buildCellConfig(selected, lat, lon)
-                val result = ApiClient.setEnvData("cell", config)
+                val entries = config.optJSONArray("entries")
+                if (entries == null || entries.length() == 0) {
+                    requireActivity().runOnUiThread {
+                        cellQueryBusy = false
+                        cellQueryStatus = getString(R.string.location_cell_query_save_empty)
+                        Toast.makeText(requireContext(), R.string.location_cell_query_save_empty, Toast.LENGTH_SHORT).show()
+                    }
+                    return@execute
+                }
+                // 1) 立即写入 cell 引擎并关闭自动托管（否则自动托管会覆盖用户配置，界面显示 0 个基站）
+                ApiClient.setEnvData("cell", config)
+                ApiClient.setEnvAutoManaged("cell", false)
+                // 2) 保存为环境快照（type=cell），环境页「已保存环境」可见，点击「使用」可再次加载
+                val snapshot = ApiClient.createEnvSnapshot(name, remark, "cell", config)
                 requireActivity().runOnUiThread {
                     cellQueryBusy = false
-                    if (result.code == ApiResult.CODE_OK) {
-                        cellQueryStatus = getString(R.string.location_cell_query_saved, selected.size)
-                        Toast.makeText(requireContext(), getString(R.string.location_cell_query_saved, selected.size), Toast.LENGTH_SHORT).show()
+                    if (snapshot.code == ApiResult.CODE_OK) {
+                        cellQueryStatus = getString(R.string.location_cell_query_saved, entries.length(), name)
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.location_cell_query_saved, entries.length(), name),
+                            Toast.LENGTH_SHORT
+                        ).show()
                     } else {
-                        cellQueryStatus = "保存失败：${result.message}"
-                        Toast.makeText(requireContext(), "保存失败：${result.message}", Toast.LENGTH_SHORT).show()
+                        cellQueryStatus = "保存失败：${snapshot.message}"
+                        Toast.makeText(requireContext(), "保存失败：${snapshot.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (t: Throwable) {
