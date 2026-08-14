@@ -108,6 +108,9 @@ class VirtualEnvEntry : XposedModule() {
                 // 必须拦截 TelephonyProperties setter 才能全局虚拟化（属性进程级全局，不 Hook 第三方 App）
                 val simPropHooked = SimSystemPropertyHookAdapter(cache, registrar).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] sim system-property hooks installed pkg=$pkg hooked=$simPropHooked loader=${hostClassLoader}")
+                // RIL Java 层防御性 Hook：直达 RIL 的路径直接注入虚拟基站/信号（fail-open）
+                val rilHooked = RilDefensiveHookAdapter(cache, registrar).install(hostClassLoader)
+                log(Log.INFO, TAG, "[$TAG_SCOPE] ril defensive hooks installed pkg=$pkg hooked=$rilHooked loader=${hostClassLoader}")
             }
             // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
             if (processName == "com.android.bluetooth" && bleHooksInstalled.compareAndSet(false, true)) {
@@ -203,6 +206,9 @@ class VirtualEnvEntry : XposedModule() {
             LocationHookAdapter(backend, registrar).install(param.classLoader)
             // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位
             WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
+            // 蓝牙适配器身份虚拟化：BluetoothAdapter.getAddress/getName/getState/isEnabled（全局）
+            val btHooked = BluetoothIdentityHookAdapter(backend, registrar).install(param.classLoader)
+            log(Log.INFO, TAG, "[$TAG_SCOPE] bluetooth identity hooks installed hooked=$btHooked")
             // GNSS 原始数据流阻断：NMEA/导航消息/原始测量（百度 SDK 拉回真实位置根因）
             val gnssBlocked = GnssDataBlockHookAdapter(backend, registrar).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] gnss data block hooks installed hooked=$gnssBlocked")

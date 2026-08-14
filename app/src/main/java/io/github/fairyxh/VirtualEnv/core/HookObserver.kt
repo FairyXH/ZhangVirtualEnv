@@ -43,6 +43,9 @@ object HookObserver {
     /** 最近真实 GNSS 状态。 */
     private var gnss: JSONObject? = null
 
+    /** 最近真实 NMEA 句子（最多保留 3 条，按时间倒序）。 */
+    private var nmea: JSONArray? = null
+
     /** 是否处于观测状态。 */
     fun isActive(): Boolean = active
 
@@ -53,6 +56,7 @@ object HookObserver {
             cells = null
             wifi = null
             gnss = null
+            nmea = null
             active = true
         }
         ZLog.i(TAG_SCOPE, "hook observation started")
@@ -163,6 +167,22 @@ object HookObserver {
         }
     }
 
+    /** 记录真实 NMEA 句子（GnssLocationProvider.onReportNmea 参数）。 */
+    fun recordNmea(sentence: String?) {
+        if (!active || sentence.isNullOrBlank()) return
+        synchronized(lock) {
+            val arr = nmea ?: JSONArray()
+            val item = JSONObject().apply {
+                put("time", System.currentTimeMillis())
+                put("sentence", sentence.trim().take(120))
+            }
+            // 倒序：最新在前，最多 3 条
+            val next = JSONArray().put(item)
+            for (i in 0 until minOf(arr.length(), 2)) next.put(arr.opt(i))
+            nmea = next
+        }
+    }
+
     fun recordCell(cells: List<*>) {
         if (!active) return
         val arr = JSONArray()
@@ -193,13 +213,14 @@ object HookObserver {
                 cells?.let { put("cells", it) }
                 wifi?.let { put("wifi", it) }
                 gnss?.let { put("gnss", it) }
+                nmea?.let { put("nmea", it) }
             }
         }
     }
 
     /** 是否有任一真实数据。 */
     fun hasAny(): Boolean = synchronized(lock) {
-        location != null || (cells?.length() ?: 0) > 0 || (wifi?.length() ?: 0) > 0 || gnss != null
+        location != null || (cells?.length() ?: 0) > 0 || (wifi?.length() ?: 0) > 0 || gnss != null || (nmea?.length() ?: 0) > 0
     }
 
     /**

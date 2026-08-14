@@ -93,6 +93,7 @@ class GnssDataBlockHookAdapter(
         hooked += blockRegister(classLoader, clazz, "addGnssMeasurementsListener", 5)
         hooked += hookOldGpsStatusTransport(classLoader)
         hooked += hookRealSvStatus(classLoader)
+        hooked += hookRealNmea(classLoader)
         startTakeoverMonitor()
         return hooked
     }
@@ -143,6 +144,38 @@ class GnssDataBlockHookAdapter(
         return 0
     }
 
+    /**
+     * Hook 层真实数据观测：GnssLocationProvider.onReportNmea(long, String)。
+     *
+     * GNSS HAL 上报真实 NMEA 句子的入口（services.jar JADX 确认）。虚拟 NMEA 已在
+     * registerGnssNmeaCallback 拦截层投递；此点仅记录真实句子供 Hook 层检验/采集包。
+     */
+    private fun hookRealNmea(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(
+            classLoader,
+            "com.android.server.location.gnss.GnssLocationProvider"
+        ) ?: return 0
+        val method = HookSupport.findMethods(clazz, "onReportNmea")
+            .firstOrNull { it.parameterCount == 2 && it.parameterTypes[1] == String::class.java }
+        if (method == null) {
+            ZLog.d(TAG_SCOPE, "onReportNmea not found (fail-open)")
+            return 0
+        }
+        val ok = registrar.register(method) { chain ->
+            try {
+                io.github.fairyxh.VirtualEnv.core.HookObserver.recordNmea(chain.getArg(1) as? String)
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "record nmea failed", t)
+            }
+            chain.proceed()
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked GnssLocationProvider.onReportNmea (observe)")
+            return 1
+        }
+        return 0
+    }
     /**
      * Hook 层真实数据观测：GnssLocationProvider.onReportSvStatus(GnssStatus)。
      *

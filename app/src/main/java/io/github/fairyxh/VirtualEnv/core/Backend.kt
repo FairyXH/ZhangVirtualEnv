@@ -367,12 +367,13 @@ class Backend private constructor(private val dataDir: File) {
         return org.json.JSONObject().apply { put("entries", org.json.JSONArray()) }
     }
 
-    /** 自动托管：GNSS 卫星充足（usedInFix=12 > 百度 a>2 阈值）。 */
+    /** 自动托管：GNSS 卫星充足（usedInFix=12 > 百度 a>2 阈值）+ 虚拟 NMEA。 */
     private fun autoGnssData(): org.json.JSONObject {
         return org.json.JSONObject().apply {
             put("satelliteCount", 24)
             put("usedInFix", 12)
             put("cn0", 38.0)
+            put("nmeaEnabled", true)
         }
     }
 
@@ -404,7 +405,7 @@ class Backend private constructor(private val dataDir: File) {
         return org.json.JSONObject().apply { put("networks", networks) }
     }
 
-    /** 自动托管：BLE 设备（2 个合法 beacon）。 */
+    /** 自动托管：BLE 设备（2 个合法 beacon）+ 适配器身份（MAC/名称，VirtualRegion 同款覆盖）。 */
     private fun autoBleData(): org.json.JSONObject {
         val loc = currentLocation()
         val seed = ((loc?.latitude ?: 24.6) * 1e6).toLong()
@@ -421,7 +422,22 @@ class Backend private constructor(private val dataDir: File) {
                 put("rssi", -60 - rnd.nextInt(25))
             })
         }
-        return org.json.JSONObject().apply { put("devices", devices) }
+        // 适配器身份：确定性虚拟 MAC（locally administered）+ 名称，供 BluetoothIdentityHookAdapter 使用
+        val lat = loc?.latitude ?: 24.6
+        val lon = loc?.longitude ?: 118.0
+        val macSeed = ((lat * 1e5).toLong() shl 16) xor (lon * 1e5).toLong()
+        val crc = java.util.zip.CRC32().apply { update(macSeed.toString().toByteArray()) }.value
+        val adapterMac = String.format(
+            "02:00:00:%02x:%02x:%02x",
+            (crc shr 16) and 0xff,
+            (crc shr 8) and 0xff,
+            crc and 0xff
+        ).uppercase()
+        return org.json.JSONObject().apply {
+            put("devices", devices)
+            put("adapterMac", adapterMac)
+            put("adapterName", "ZVE-BT-${adapterMac.takeLast(6).replace(":", "")}")
+        }
     }
 
     /** 自动托管：传感器步频默认值。 */
@@ -1290,7 +1306,20 @@ class Backend private constructor(private val dataDir: File) {
                 put("rssi", -50 - rnd.nextInt(40))
             })
         }
-        setEnvData("ble", org.json.JSONObject().apply { put("devices", bleDevices) })
+        setEnvData("ble", org.json.JSONObject().apply {
+            put("devices", bleDevices)
+            // 适配器身份（随机模拟时一并生成，检测器可校验 BluetoothAdapter.getAddress/getName）
+            val macSeed = ((baseLat * 1e5).toLong() shl 16) xor (baseLon * 1e5).toLong()
+            val crc = java.util.zip.CRC32().apply { update(macSeed.toString().toByteArray()) }.value
+            val adapterMac = String.format(
+                "02:00:00:%02x:%02x:%02x",
+                (crc shr 16) and 0xff,
+                (crc shr 8) and 0xff,
+                crc and 0xff
+            ).uppercase()
+            put("adapterMac", adapterMac)
+            put("adapterName", "ZVE-BT-${adapterMac.takeLast(6).replace(":", "")}")
+        })
         setEnvEnabled("ble", true)
 
         // 传感器：步频 90~150
@@ -1307,6 +1336,7 @@ class Backend private constructor(private val dataDir: File) {
         setEnvData("gnss", org.json.JSONObject().apply {
             put("satelliteCount", satelliteCount)
             put("usedInFix", usedInFix.coerceAtMost(satelliteCount))
+            put("nmeaEnabled", true)
         })
         setEnvEnabled("gnss", true)
 
@@ -1368,6 +1398,7 @@ class Backend private constructor(private val dataDir: File) {
             put("gnss", org.json.JSONObject().apply {
                 put("satelliteCount", satelliteCount)
                 put("usedInFix", usedInFix)
+                put("nmeaEnabled", true)
             })
             put("sim", org.json.JSONObject().apply { put("slots", slots) })
         }

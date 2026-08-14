@@ -37,6 +37,7 @@ class FrameworkEnvHookAdapter(
     fun install(classLoader: ClassLoader) {
         hookTelephonyGetAllCellInfo(classLoader)
         hookBleStartScan(classLoader)
+        hookBluetoothDeviceIdentity(classLoader)
         hookWifiGetScanResults(classLoader)
         hookSensorRegister(classLoader)
         hookGnssStatus(classLoader)
@@ -420,6 +421,84 @@ class FrameworkEnvHookAdapter(
             ZLog.w(TAG_SCOPE, "deliver virtual ble failed, fallback", t)
             return null
         }
+    }
+
+    // ---------- 蓝牙设备身份：AdapterService.getRemoteName / getRemoteUuids（com.android.bluetooth 进程） ----------
+
+    /**
+     * 对应 VirtualRegion 的 BluetoothDevice.getRemoteName/getRemoteUuids 类 Hook。
+     * 仅在 com.android.bluetooth 进程命中 AdapterService；BLE 虚拟化启用时按设备地址
+     * 在虚拟 devices[] 中查找名称/UUID，命中返回虚拟值，未命中放行真实数据（fail-open）。
+     */
+    private fun hookBluetoothDeviceIdentity(classLoader: ClassLoader) {
+        val clazz = HookSupport.findClass(classLoader, "com.android.bluetooth.btservice.AdapterService") ?: return
+        val deviceClass = Class.forName("android.bluetooth.BluetoothDevice")
+        // getRemoteName(BluetoothDevice) -> String
+        HookSupport.findMethods(clazz, "getRemoteName")
+            .firstOrNull { it.parameterCount == 1 && it.parameterTypes[0] == deviceClass }
+            ?.let { method ->
+                val ok = registrar.register(method) { chain ->
+                    val virtual = cache.currentBle()
+                    if (virtual != null) {
+                        try {
+                            val device = chain.getArg(0)
+                            val address = device.javaClass.getMethod("getAddress").invoke(device) as? String
+                            val entry = findBleEntry(virtual, address)
+                            val name = entry?.optString("name", "")?.takeIf { it.isNotBlank() }
+                            if (name != null) {
+                                ZLog.d(TAG_SCOPE, "AdapterService.getRemoteName -> virtual $name")
+                                return@register name
+                            }
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "getRemoteName virtual failed, fallback", t)
+                        }
+                    }
+                    chain.proceed()
+                }
+                if (ok) ZLog.i(TAG_SCOPE, "hooked AdapterService.getRemoteName")
+            }
+        // getRemoteUuids(BluetoothDevice) -> ParcelUuid[]
+        HookSupport.findMethods(clazz, "getRemoteUuids")
+            .firstOrNull { it.parameterCount == 1 && it.parameterTypes[0] == deviceClass }
+            ?.let { method ->
+                val ok = registrar.register(method) { chain ->
+                    val virtual = cache.currentBle()
+                    if (virtual != null) {
+                        try {
+                            val device = chain.getArg(0)
+                            val address = device.javaClass.getMethod("getAddress").invoke(device) as? String
+                            val entry = findBleEntry(virtual, address)
+                            val uuid = entry?.optString("uuid", "")?.takeIf { it.isNotBlank() }
+                            if (uuid != null) {
+                                val puClass = Class.forName("android.os.ParcelUuid")
+                                val pu = puClass.getMethod("fromString", String::class.java).invoke(null, uuid)
+                                val arr = java.lang.reflect.Array.newInstance(puClass, 1)
+                                java.lang.reflect.Array.set(arr, 0, pu)
+                                ZLog.d(TAG_SCOPE, "AdapterService.getRemoteUuids -> virtual $uuid")
+                                return@register arr
+                            }
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "getRemoteUuids virtual failed, fallback", t)
+                        }
+                    }
+                    chain.proceed()
+                }
+                if (ok) ZLog.i(TAG_SCOPE, "hooked AdapterService.getRemoteUuids")
+            }
+    }
+
+    /** 在虚拟 BLE 数据 devices/bonded 中按地址查找条目。 */
+    private fun findBleEntry(data: JSONObject, address: String?): JSONObject? {
+        if (address.isNullOrBlank()) return null
+        val key = address.uppercase()
+        val arrays = listOfNotNull(data.optJSONArray("devices"), data.optJSONArray("bonded"))
+        for (arr in arrays) {
+            for (i in 0 until arr.length()) {
+                val entry = arr.optJSONObject(i) ?: continue
+                if (entry.optString("address", "").uppercase() == key) return entry
+            }
+        }
+        return null
     }
 
     // ---------- WiFi：WifiManager.getScanResults ----------
