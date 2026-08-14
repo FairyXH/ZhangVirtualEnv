@@ -287,6 +287,14 @@ class SettingsFragment : Fragment() {
                     return@Thread
                 }
                 val json = result.data ?: org.json.JSONObject()
+                // 注入模块 App 自身版本（system_server 无法读 BuildConfig）
+                runCatching {
+                    json.put(
+                        "moduleVersion",
+                        requireContext().packageManager
+                            .getPackageInfo(requireContext().packageName, 0).versionName
+                    )
+                }
                 val text = json.toString(2)
                 val ctx = requireContext()
                 val out = ctx.contentResolver.openOutputStream(uri)
@@ -329,15 +337,18 @@ class SettingsFragment : Fragment() {
                     val detail = StringBuilder()
                     var totalOk = 0
                     var totalFail = 0
+                    var totalSkip = 0
                     if (processes != null) {
                         val keys = processes.keys().asSequence().toList().sorted()
                         for (k in keys) {
                             val p = processes.optJSONObject(k) ?: continue
                             val ok = p.optInt("hooked", 0)
                             val fail = p.optInt("failed", 0)
+                            val skip = p.optInt("skipped", 0)
                             totalOk += ok
                             totalFail += fail
-                            lines.add("$k $ok/${ok + fail}")
+                            totalSkip += skip
+                            lines.add("$k $ok/${ok + fail}${if (skip > 0) " ·跳过$skip" else ""}")
                             val points = p.optJSONObject("points")
                             if (points != null) {
                                 val failedKeys = points.keys().asSequence().toList()
@@ -347,10 +358,17 @@ class SettingsFragment : Fragment() {
                                     failedKeys.forEach { detail.append("  ").append(it).append('\n') }
                                 }
                             }
+                            val skippedPoints = p.optJSONArray("skippedPoints")
+                            if (skippedPoints != null && skippedPoints.length() > 0) {
+                                detail.append("[$k] 跳过 ").append(skippedPoints.length()).append(" 处（抽象方法等）：\n")
+                                for (i in 0 until skippedPoints.length()) {
+                                    detail.append("  ").append(skippedPoints.optString(i)).append('\n')
+                                }
+                            }
                         }
                     }
-                    hookStatusSummary = if (totalOk + totalFail > 0) {
-                        "作用域 ${lines.size} 个 · 成功 $totalOk · 失败 $totalFail\n${lines.joinToString(" · ")}"
+                    hookStatusSummary = if (totalOk + totalFail + totalSkip > 0) {
+                        "作用域 ${lines.size} 个 · 成功 $totalOk · 失败 $totalFail · 跳过 $totalSkip\n${lines.joinToString(" · ")}"
                     } else {
                         getString(R.string.settings_hook_status_empty)
                     }

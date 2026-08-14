@@ -17,17 +17,32 @@ object HookStatusRegistry {
     private var processName: String = "unknown"
 
     private val entries = LinkedHashMap<String, Boolean>()
+    private val skipped = LinkedHashSet<String>()
 
     fun setProcess(name: String) {
         synchronized(lock) { processName = name }
     }
 
     fun reset() {
-        synchronized(lock) { entries.clear() }
+        synchronized(lock) {
+            entries.clear()
+            skipped.clear()
+        }
     }
 
     fun record(key: String, ok: Boolean) {
         synchronized(lock) { entries[key] = ok }
+    }
+
+    /** 登记跳过项（如抽象方法无法 Hook，由具体子类覆盖）。 */
+    fun recordSkipped(key: String) {
+        synchronized(lock) { skipped.add(key) }
+    }
+
+    /** Hook 点标识：类.方法(参数类型)。 */
+    fun hookKey(executable: java.lang.reflect.Executable): String {
+        val params = executable.parameterTypes.joinToString(",") { it.simpleName }
+        return "${executable.declaringClass.name}.${executable.name}($params)"
     }
 
     fun snapshot(): JSONObject {
@@ -39,10 +54,14 @@ object HookStatusRegistry {
                 points.put(k, v)
                 if (v) ok++ else fail++
             }
+            val skipArr = org.json.JSONArray()
+            skipped.forEach { skipArr.put(it) }
             JSONObject().apply {
                 put("process", processName)
                 put("hooked", ok)
                 put("failed", fail)
+                put("skipped", skipped.size)
+                put("skippedPoints", skipArr)
                 put("points", points)
             }
         }

@@ -10,7 +10,6 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import java.io.File
-import java.lang.reflect.Executable
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -32,12 +31,6 @@ class VirtualEnvEntry : XposedModule() {
     companion object {
         private const val TAG = "ZVirtualEnv"
         private const val TAG_SCOPE = "Entry"
-
-        /** Hook 点标识：类.方法(参数类型列表)，用于状态报告。 */
-        private fun hookKey(executable: Executable): String {
-            val params = executable.parameterTypes.joinToString(",") { it.simpleName }
-            return "${executable.declaringClass.name}.${executable.name}($params)"
-        }
     }
 
     private var backend: Backend? = null
@@ -92,7 +85,7 @@ class VirtualEnvEntry : XposedModule() {
                     ZLog.e(TAG_SCOPE, "app hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
-                HookStatusRegistry.record(hookKey(executable), ok)
+                HookStatusRegistry.record(HookStatusRegistry.hookKey(executable), ok)
                 ok
             }
             val pkg = try { param.packageName } catch (t: Throwable) { "" }
@@ -204,7 +197,7 @@ class VirtualEnvEntry : XposedModule() {
                     ZLog.e(TAG_SCOPE, "hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
-                HookStatusRegistry.record(hookKey(executable), ok)
+                HookStatusRegistry.record(HookStatusRegistry.hookKey(executable), ok)
                 ok
             }
             LocationHookAdapter(backend, registrar).install(param.classLoader)

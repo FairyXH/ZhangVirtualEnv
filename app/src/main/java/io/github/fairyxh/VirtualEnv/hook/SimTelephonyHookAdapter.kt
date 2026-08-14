@@ -147,6 +147,17 @@ class SimTelephonyHookAdapter(
         return hooked
     }
 
+    private fun registerConcrete(method: java.lang.reflect.Method, interceptor: io.github.libxposed.api.XposedInterface.Hooker): Boolean {
+        if (java.lang.reflect.Modifier.isAbstract(method.modifiers)) {
+            // 抽象方法无法 Hook（如 Phone.getPhoneType），由具体子类（GsmCdmaPhone）覆盖；登记为跳过
+            io.github.fairyxh.VirtualEnv.core.HookStatusRegistry.recordSkipped(
+                io.github.fairyxh.VirtualEnv.core.HookStatusRegistry.hookKey(method)
+            )
+            return false
+        }
+        return registrar.register(method, interceptor)
+    }
+
     // ---------- PhoneInterfaceManager（ITelephony.Stub） ----------
 
     private fun hookPhoneInterfaceManager(clazz: Class<*>): Int {
@@ -157,7 +168,7 @@ class SimTelephonyHookAdapter(
             HookSupport.findMethods(clazz, name)
                 .filter { it.returnType == String::class.java }
                 .forEach { method ->
-                    val ok = registrar.register(method) { chain ->
+                    val ok = registerConcrete(method) { chain ->
                         // 先解析虚拟值：命中直接返回，避免 proceed() 触发的权限拒绝
                         val virtual = resolveString(name, chain, null)
                         if (virtual != null) {
@@ -181,7 +192,7 @@ class SimTelephonyHookAdapter(
         HookSupport.findMethods(clazz, "getSignalStrength")
             .filter { it.parameterCount in 0..3 }
             .forEach { method ->
-                val ok = registrar.register(method) { chain ->
+                val ok = registerConcrete(method) { chain ->
                     val virtual = VirtualSignalFactory.build(currentSimData())
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getSignalStrength -> virtual")
@@ -207,7 +218,7 @@ class SimTelephonyHookAdapter(
             HookSupport.findMethods(clazz, name)
                 .filter { it.returnType == String::class.java }
                 .forEach { method ->
-                    val ok = registrar.register(method) { chain ->
+                    val ok = registerConcrete(method) { chain ->
                         val virtual = resolveString(name, chain, null)
                         if (virtual != null) {
                             ZLog.d(TAG_SCOPE, "PhoneSubInfoController.$name -> virtual")
@@ -226,7 +237,7 @@ class SimTelephonyHookAdapter(
         HookSupport.findMethods(clazz, "getSignalStrength")
             .filter { it.parameterCount in 0..4 }
             .forEach { method ->
-                val ok = registrar.register(method) { chain ->
+                val ok = registerConcrete(method) { chain ->
                     val virtual = VirtualSignalFactory.build(currentSimData())
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneSubInfoController.getSignalStrength -> virtual")
@@ -252,7 +263,7 @@ class SimTelephonyHookAdapter(
             HookSupport.findMethods(clazz, name)
                 .filter { it.returnType == String::class.java && it.parameterCount <= 1 }
                 .forEach { method ->
-                    val ok = registrar.register(method) { chain ->
+                    val ok = registerConcrete(method) { chain ->
                         val virtual = resolveString(name, chain, null)
                         if (virtual != null) {
                             ZLog.d(TAG_SCOPE, "Phone.$name -> virtual")
@@ -273,7 +284,7 @@ class SimTelephonyHookAdapter(
         HookSupport.findMethods(clazz, "getSignalStrength")
             .filter { it.parameterCount <= 1 }
             .forEach { method ->
-                val ok = registrar.register(method) { chain ->
+                val ok = registerConcrete(method) { chain ->
                     val virtual = VirtualSignalFactory.build(currentSimData())
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "Phone.getSignalStrength -> virtual")
@@ -295,7 +306,7 @@ class SimTelephonyHookAdapter(
         HookSupport.findMethods(clazz, name)
             .filter { (it.returnType == Int::class.javaPrimitiveType || it.returnType == Integer::class.java) && it.parameterCount <= 1 }
             .forEach { method ->
-                val ok = registrar.register(method) { chain ->
+                val ok = registerConcrete(method) { chain ->
                     val virtual = resolveInt(name, chain, null)
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "Phone.$name -> virtual")
@@ -319,7 +330,7 @@ class SimTelephonyHookAdapter(
         HookSupport.findMethods(clazz, name)
             .filter { it.returnType == Int::class.javaPrimitiveType || it.returnType == Integer::class.java }
             .forEach { method ->
-                val ok = registrar.register(method) { chain ->
+                val ok = registerConcrete(method) { chain ->
                     val virtual = resolveInt(name, chain, null)
                     if (virtual != null) {
                         ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.$name -> virtual")
