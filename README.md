@@ -76,6 +76,7 @@ Users are responsible for their own usage.
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），测试进程中接管真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
 | 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
+| Hook 层观测 | 采集真实环境时在各 Hook 点记录**未虚拟化前的真实数据**（位置/基站/WiFi/GNSS），采集包附带 `hookObserve` 字段用于 Hook 层检验（不只普通 App 视角）；一键采集位置自动保存到“已保存地点/位置模拟”；基站采集 mcc/mnc 优先字符串 getter（Oplus 15 旧 int getter 不可靠，详见 `docs/reverse/hook-observe-and-collect-fixes.md`） |
 | 配置状态预设 | 主页一键保存当前完整测试配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
 | 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
 | 隐私/外观 | 桌面图标隐藏（仅 LSPosed 入口）、地图选点 GCJ-02→WGS-84 自动转换 |
@@ -248,6 +249,9 @@ curl -X POST http://127.0.0.1:18790/api/debug/random-env \
 - **识别录像/回放状态**：新增“录像/回放状态”区，显示 `PLAYING / PAUSED / RECORDING / IDLE`、播放段/帧进度、平滑插值开关；回放中位置判定容差放宽至 800m（帧间插值+抖动）
 - 一键"随机模拟"调用 `/api/debug/random-env` 后自动开始检测
 - 上报报告到 `/api/test/report`（含 `playback` 对象）
+- **Hook 层观测区块**：显示模块 Hook 点最近经手的真实数据（`/api/debug/observe/snapshot`）
+- **实时同步实时计算**：location/GNSS/sensor/BLE 回调到达即渲染判定，不等待 1s 刷新周期；点“开始检测”立即拉取期望配置
+- **结束按钮清空全部数据结果**（不再保留最后一次快照）
 
 ### 4.2 使用
 
@@ -278,6 +282,14 @@ gnss:     PASS | 卫星总数: 16 使用: 5
 - 模块 `EnvStateCache` 500ms 轮询，配置切换后 Hook 层快速追平
 - BLE/GNSS 采用"配置就绪后自动接管"（pending callback / 300ms 周期投递）
 - 检测器在配置切换后有 2s 同步宽限期（`SYNCING`），避免瞬时误判
+
+### 4.5 Hook 层真实数据观测（采集检验）
+
+模块在 system_server 内提供 Hook 层真实数据观测：
+
+- 观测点：位置（`LocationProviderManager.onReportLocation` / `GnssLocationProvider.onReportLocation` / `getLastLocation`）、GNSS（`GnssLocationProvider.onReportSvStatus`）、WiFi（`WifiServiceImpl.getScanResults` 原始结果）、基站（`com.android.server.TelephonyRegistry.notifyCellInfoForSubscriber` + 挂起时直连 phone Binder 实时拉取）
+- API：`POST /api/debug/observe/start|end`、`GET /api/debug/observe/snapshot`
+- 一键采集流程：`observe/start → env/suspend → collectAll → observe/snapshot（挂起中）→ env/resume`，观测结果合并进采集包 `hookObserve` 字段
 
 ---
 
