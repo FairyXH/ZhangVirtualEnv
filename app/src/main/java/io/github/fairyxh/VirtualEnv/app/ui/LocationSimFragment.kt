@@ -782,6 +782,53 @@ class LocationSimFragment : Fragment() {
                                         style = TextStyle(color = colors.danger, fontSize = 12.sp)
                                     )
                                 }
+                                Row(
+                                    Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    GlassPill(
+                                        onClick = { fragment.cellQuerySelectAll() },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                        height = 32.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.location_cell_query_select_all),
+                                            Modifier.padding(horizontal = 8.dp),
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                        )
+                                    }
+                                    GlassPill(
+                                        onClick = { fragment.cellQuerySelectInvert() },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                        height = 32.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.location_cell_query_select_invert),
+                                            Modifier.padding(horizontal = 8.dp),
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                        )
+                                    }
+                                    GlassPill(
+                                        onClick = { fragment.cellQuerySelectNone() },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                        height = 32.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.location_cell_query_select_none),
+                                            Modifier.padding(horizontal = 8.dp),
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                        )
+                                    }
+                                }
                                 val pageStart = fragment.cellQueryPage * CELL_QUERY_PAGE_SIZE
                                 val pageEnd = minOf(pageStart + CELL_QUERY_PAGE_SIZE, cellQueryAllResults.size)
                                 (pageStart until pageEnd).forEach { index ->
@@ -1160,6 +1207,24 @@ class LocationSimFragment : Fragment() {
     private fun toggleCellQuerySelection(index: Int) {
         val current = cellQuerySelected[index] ?: true
         cellQuerySelected[index] = !current
+    }
+
+    /** 全选：当前查询结果全部选中（跨页）。 */
+    private fun cellQuerySelectAll() {
+        cellQueryAllResults.indices.forEach { cellQuerySelected[it] = true }
+    }
+
+    /** 反选：当前查询结果选中状态全部取反（跨页）。 */
+    private fun cellQuerySelectInvert() {
+        cellQueryAllResults.indices.forEach {
+            val current = cellQuerySelected[it] ?: true
+            cellQuerySelected[it] = !current
+        }
+    }
+
+    /** 全不选：清空当前查询结果选中状态（跨页）。 */
+    private fun cellQuerySelectNone() {
+        cellQueryAllResults.indices.forEach { cellQuerySelected[it] = false }
     }
 
     private fun saveCellsToSimulation() {
