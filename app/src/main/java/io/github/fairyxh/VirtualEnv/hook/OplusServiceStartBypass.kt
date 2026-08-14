@@ -22,6 +22,7 @@ class OplusServiceStartBypass(
         private const val TAG_SCOPE = "Hook"
         private const val SERVICE_RECORD = "com.android.server.am.ServiceRecord"
         private const val ACTIVE_SERVICES = "com.android.server.am.ActiveServices"
+        private const val ACTIVE_SERVICES_EXT = "com.android.server.am.ActiveServicesExtImpl"
 
         /** 志愿汇等应用会内置该服务，不能按宿主包名限定。 */
         private const val TARGET_SERVICE = "com.baidu.location.f"
@@ -37,6 +38,9 @@ class OplusServiceStartBypass(
             hooked += hookSetFgsRestriction(asClazz)
             hooked += hookBringUpService(asClazz)
         }
+        // ColorOS 自启动管理：ActiveServicesExtImpl.interceptBringUpServices 调
+        // OplusAppStartupManager.validStartProcess，对未加入白名单的宿主包返回 true 拦截服务进程。
+        hooked += hookInterceptBringUpServices(classLoader)
         ZLog.i(TAG_SCOPE, "oplus service start bypass installed hooked=$hooked")
         return hooked
     }
@@ -123,6 +127,35 @@ class OplusServiceStartBypass(
                 }
                 chain.proceed()
                 null
+            }
+            if (ok) hooked++
+        }
+        return hooked
+    }
+
+    /**
+     * 绕过 ColorOS 自启动管理对百度定位服务进程的拦截。
+     *
+     * bringUpServiceInnerLocked 里：
+     *   if (mActiveServicesExt.interceptBringUpServices(r, ams, uid, pid)) bringDownServiceLocked(r);
+     * ActiveServicesExtImpl.interceptBringUpServices 调
+     *   OplusAppStartupManager.validStartProcess(pkg, userId, "service")
+     * 当宿主包 isPackageRestricted 且不在 getmStartInfoWhiteList 时返回 true → 进程被拦。
+     * 这里对百度定位服务直接返回 false（放行），其余服务维持原始行为（fail-open）。
+     */
+    private fun hookInterceptBringUpServices(classLoader: ClassLoader): Int {
+        val ext = HookSupport.findClass(classLoader, ACTIVE_SERVICES_EXT) ?: return 0
+        var hooked = 0
+        HookSupport.findMethods(ext, "interceptBringUpServices").forEach { method ->
+            if (method.parameterCount != 4) return@forEach
+            val ok = registrar.register(method) { chain ->
+                val sr = chain.getArg(0)
+                if (isBaiduLocService(sr)) {
+                    ZLog.i(TAG_SCOPE, "interceptBringUpServices -> false (baidu loc service bypass)")
+                    false
+                } else {
+                    chain.proceed()
+                }
             }
             if (ok) hooked++
         }
