@@ -226,6 +226,7 @@ class ApiServer(
                 path == "/api/env/status" && method == "GET" -> envStatus()
                 path == "/api/cell/status" && method == "GET" -> envStatus("cell")
                 path == "/api/cell/set" && method == "POST" -> envSet("cell", body)
+                path == "/api/cell/auto" && method == "POST" -> cellAuto(body)
                 path == "/api/wifi/status" && method == "GET" -> envStatus("wifi")
                 path == "/api/wifi/set" && method == "POST" -> envSet("wifi", body)
                 path == "/api/bluetooth/status" && method == "GET" -> envStatus("ble")
@@ -558,6 +559,14 @@ class ApiServer(
         }
         ZLog.i(TAG_SCOPE, "env set type=$type keys=${data.length()}")
         return ApiResult.ok("ok", backend.envStatus(type))
+    }
+
+    /** 设置基站自动托管缓存（OpenCellID 查询结果；body 无 data → null → 空基站）。 */
+    private fun cellAuto(body: String): ApiResult {
+        val json = JSONObject(body)
+        val data = json.optJSONObject("data")
+        backend.setAutoCellCache(data)
+        return ApiResult.ok("ok", backend.envStatus("cell"))
     }
 
     private fun profileStatus(): ApiResult {

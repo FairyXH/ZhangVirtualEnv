@@ -271,6 +271,13 @@ object ApiClient {
         return post("/api/${envPath(type)}/set", body)
     }
 
+    /** 设置基站自动托管缓存（OpenCellID 查询结果；data=null 表示附近无基站 → 空基站）。 */
+    fun setAutoCell(data: org.json.JSONObject?): ApiResult {
+        val body = JSONObject()
+        data?.let { body.put("data", it) }
+        return post("/api/cell/auto", body)
+    }
+
     /** 查询指定环境类型的虚拟数据状态。 */
     fun getEnvStatus(type: String): ApiResult = get("/api/${envPath(type)}/status")
 

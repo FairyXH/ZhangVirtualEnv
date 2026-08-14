@@ -362,9 +362,18 @@ class Backend private constructor(private val dataDir: File) {
         ZLog.i(TAG_SCOPE, "auto env providers configured")
     }
 
-    /** 自动托管：基站配置（空 entries → Hook fallback 带坐标 CDMA，ID 由工厂派生合法值）。 */
+    /** 自动托管基站缓存：换点后由 app 端经 /api/cell/auto 写入的 OpenCellID 真实基站。 */
+    private val autoCellCache = java.util.concurrent.atomic.AtomicReference<org.json.JSONObject?>(null)
+
+    /** 设置自动托管基站缓存（OpenCellID 查询结果；null = 附近无基站，返回空基站）。 */
+    fun setAutoCellCache(data: org.json.JSONObject?) {
+        autoCellCache.set(data)
+        ZLog.i(TAG_SCOPE, "auto cell cache set entries=${data?.optJSONArray("entries")?.length() ?: 0}")
+    }
+
+    /** 自动托管：优先返回 OpenCellID 真实基站；未查询到则返回空基站（附近无基站）。 */
     private fun autoCellData(): org.json.JSONObject {
-        return org.json.JSONObject().apply { put("entries", org.json.JSONArray()) }
+        return autoCellCache.get() ?: org.json.JSONObject().apply { put("entries", org.json.JSONArray()) }
     }
 
     /** 自动托管：GNSS 卫星充足（usedInFix=12 > 百度 a>2 阈值）+ 虚拟 NMEA。 */

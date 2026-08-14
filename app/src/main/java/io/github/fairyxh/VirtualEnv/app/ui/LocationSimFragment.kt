@@ -1354,6 +1354,7 @@ class LocationSimFragment : Fragment() {
         executor.execute {
             val result = ApiClient.setLocation(lat, lon, 0f, 0f)
             ApiClient.setLocationEnabled(true)
+            autoQueryCell(lat, lon)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 refreshStatus()
@@ -1370,9 +1371,32 @@ class LocationSimFragment : Fragment() {
         }
         executor.execute {
             val result = ApiClient.setLocation(lat, lon, 0f, 0f)
+            autoQueryCell(lat, lon)
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 refreshStatus()
+            }
+        }
+    }
+
+    /** 换点后自动查询 OpenCellID 真实基站并写入自动托管缓存；未查到 → 空基站。 */
+    private fun autoQueryCell(lat: Double, lon: Double) {
+        executor.execute {
+            try {
+                val cellStatus = ApiClient.getEnvStatus("cell")
+                val autoManaged = cellStatus.data?.optBoolean("autoManaged", false) ?: false
+                if (!autoManaged) return@execute
+                val repository = CellRepository(requireContext())
+                val query = repository.queryNearbyCells(lat, lon, 1500)
+                val config = if (query.cells.isNotEmpty()) {
+                    CellSignalCalculator.buildCellConfig(query.cells, lat, lon)
+                } else {
+                    null
+                }
+                ApiClient.setAutoCell(config)
+                ZLog.i(TAG_SCOPE, "auto cell query done cells=${query.cells.size} source=${query.source}")
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "auto cell query failed", t)
             }
         }
     }
