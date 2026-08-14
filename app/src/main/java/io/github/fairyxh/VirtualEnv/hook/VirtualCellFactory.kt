@@ -232,6 +232,18 @@ object VirtualCellFactory {
             pci,
             tac
         ) as Any
+        // 5 参构造的 CellIdentityLte.earfcn 默认为 CellInfo.UNAVAILABLE（Int.MAX_VALUE），
+        // 会导致 App/检测器读到 2147483647 哨兵；反射写回 -1 表示"未配置"
+        if (earfcn < 0) {
+            try {
+                identity.javaClass.getDeclaredField("mEarfcn").also { it.isAccessible = true }.set(identity, -1)
+            } catch (t: Throwable) {
+                try {
+                    identity.javaClass.getField("earfcn").set(identity, -1)
+                } catch (_: Throwable) {
+                }
+            }
+        }
         infoClass.getMethod("setCellIdentity", identityClass).invoke(info, identity)
 
         val signalClass = Class.forName("android.telephony.CellSignalStrengthLte")
