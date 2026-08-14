@@ -3,6 +3,5 @@ com.android.phone
 com.android.bluetooth
 com.android.location.fused
 com.oplus.location
-com.google.android.gms
 io.github.fairyxh.VirtualEnv
 io.github.fairyxh.VirEnvDetector
