@@ -1299,8 +1299,24 @@ class HomeFragment : Fragment() {
         }
 
         val loc = collect.optJSONObject("location")
-        val lat = loc?.optDouble("latitude", Double.NaN) ?: Double.NaN
-        val lon = loc?.optDouble("longitude", Double.NaN) ?: Double.NaN
+        // 位置结构兼容：新版采集含扁平主字段（latitude/longitude），老版本只有 provider 键
+        // （gps/network/fused/... 对象）。两种都解析，取最新一条保存到位置模拟（已保存地点）。
+        var lat = loc?.optDouble("latitude", Double.NaN) ?: Double.NaN
+        var lon = loc?.optDouble("longitude", Double.NaN) ?: Double.NaN
+        if (lat.isNaN() || lon.isNaN()) {
+            var bestTime = Long.MIN_VALUE
+            loc?.keys()?.forEach { k ->
+                val item = loc.optJSONObject(k) ?: return@forEach
+                val l = item.optDouble("latitude", Double.NaN)
+                val n = item.optDouble("longitude", Double.NaN)
+                val t = item.optLong("time", Long.MIN_VALUE)
+                if (!l.isNaN() && !n.isNaN() && t >= bestTime) {
+                    bestTime = t
+                    lat = l
+                    lon = n
+                }
+            }
+        }
         if (!lat.isNaN() && !lon.isNaN()) {
             ApiClient.createLocationPoint(name, sourceRemark, lat, lon)
         }
@@ -1895,10 +1911,15 @@ class HomeFragment : Fragment() {
         val wifi = result.optJSONObject("wifi")
         val bt = result.optJSONObject("bluetooth")
         val gnss = result.optJSONObject("gnss")
+        val observe = result.optJSONObject("hookObserve")
 
         val sb = StringBuilder()
         sb.append("位置: ")
-        if (loc != null && loc.length() > 0) {
+        val flatLat = loc?.optDouble("latitude", Double.NaN) ?: Double.NaN
+        val flatLon = loc?.optDouble("longitude", Double.NaN) ?: Double.NaN
+        if (!flatLat.isNaN() && !flatLon.isNaN()) {
+            sb.append(flatLat).append(", ").append(flatLon)
+        } else if (loc != null && loc.length() > 0) {
             val first = loc.keys().next()
             val item = loc.optJSONObject(first)
             sb.append(item?.optString("latitude")).append(", ").append(item?.optString("longitude"))
@@ -1919,6 +1940,22 @@ class HomeFragment : Fragment() {
                 ""
             }
         )
+        if (observe != null) {
+            val locObs = observe.optJSONObject("location")
+            val cellObs = observe.optJSONArray("cells")
+            val wifiObs = observe.optJSONArray("wifi")
+            val gnssObs = observe.optJSONObject("gnss")
+            val obsFlags = mutableListOf<String>()
+            if (locObs != null) obsFlags.add("位置")
+            if (cellObs != null && cellObs.length() > 0) obsFlags.add("基站")
+            if (wifiObs != null && wifiObs.length() > 0) obsFlags.add("WiFi")
+            if (gnssObs != null && gnssObs.optInt("satelliteCount", 0) > 0) obsFlags.add("GNSS")
+            if (obsFlags.isNotEmpty()) {
+                sb.append("\nHook层观测: ").append(obsFlags.joinToString("、"))
+            } else {
+                sb.append("\nHook层观测: 无（未挂起采集或 Hook 未生效）")
+            }
+        }
         return sb.toString()
     }
 }

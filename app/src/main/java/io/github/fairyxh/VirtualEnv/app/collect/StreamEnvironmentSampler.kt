@@ -22,6 +22,7 @@ import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
 import android.telephony.CellIdentityWcdma
 import android.telephony.TelephonyManager
+import io.github.fairyxh.VirtualEnv.util.CellInfoRead
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -283,6 +284,12 @@ class StreamEnvironmentSampler(private val context: Context) {
                 put("time", loc.time)
             }
         )
+        // 扁平主字段：与快照采集一致，供“保存到位置模拟/已保存地点”直接使用
+        out.put("latitude", loc.latitude)
+        out.put("longitude", loc.longitude)
+        out.put("accuracy", loc.accuracy)
+        out.put("speed", loc.speed)
+        out.put("time", loc.time)
         return out
     }
 
@@ -304,31 +311,31 @@ class StreamEnvironmentSampler(private val context: Context) {
             when (id) {
                 is CellIdentityLte -> {
                     item.put("type", "LTE")
-                    item.put("mcc", cellInt(id, "mcc"))
-                    item.put("mnc", cellInt(id, "mnc"))
+                    item.put("mcc", CellInfoRead.mcc(id))
+                    item.put("mnc", CellInfoRead.mnc(id))
                     item.put("tac", id.tac)
                     item.put("ci", id.ci)
                     item.put("pci", id.pci)
                 }
                 is CellIdentityNr -> {
                     item.put("type", "NR")
-                    item.put("mcc", cellInt(id, "mcc"))
-                    item.put("mnc", cellInt(id, "mnc"))
+                    item.put("mcc", CellInfoRead.mcc(id))
+                    item.put("mnc", CellInfoRead.mnc(id))
                     item.put("tac", id.tac)
                     item.put("nci", id.nci)
                     item.put("pci", id.pci)
                 }
                 is CellIdentityGsm -> {
                     item.put("type", "GSM")
-                    item.put("mcc", id.mcc)
-                    item.put("mnc", id.mnc)
+                    item.put("mcc", CellInfoRead.mcc(id))
+                    item.put("mnc", CellInfoRead.mnc(id))
                     item.put("lac", id.lac)
                     item.put("cid", id.cid)
                 }
                 is CellIdentityWcdma -> {
                     item.put("type", "WCDMA")
-                    item.put("mcc", id.mcc)
-                    item.put("mnc", id.mnc)
+                    item.put("mcc", CellInfoRead.mcc(id))
+                    item.put("mnc", CellInfoRead.mnc(id))
                     item.put("lac", id.lac)
                     item.put("cid", id.cid)
                 }
@@ -338,16 +345,6 @@ class StreamEnvironmentSampler(private val context: Context) {
         }
         out.put("cells", arr)
         return out
-    }
-
-    private fun cellInt(identity: Any, field: String): Int {
-        return try {
-            val m = identity.javaClass.getMethod("get$field")
-            m.isAccessible = true
-            m.invoke(identity) as? Int ?: -1
-        } catch (t: Throwable) {
-            -1
-        }
     }
 
     private fun snapshotWifi(): JSONObject {

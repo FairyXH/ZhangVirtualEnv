@@ -19,6 +19,7 @@ import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
 import android.telephony.CellIdentityWcdma
 import android.telephony.TelephonyManager
+import io.github.fairyxh.VirtualEnv.util.CellInfoRead
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -93,6 +94,21 @@ class EnvironmentCollector(private val context: Context) {
                 ZLog.d(TAG_SCOPE, "location provider $provider failed: ${t.message}")
             }
         }
+        // 扁平主字段：取最新 provider 结果，供“保存到位置模拟/已保存地点”直接使用
+        var best: JSONObject? = null
+        out.keys().forEach { k ->
+            val item = out.optJSONObject(k) ?: return@forEach
+            if (best == null || item.optLong("time", 0L) > (best?.optLong("time", 0L) ?: 0L)) {
+                best = item
+            }
+        }
+        best?.let {
+            out.put("latitude", it.optDouble("latitude", 0.0))
+            out.put("longitude", it.optDouble("longitude", 0.0))
+            out.put("accuracy", it.optDouble("accuracy", 0.0))
+            out.put("speed", it.optDouble("speed", 0.0))
+            out.put("time", it.optLong("time", 0L))
+        }
         return out
     }
 
@@ -115,31 +131,31 @@ class EnvironmentCollector(private val context: Context) {
                 when (id) {
                     is CellIdentityLte -> {
                         item.put("type", "LTE")
-                        item.put("mcc", cellInt(id, "mcc"))
-                        item.put("mnc", cellInt(id, "mnc"))
+                        item.put("mcc", CellInfoRead.mcc(id))
+                        item.put("mnc", CellInfoRead.mnc(id))
                         item.put("tac", id.tac)
                         item.put("ci", id.ci)
                         item.put("pci", id.pci)
                     }
                     is CellIdentityNr -> {
                         item.put("type", "NR")
-                        item.put("mcc", cellInt(id, "mcc"))
-                        item.put("mnc", cellInt(id, "mnc"))
+                        item.put("mcc", CellInfoRead.mcc(id))
+                        item.put("mnc", CellInfoRead.mnc(id))
                         item.put("tac", id.tac)
                         item.put("nci", id.nci)
                         item.put("pci", id.pci)
                     }
                     is CellIdentityGsm -> {
                         item.put("type", "GSM")
-                        item.put("mcc", id.mcc)
-                        item.put("mnc", id.mnc)
+                        item.put("mcc", CellInfoRead.mcc(id))
+                        item.put("mnc", CellInfoRead.mnc(id))
                         item.put("lac", id.lac)
                         item.put("cid", id.cid)
                     }
                     is CellIdentityWcdma -> {
                         item.put("type", "WCDMA")
-                        item.put("mcc", id.mcc)
-                        item.put("mnc", id.mnc)
+                        item.put("mcc", CellInfoRead.mcc(id))
+                        item.put("mnc", CellInfoRead.mnc(id))
                         item.put("lac", id.lac)
                         item.put("cid", id.cid)
                     }
@@ -154,17 +170,6 @@ class EnvironmentCollector(private val context: Context) {
             out.put("error", t.message)
         }
         return out
-    }
-
-    /** 反射读取 CellIdentity 的隐藏字段（mcc/mnc 等）。 */
-    private fun cellInt(identity: Any, field: String): Int {
-        return try {
-            val m = identity.javaClass.getMethod("get$field")
-            m.isAccessible = true
-            m.invoke(identity) as? Int ?: -1
-        } catch (t: Throwable) {
-            -1
-        }
     }
 
     @SuppressLint("MissingPermission")
