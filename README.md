@@ -66,6 +66,7 @@ Users are responsible for their own usage.
 |---|---|
 | 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动；**摇杆松手保留当前位置**（不溜回原点），斜向移动经方向平滑 + 注入频率对齐（摇杆启用时 fix/push 加速至 ~200-250ms）后顺滑无锯齿；**随机抖动可在设置页关闭**（`/api/settings/jitter`） |
 | 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
+| OpenCellID 基站数据库 | BYOK 模式接入 OpenCellID：设置页填写/测试 API Key（默认隐藏、日志脱敏）；位置页**可收起「基站查询」卡片**按当前选点查询附近基站（BBOX + Haversine 二次过滤 + 空间网格缓存），一键保存到基站模拟（信号强度由距离/覆盖半径/样本数算法估算）；可选**为 OpenCellID 社区贡献真实测量数据**（默认关闭，采集挂起窗口内的真实位置+基站批量上传，虚拟数据严禁上传；详见 `docs/reverse/opencellid-integration.md`） |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
 | 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
 | 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（仿泡泡虚拟定位）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，百度地图摇杆移动实时生效（详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`） |
@@ -178,15 +179,15 @@ adb reboot
 控制端主界面分为：
 
 - **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整测试配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放
-- **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）
+- **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）；底部**可收起「基站查询」卡片**：按当前选点/输入坐标通过 OpenCellID 查询附近基站（默认半径 1500 米，可调），展示制式/运营商/距离/信号/样本，点击条目勾选后**一键保存到基站模拟**（信号强度由距离/覆盖半径/样本数算法估算）
 - **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照；每个类型条目表单右上角提供**随机**按钮，一键生成合法随机参数
   - **自动托管（严格定位适配）**：基站 / WiFi / BLE / GNSS / 传感器子页面顶部提供「自动托管」开关。开启后该类型忽略手动配置，由模块基于当前虚拟位置自动生成最优且自洽的环境（GNSS 卫星 24 / usedInFix 12 / cn0 38，满足百度等 SDK 的 `a > 2` 卫星数判定；基站回退带合法 ID + 虚拟坐标的 CDMA，通过百度 `c.a.b()` 有效性校验并按 `&cdmall=` 反算；WiFi / BLE / 步频派生合法默认值）。**是否进行该类型环境模拟仍由用户开关决定**，开启虚拟定位时 UI 仅提示建议打开环境模拟；关闭自动托管后恢复手动配置（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）
   - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与 Nrfr 相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**Oplus 15 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 拦截 `TelephonyProperties` setter 并 1s 轮询重写（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
 - **环境配置持久化**：**wifi/cell/ble/gnss/sensor/sim 六类环境引擎的上次配置（数据 + 开关 + 来源快照）自动持久化到 `env_state` 表**（system_server 的 zve.db），重启后自动恢复并直接生效（enabled=true 的类型开机即应用）；环境页卡片实时显示“使用中 · 配置摘要/使用配置：快照名”，清除配置后持久化记录同步删除
 - **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
-- **设置**：高德地图 Key（可选，用于地图可视化）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
+- **设置**：高德地图 Key（可选，用于地图可视化）、**OpenCellID 基站数据库**（BYOK：自行在 [opencellid.org](https://opencellid.org) 注册并填写 API Key，默认密码态显示、日志脱敏；一键**测试 API Key**；「为 opencellid 社区贡献数据」复选框默认关闭，开启后主页一键采集会顺带把**挂起窗口内的真实观测**（位置 + 基站标识 + 信号 + 测量时间）批量上传到 OpenCellID，虚拟基站/虚拟坐标严禁上传）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
 
-所有操作走本地 API，无需外部网络（地图 SDK 除外）。
+所有操作走本地 API，无需外部网络（地图 SDK、OpenCellID 查询与数据贡献除外）。
 
 ### 3.5 常用 API（供自动化/脚本）
 
@@ -234,6 +235,13 @@ curl -X POST http://127.0.0.1:18790/api/debug/random-env \
 - Token 存于两个 APK 的 `assets/api_token.txt`（模块与检测器必须一致）。
 - 未带 Token 的请求**不返回任何字节直接断连**（fail-closed）。
 - 重新构建前如需更换 Token，同时更新两份文件并重新打包。
+
+### 3.7 OpenCellID 数据与许可
+
+- 基站数据库查询使用 [OpenCellID](https://opencellid.org/) 数据，数据许可：**Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)**。
+- API Key 由用户自行在 opencellid.org 注册申请（BYOK），仅保存在本地，不上传项目服务器、不写入日志。
+- 数据贡献默认关闭；开启后只上传设备**真实观测**的基站测量，严禁上传虚拟基站/虚拟坐标数据。
+- 官方文档：<https://wiki.opencellid.org/index.php/API>、<https://wiki.opencellid.org/wiki/Server_usage_policy>、<https://wiki.opencellid.org/wiki/Attribution>
 
 ---
 
