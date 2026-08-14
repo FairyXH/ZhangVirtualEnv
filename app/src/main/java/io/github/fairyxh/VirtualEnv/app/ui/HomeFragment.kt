@@ -57,6 +57,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -125,12 +126,17 @@ class HomeFragment : Fragment() {
     private val featureStatusRows = mutableStateListOf<Pair<String, String>>()
 
     private var collectResult by mutableStateOf<String?>(null)
+    /** OpenCellID 贡献上传结果（采集/录像模式共用，显示在对应结果下方）。 */
+    private var collectContributeResult by mutableStateOf<String?>(null)
     private var collectName by mutableStateOf("")
     private var detailDialog by mutableStateOf<Pair<String, String>?>(null)
     private var collectRemark by mutableStateOf("")
     private var collectButtonEnabled by mutableStateOf(true)
     private var saveCollectEnabled by mutableStateOf(false)
     private var collectRecordingMode by mutableStateOf(false)
+
+    /** 录像会话级去重：已贡献过的小区不再重复上传（key = mcc|mnc|cellId）。 */
+    private val contributedCellKeys = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     private var recordingName by mutableStateOf("")
     private var recordingInterval by mutableStateOf("3")
@@ -551,6 +557,20 @@ class HomeFragment : Fragment() {
                                     )
                                 )
                             }
+                            collectContributeResult?.let { text ->
+                                val ok = !text.contains("失败") && !text.contains("未开启")
+                                BasicText(
+                                    text,
+                                    Modifier
+                                        .padding(top = 4.dp)
+                                        .fillMaxWidth(),
+                                    style = TextStyle(
+                                        color = if (ok) Color(0xFF4CAF50) else Color(0xFFE57373),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
                             GlassField(
                                 value = collectName,
                                 onValueChange = { collectName = it },
@@ -631,6 +651,18 @@ class HomeFragment : Fragment() {
                                 Modifier.padding(top = 8.dp),
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
+                            collectContributeResult?.let { text ->
+                                val ok = !text.contains("失败") && !text.contains("未开启")
+                                BasicText(
+                                    text,
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(
+                                        color = if (ok) Color(0xFF4CAF50) else Color(0xFFE57373),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -1241,19 +1273,24 @@ class HomeFragment : Fragment() {
                                 TAG_SCOPE,
                                 "opencellid contribute success=${contribute.success} queued=${contribute.queued} msg=${contribute.message}"
                             )
-                            if (contribute.success && isAdded) {
-                                requireActivity().runOnUiThread {
-                                    Toast.makeText(
-                                        requireContext(),
-                                        "OpenCellID 贡献：${contribute.message}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                            val text = "OpenCellID 贡献：${contribute.message}"
+                            requireActivity().runOnUiThread {
+                                if (isAdded) {
+                                    collectContributeResult = text
+                                    Toast.makeText(requireContext(), text, Toast.LENGTH_SHORT).show()
                                 }
                             }
                         } catch (t: Throwable) {
                             ZLog.w(TAG_SCOPE, "opencellid contribute failed: ${t.message}")
+                            requireActivity().runOnUiThread {
+                                if (isAdded) collectContributeResult = "OpenCellID 贡献失败：${t.message}"
+                            }
                         }
                     }.start()
+                } else {
+                    requireActivity().runOnUiThread {
+                        if (isAdded) collectContributeResult = null
+                    }
                 }
                 lastCollectResult = result
                 requireActivity().runOnUiThread {
@@ -1483,6 +1520,11 @@ class HomeFragment : Fragment() {
                             val id = recordingId
                             if (id > 0) {
                                 val frame = streamSampler?.snapshot() ?: JSONObject()
+                                // OpenCellID 贡献：录像期间挂起虚拟环境，帧内 location/cell 均为真实观测；
+                                // 出现新基站（会话级去重）时实时上传
+                                if (io.github.fairyxh.VirtualEnv.app.cell.OpenCellIdSettings.isContributeEnabled(requireContext())) {
+                                    contributeNewCellsFromFrame(frame)
+                                }
                                 val result = ApiClient.appendRecordingFrame(id, frame)
                                 if (result.code == ApiResult.CODE_OK) {
                                     recordingFrames++
@@ -1521,6 +1563,7 @@ class HomeFragment : Fragment() {
         recordingScheduler = null
         sensorRecorder?.stop()
         streamSampler?.stop()
+        contributedCellKeys.clear()
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L
@@ -1538,6 +1581,43 @@ class HomeFragment : Fragment() {
                     refreshSavedItems()
                 }
             }
+        }
+    }
+
+    /**
+     * 录像帧中的新基站实时贡献上传（会话级去重，同一录像只上传一次相同小区）。
+     * 在录像采样线程调用；帧内 location/cell 均为挂起虚拟环境期间的真实观测。
+     */
+    private fun contributeNewCellsFromFrame(frame: JSONObject) {
+        try {
+            val cell = frame.optJSONObject("cell") ?: return
+            val cells = cell.optJSONArray("cells") ?: return
+            if (cells.length() == 0) return
+            val fresh = JSONArray()
+            for (i in 0 until cells.length()) {
+                val c = cells.optJSONObject(i) ?: continue
+                val mcc = c.optInt("mcc", -1)
+                val mnc = c.optInt("mnc", -1)
+                val cellId = if (c.has("ci")) c.optLong("ci", -1L) else c.optLong("cid", -1L)
+                if (mcc < 0 || mnc < 0 || cellId < 0) continue
+                val key = "$mcc|$mnc|$cellId"
+                if (contributedCellKeys.putIfAbsent(key, true) == null) {
+                    fresh.put(c)
+                }
+            }
+            if (fresh.length() == 0) return
+            val collect = JSONObject().apply {
+                put("location", frame.optJSONObject("location") ?: JSONObject())
+                put("cell", JSONObject().apply { put("cells", fresh) })
+            }
+            val contribute = CellRepository(requireContext()).contribute(collect)
+            val text = "OpenCellID 贡献：${contribute.message}（新基站 ${fresh.length()}）"
+            ZLog.i(TAG_SCOPE, "recording opencellid contribute new=${fresh.length()} success=${contribute.success} msg=${contribute.message}")
+            requireActivity().runOnUiThread {
+                if (isAdded) collectContributeResult = text
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "recording opencellid contribute failed: ${t.message}")
         }
     }
 
