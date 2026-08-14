@@ -134,6 +134,9 @@ fun EnvDetailPanel(
     var wifiBssid by remember { mutableStateOf("") }
     var wifiRssi by remember { mutableStateOf("") }
     var wifiFrequency by remember { mutableStateOf("") }
+    var wifiConnected by remember { mutableStateOf(false) }
+    var wifiLinkSpeed by remember { mutableStateOf("") }
+    var wifiIp by remember { mutableStateOf("") }
     var bleName by remember { mutableStateOf("") }
     var bleAddress by remember { mutableStateOf("") }
     var bleRssi by remember { mutableStateOf("") }
@@ -141,6 +144,8 @@ fun EnvDetailPanel(
     var bleMode by remember { mutableStateOf("dual") }
     var bleClassOfDevice by remember { mutableStateOf("") }
     var bleClassicRssi by remember { mutableStateOf("") }
+    var bleRaw by remember { mutableStateOf("") }
+    var bleIntervalMs by remember { mutableStateOf("") }
     var sensorStep by remember { mutableStateOf("") }
     var gnssCount by remember { mutableStateOf("") }
     var gnssUsed by remember { mutableStateOf("") }
@@ -261,6 +266,12 @@ fun EnvDetailPanel(
                     put("bssid", wifiBssid.trim())
                     put("rssi", wifiRssi.toIntOrNull() ?: -60)
                     put("frequency", wifiFrequency.toIntOrNull() ?: 2412)
+                    // 已连接状态（可选）
+                    if (wifiConnected) {
+                        put("connected", true)
+                        wifiLinkSpeed.trim().toIntOrNull()?.let { put("linkSpeed", it) }
+                        wifiIp.trim().ifEmpty { "192.168.1.100" }?.let { put("ipAddress", it) }
+                    }
                 }
             }
             TYPE_BLE -> {
@@ -278,6 +289,9 @@ fun EnvDetailPanel(
                     // 经典/双模附加字段（可选）
                     bleClassOfDevice.trim().toIntOrNull()?.let { put("classOfDevice", it) }
                     bleClassicRssi.trim().toIntOrNull()?.let { put("classicRssi", it) }
+                    // 广播 RAW 数据（base64，采集回放）与广播间隔（ms，可选）
+                    bleRaw.trim().takeIf { it.isNotBlank() }?.let { put("raw", it) }
+                    bleIntervalMs.trim().toIntOrNull()?.takeIf { it > 0 }?.let { put("intervalMs", it) }
                 }
             }
             TYPE_SIM -> {
@@ -352,6 +366,9 @@ fun EnvDetailPanel(
                 wifiBssid = ""
                 wifiRssi = ""
                 wifiFrequency = ""
+                wifiConnected = false
+                wifiLinkSpeed = ""
+                wifiIp = ""
             }
             TYPE_BLE -> {
                 bleName = ""
@@ -360,6 +377,8 @@ fun EnvDetailPanel(
                 bleMode = "dual"
                 bleClassOfDevice = ""
                 bleClassicRssi = ""
+                bleRaw = ""
+                bleIntervalMs = ""
             }
             TYPE_SIM -> {
                 simSlot = (entries.size).toString()
@@ -491,6 +510,9 @@ fun EnvDetailPanel(
                 wifiBssid = String.format("AA:BB:CC:%02X:%02X:%02X", rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256))
                 wifiRssi = (-90 + rnd.nextInt(50)).toString()
                 wifiFrequency = (2412 + rnd.nextInt(10) * 5).toString()
+                wifiConnected = rnd.nextBoolean()
+                wifiLinkSpeed = listOf("54", "300", "866", "1200")[rnd.nextInt(4)]
+                wifiIp = "192.168.1." + (2 + rnd.nextInt(250))
             }
             TYPE_BLE -> {
                 bleName = "ZVE-Device-${rnd.nextInt(1000)}"
@@ -499,6 +521,8 @@ fun EnvDetailPanel(
                 bleMode = listOf("ble", "classic", "dual")[rnd.nextInt(3)]
                 bleClassOfDevice = listOf("2360324", "2550136832", "0")[rnd.nextInt(3)]
                 bleClassicRssi = (-90 + rnd.nextInt(40)).toString()
+                bleRaw = ""
+                bleIntervalMs = listOf("", "1000", "2000")[rnd.nextInt(3)]
             }
             TYPE_SENSOR -> {
                 sensorStep = (90 + rnd.nextInt(91)).toString()
@@ -1119,6 +1143,34 @@ fun EnvDetailPanel(
                                 EntryFormField("bssid", wifiBssid, { wifiBssid = it }, fragment.getString(R.string.env_wifi_bssid_hint), backdrop)
                                 EntryFormField("rssi", wifiRssi, { wifiRssi = it }, fragment.getString(R.string.env_wifi_rssi_hint), backdrop)
                                 EntryFormField("frequency", wifiFrequency, { wifiFrequency = it }, fragment.getString(R.string.env_wifi_frequency_hint), backdrop)
+                                // 已连接状态开关
+                                Row(
+                                    Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    GlassPill(
+                                        onClick = { wifiConnected = !wifiConnected },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = wifiConnected,
+                                        containerColor = if (wifiConnected) colors.accent.copy(alpha = 0.18f)
+                                        else colors.bgTertiary.copy(alpha = 0.3f),
+                                        height = 36.dp
+                                    ) {
+                                        BasicText(
+                                            if (wifiConnected) "已连接" else "未连接",
+                                            Modifier.padding(horizontal = 8.dp),
+                                            style = TextStyle(
+                                                color = if (wifiConnected) colors.accent else colors.textPrimary,
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                    }
+                                }
+                                if (wifiConnected) {
+                                    EntryFormField("linkSpeed", wifiLinkSpeed, { wifiLinkSpeed = it }, "可选，如 866 (Mbps)", backdrop)
+                                    EntryFormField("ip", wifiIp, { wifiIp = it }, "可选，如 192.168.1.100", backdrop)
+                                }
                                 GlassButton(
                                     onClick = { addEntry() },
                                     backdrop = backdrop,
@@ -1190,6 +1242,8 @@ fun EnvDetailPanel(
                                     EntryFormField("classOfDevice", bleClassOfDevice, { bleClassOfDevice = it }, "可选，如 2360324（音频）", backdrop)
                                     EntryFormField("classicRssi", bleClassicRssi, { bleClassicRssi = it }, "可选，默认同 RSSI", backdrop)
                                 }
+                                EntryFormField("raw", bleRaw, { bleRaw = it }, "广播 RAW（base64，采集回放；留空按名称生成）", backdrop)
+                                EntryFormField("intervalMs", bleIntervalMs, { bleIntervalMs = it }, "广播间隔 ms，如 1000；留空立即", backdrop)
                                 GlassButton(
                                     onClick = { addEntry() },
                                     backdrop = backdrop,

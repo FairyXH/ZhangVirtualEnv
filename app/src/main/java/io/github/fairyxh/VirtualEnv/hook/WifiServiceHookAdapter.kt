@@ -265,8 +265,10 @@ class WifiServiceHookAdapter(
 
     private fun buildVirtualWifiInfo(returnType: Class<*>, data: JSONObject): Any {
         val info = newEmptyWifiInfo(returnType)
+        // 已连接状态优先：采集包 connected{} / 配置 connected{}，其次 networks[0]
+        val connected = data.optJSONObject("connected")
         val networks = data.optJSONArray("networks")
-        val first = networks?.optJSONObject(0)
+        val first = connected ?: networks?.optJSONObject(0)
         if (first != null) {
             try {
                 val ssid = first.optString("ssid", "")
@@ -307,11 +309,39 @@ class WifiServiceHookAdapter(
                 info.javaClass.getMethod("setBSSID", String::class.java).invoke(info, bssid)
                 info.javaClass.getMethod("setRssi", Int::class.java).invoke(info, rssi)
                 info.javaClass.getMethod("setFrequency", Int::class.java).invoke(info, freq)
+                // 已连接状态（WifiInfo hidden API setter，反射兼容）
+                if (first.optBoolean("connected", connected != null)) {
+                    info.javaClass.getMethod("setNetworkId", Int::class.java).invoke(
+                        info, first.optInt("networkId", 1)
+                    )
+                    info.javaClass.getMethod("setLinkSpeed", Int::class.java).invoke(
+                        info, first.optInt("linkSpeed", 866)
+                    )
+                    try {
+                        info.javaClass.getMethod("setSupplicantState", Class.forName("android.net.wifi.SupplicantState"))
+                            .invoke(info, Class.forName("android.net.wifi.SupplicantState").getField("COMPLETED").get(null))
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "set supplicant state failed", t)
+                    }
+                    val ip = first.optString("ipAddress", "192.168.1.100")
+                    try {
+                        val addr = java.net.InetAddress.getByName(ip)
+                        info.javaClass.getMethod("setIpAddress", Int::class.java).invoke(info, ipv4ToInt(addr))
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "set ip failed", t)
+                    }
+                }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "build virtual wifi info failed", t)
             }
         }
         return info
+    }
+
+    private fun ipv4ToInt(addr: java.net.InetAddress): Int {
+        val b = addr.address
+        return ((b[0].toInt() and 0xFF) shl 24) or ((b[1].toInt() and 0xFF) shl 16) or
+            ((b[2].toInt() and 0xFF) shl 8) or (b[3].toInt() and 0xFF)
     }
 
     private fun findMethod(clazz: Class<*>, name: String, paramCount: Int): Method? {

@@ -236,6 +236,24 @@ class EnvironmentCollector(private val context: Context) {
         val out = JSONObject()
         try {
             out.put("enabled", wm.isWifiEnabled)
+            // 已连接状态采集（虚拟 WiFi 已连接模拟的数据来源）
+            try {
+                val conn = wm.connectionInfo
+                if (conn != null) {
+                    out.put("connected", JSONObject().apply {
+                        put("ssid", conn.ssid?.removeSurrounding("\"").orEmpty())
+                        put("bssid", conn.bssid.orEmpty())
+                        put("rssi", conn.rssi)
+                        put("linkSpeed", conn.linkSpeed)
+                        put("frequency", conn.frequency)
+                        put("networkId", conn.networkId)
+                        put("supplicantState", conn.supplicantState?.name.orEmpty())
+                        put("ipAddress", android.text.format.Formatter.formatIpAddress(conn.ipAddress))
+                    })
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "collect wifi connectionInfo failed", t)
+            }
             val handler = Handler(Looper.getMainLooper())
             val start = SystemClock.elapsedRealtime()
             val poll = object : Runnable {
@@ -332,6 +350,16 @@ class EnvironmentCollector(private val context: Context) {
                 item.put("txPower", result.txPower)
                 val name = result.scanRecord?.deviceName ?: device.name
                 item.put("name", name ?: "")
+                // 广播 RAW 数据（ScanRecord 原始字节，base64 存储，用于模拟回放）
+                try {
+                    result.scanRecord?.bytes?.let { bytes ->
+                        if (bytes.isNotEmpty()) {
+                            item.put("raw", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                        }
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "collect ble raw failed", t)
+                }
                 result.scanRecord?.manufacturerSpecificData?.let { map ->
                     val sb = StringBuilder()
                     for (i in 0 until map.size()) {

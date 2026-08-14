@@ -70,7 +70,18 @@ object VirtualBleFactory {
                 if (address.isBlank() || !seen.add(address)) return
                 try {
                     val device = getRemoteDevice.invoke(adapterInstance, address)
-                    val record = parseFromBytes.invoke(null, buildAdvBytes(d.optString("name", "")))
+                    // RAW 广播数据优先（base64，采集回放）；缺失时按名称生成
+                    val rawBytes: ByteArray = try {
+                        val raw = d.optString("raw", "")
+                        if (raw.isNotBlank()) {
+                            android.util.Base64.decode(raw, android.util.Base64.DEFAULT)
+                        } else {
+                            buildAdvBytes(d.optString("name", ""))
+                        }
+                    } catch (_: Throwable) {
+                        buildAdvBytes(d.optString("name", ""))
+                    }
+                    val record = parseFromBytes.invoke(null, rawBytes)
                     result.add(
                         ctor.newInstance(
                             device,

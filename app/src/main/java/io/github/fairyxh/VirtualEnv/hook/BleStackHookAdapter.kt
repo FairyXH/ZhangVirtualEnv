@@ -228,10 +228,27 @@ class BleStackHookAdapter(
                 Class.forName("android.bluetooth.le.IScannerCallback")
                     .getMethod("onScanResult", resultClass)
             }
-            results.forEach { onScanResult.invoke(callback, it) }
+            // 广播间隔（ms）：配置 >0 时按间隔逐个投递，模拟周期性广播；0/缺省立即全部投递
+            val intervalMs = virtual.optInt("intervalMs", 0).coerceAtLeast(0)
+            if (intervalMs > 0 && results.size > 1) {
+                val handler = Handler(Looper.getMainLooper())
+                results.forEachIndexed { idx, res ->
+                    handler.postDelayed({
+                        try {
+                            onScanResult.invoke(callback, res)
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "deliver delayed scan result failed", t)
+                        }
+                    }, idx.toLong() * intervalMs)
+                }
+                logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble stack startScan -> virtual ${results.size} results scheduled interval=${intervalMs}ms")
+                ZLog.i(TAG_SCOPE, "ble stack startScan -> virtual ${results.size} results interval=${intervalMs}ms")
+            } else {
+                results.forEach { onScanResult.invoke(callback, it) }
+                logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble stack startScan -> virtual ${results.size} results delivered")
+                ZLog.i(TAG_SCOPE, "ble stack startScan -> virtual ${results.size} results")
+            }
             // 启用即覆盖：空配置也阻断真实扫描（App 收不到真实设备）
-            logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble stack startScan -> virtual ${results.size} results delivered")
-            ZLog.i(TAG_SCOPE, "ble stack startScan -> virtual ${results.size} results")
             return true
         } catch (t: Throwable) {
             logSink?.invoke(4, "ZVirtualEnv", "[Hook] deliver virtual ble stack failed: ${t.message}")
