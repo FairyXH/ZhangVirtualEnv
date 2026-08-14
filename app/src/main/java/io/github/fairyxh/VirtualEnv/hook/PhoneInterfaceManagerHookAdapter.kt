@@ -74,7 +74,8 @@ class PhoneInterfaceManagerHookAdapter(
         var hooked = 0
         methods.forEach { method ->
             val ok = registrar.register(method) { chain ->
-                if (!virtualLocationEnabled()) {
+                // 严格放行：只有虚拟定位**且基站模拟已开启**才接管；否则走原始真实链路
+                if (!virtualLocationEnabled() || cache.currentCell() == null) {
                     chain.proceed()
                     return@register null
                 }
@@ -98,18 +99,16 @@ class PhoneInterfaceManagerHookAdapter(
         return hooked
     }
 
-    /** 构造虚拟基站列表：优先按 cell 配置，否则回退带虚拟经纬度的 CDMA。 */
+    /** 构造虚拟基站列表：仅当基站模拟配置可用时生成；否则返回空（调用方放行真实数据）。 */
     private fun buildVirtualCells(): List<Any> {
-        val cellData = cache.currentCell()
-        if (cellData != null) {
-            try {
-                val list = VirtualCellFactory.buildCellInfoList(cellData)
-                if (list.isNotEmpty()) return list
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "requestCellInfoUpdate config build failed, fallback cdma", t)
-            }
+        val cellData = cache.currentCell() ?: return emptyList()
+        try {
+            val list = VirtualCellFactory.buildCellInfoList(cellData)
+            if (list.isNotEmpty()) return list
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "requestCellInfoUpdate config build failed, fallback cdma", t)
         }
-        val cellCount = cellData?.optJSONArray("entries")?.length()?.coerceIn(1, 16) ?: 1
+        val cellCount = cellData.optJSONArray("entries")?.length()?.coerceIn(1, 16) ?: 1
         return (0 until cellCount).mapNotNull {
             VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
         }
@@ -144,28 +143,25 @@ class PhoneInterfaceManagerHookAdapter(
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
             val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null
-            // 优先按 cell 配置生成对应类型（LTE/GSM/NR/WCDMA）；无配置但虚拟定位启用时
-            // 回退 CDMA（带虚拟经纬度，供网络定位 SDK 换算坐标）。
+            // 严格放行：基站模拟未开启（即使虚拟定位开启）→ 返回原始真实基站
             val cellData = cache.currentCell()
-            if (cellData != null) {
-                try {
-                    val list = VirtualCellFactory.buildCellInfoList(cellData)
-                    if (list.isNotEmpty()) {
-                        logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> virtual ${list.size} cells from config")
-                        return@register list
-                    }
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo config build failed, fallback cdma", t)
+            if (cellData == null) {
+                logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> real (cell sim off)")
+                return@register original
+            }
+            try {
+                val list = VirtualCellFactory.buildCellInfoList(cellData)
+                if (list.isNotEmpty()) {
+                    logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> virtual ${list.size} cells from config")
+                    return@register list
                 }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo config build failed, fallback cdma", t)
             }
             if (!virtualLocationEnabled()) return@register original
             try {
-                // 多基站：按 cell 配置 entries 数量返回多个带虚拟经纬度的基站（默认 1 个）
-                val cellCount = cache.currentCell()
-                    ?.optJSONArray("entries")
-                    ?.length()
-                    ?.coerceIn(1, 16)
-                    ?: 1
+                // 配置存在但全部构建失败：按 entries 数量回退带虚拟经纬度的 CDMA
+                val cellCount = cellData.optJSONArray("entries")?.length()?.coerceIn(1, 16) ?: 1
                 val cells = (0 until cellCount).mapNotNull {
                     VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
                 }
@@ -200,6 +196,8 @@ class PhoneInterfaceManagerHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
+            // 基站模拟未开启 → 放行真实 CellIdentity
+            if (cache.currentCell() == null) return@register original
             if (!virtualLocationEnabled()) return@register original
             try {
                 val identity = VirtualCellFactory.buildCellIdentityCdma(cache.locationLat(), cache.locationLon())
@@ -230,6 +228,8 @@ class PhoneInterfaceManagerHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
+            // 基站模拟未开启 → 放行真实邻区
+            if (cache.currentCell() == null) return@register original
             if (!virtualLocationEnabled()) return@register original
             try {
                 ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getNeighboringCellInfo -> empty (virtual location)")

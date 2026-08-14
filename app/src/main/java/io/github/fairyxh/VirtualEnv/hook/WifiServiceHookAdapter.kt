@@ -126,13 +126,9 @@ class WifiServiceHookAdapter(
                     val slice = newParceledListSlice(method.returnType, list)
                     logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> virtual ${list.size} networks")
                     slice
-                } else if (!virtualLocationEnabled()) {
-                    original
                 } else {
-                    // 虚拟定位开启但未配置虚拟 WiFi：阻断网络定位数据源
-                    val slice = newParceledListSlice(method.returnType, emptyList<Any>())
-                    logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> empty (virtual location)")
-                    slice
+                    // WiFi 模拟未开启：直接放行真实扫描结果（不自作主张阻断）
+                    original
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "WifiService.getScanResults virtual failed, fallback", t)
@@ -226,13 +222,9 @@ class WifiServiceHookAdapter(
                     val info = buildVirtualWifiInfo(method.returnType, virtual)
                     logCallOnce("conn|$pkg", "WifiService.getConnectionInfo pkg=$pkg -> virtual")
                     info
-                } else if (!virtualLocationEnabled()) {
-                    original
                 } else {
-                    // 虚拟定位开启但未配置虚拟 WiFi：返回空 WifiInfo，阻断网络定位
-                    val info = newEmptyWifiInfo(method.returnType)
-                    logCallOnce("conn|$pkg", "WifiService.getConnectionInfo pkg=$pkg -> empty (virtual location)")
-                    info
+                    // WiFi 模拟未开启：直接放行真实连接信息（不自作主张阻断）
+                    original
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "WifiService.getConnectionInfo virtual failed, fallback", t)

@@ -143,18 +143,13 @@ class FrameworkEnvHookAdapter(
         }
         val ok = registrar.register(method) { chain ->
             val original = chain.proceed()
+            // 严格放行：基站模拟未开启（即使虚拟定位开启）→ 返回原始真实基站
+            val virtual = cache.currentCell() ?: return@register original
             // 虚拟定位未启用：放行真实基站（检测器/普通场景不误判）
             if (!cache.isLocationEnabled()) return@register original
             try {
-                val virtual = cache.currentCell()
-                val list = if (virtual != null) {
-                    VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
-                        // 空配置 fallback：带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
-                        listOfNotNull(
-                            VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
-                        )
-                    }
-                } else {
+                val list = VirtualCellFactory.buildCellInfoList(virtual).ifEmpty {
+                    // 配置存在但构建为空：回退带虚拟经纬度的 CDMA（供网络定位 SDK 换算坐标）
                     listOfNotNull(
                         VirtualCellFactory.buildCellInfoCdma(cache.locationLat(), cache.locationLon())
                     )
