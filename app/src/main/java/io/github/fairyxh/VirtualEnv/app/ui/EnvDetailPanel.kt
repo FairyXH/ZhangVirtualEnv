@@ -140,7 +140,7 @@ fun EnvDetailPanel(
     var wifiIp by remember { mutableStateOf("") }
     /** 「从已保存 WiFi 选择」弹窗状态与系统已保存 WiFi 列表。 */
     var wifiPickDialog by remember { mutableStateOf(false) }
-    var wifiSystemNetworks by remember { mutableStateOf<List<String>>(emptyList()) }
+    var wifiSystemNetworks by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var wifiSystemLoading by remember { mutableStateOf(false) }
     var bleName by remember { mutableStateOf("") }
     var bleAddress by remember { mutableStateOf("") }
@@ -811,20 +811,21 @@ fun EnvDetailPanel(
      * 2. Root：`cmd wifi list-networks`；
      * 3. Root：解析 WifiConfigStore.xml。
      */
-    fun loadSystemSavedWifi(context: android.content.Context): List<String> {
-        val out = LinkedHashSet<String>()
+    fun loadSystemSavedWifi(context: android.content.Context): List<JSONObject> {
+        // 1. 汇总 SSID（含 security 信息，能拿到尽量拿）
+        val bySsid = LinkedHashMap<String, String>()
         try {
             val wm = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
                     as android.net.wifi.WifiManager
             @Suppress("DEPRECATION")
             wm.configuredNetworks?.forEach { c ->
                 val ssid = c.SSID?.removeSurrounding("\"").orEmpty()
-                if (ssid.isNotBlank()) out.add(ssid)
+                if (ssid.isNotBlank()) bySsid[ssid] = c.allowedKeyManagement?.toString().orEmpty()
             }
         } catch (t: Throwable) {
             android.util.Log.w("ZVirtualEnv", "configuredNetworks read failed", t)
         }
-        if (out.isEmpty()) {
+        if (bySsid.isEmpty()) {
             try {
                 val proc = ProcessBuilder("su", "-c", "cmd wifi list-networks")
                     .redirectErrorStream(true).start()
@@ -834,14 +835,15 @@ fun EnvDetailPanel(
                 text.lineSequence().forEach { line ->
                     val trimmed = line.trim()
                     if (trimmed.isEmpty() || trimmed.startsWith("Network Id")) return@forEach
-                    val m = Regex("^\\d+\\s+(.+?)\\s{2,}\\S+.*$").find(trimmed) ?: return@forEach
-                    m.groupValues[1].trim().takeIf { it.isNotBlank() }?.let { out.add(it) }
+                    val m = Regex("^\\d+\\s+(.+?)\\s{2,}(\\S.*)$").find(trimmed) ?: return@forEach
+                    val ssid = m.groupValues[1].trim()
+                    if (ssid.isNotBlank()) bySsid[ssid] = m.groupValues[2].trim()
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("ZVirtualEnv", "root wifi list-networks failed", t)
             }
         }
-        if (out.isEmpty()) {
+        if (bySsid.isEmpty()) {
             try {
                 val proc = ProcessBuilder(
                     "su", "-c", "cat /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml"
@@ -849,13 +851,42 @@ fun EnvDetailPanel(
                 val text = proc.inputStream.readBytes().toString(Charsets.UTF_8)
                 proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
                 Regex("ssid=\"([^\"]+)\"").findAll(text).forEach { m ->
-                    m.groupValues[1].takeIf { it.isNotBlank() }?.let { out.add(it) }
+                    m.groupValues[1].takeIf { it.isNotBlank() }?.let { bySsid[it] = "" }
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("ZVirtualEnv", "root WifiConfigStore read failed", t)
             }
         }
-        return out.toList().sorted()
+        // 2. 用最近扫描结果按 SSID 补 bssid/rssi/frequency（系统已保存配置本身不存 rssi）
+        val scanBySsid = HashMap<String, JSONObject>()
+        try {
+            val wm = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
+                    as android.net.wifi.WifiManager
+            wm.scanResults?.forEach { r ->
+                val key = r.SSID
+                if (key.isNotBlank() && !scanBySsid.containsKey(key)) {
+                    scanBySsid[key] = JSONObject().apply {
+                        put("bssid", r.BSSID.orEmpty())
+                        put("rssi", r.level)
+                        put("frequency", r.frequency)
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("ZVirtualEnv", "scan results for saved wifi failed", t)
+        }
+        val out = bySsid.keys.sorted().map { ssid ->
+            JSONObject().apply {
+                put("ssid", ssid)
+                scanBySsid[ssid]?.let { scan ->
+                    put("bssid", scan.optString("bssid", ""))
+                    put("rssi", scan.optInt("rssi", -70))
+                    put("frequency", scan.optInt("frequency", 2412))
+                }
+                put("security", bySsid[ssid].orEmpty())
+            }
+        }
+        return out
     }
 
     /** 从已保存 WiFi 快照加载网络列表到当前条目（替换当前 WiFi 条目）。 */
@@ -1650,15 +1681,15 @@ fun EnvDetailPanel(
         GlassWifiPickerDialog(
             title = "选择系统已保存 WiFi",
             items = wifiSystemNetworks,
-            onSelect = { ssid ->
+            onSelect = { item ->
                 wifiPickDialog = false
                 entries.add(JSONObject().apply {
-                    put("ssid", ssid)
-                    put("bssid", "")
-                    put("rssi", -60)
-                    put("frequency", 2412)
+                    put("ssid", item.optString("ssid", ""))
+                    put("bssid", item.optString("bssid", ""))
+                    put("rssi", item.optInt("rssi", -60))
+                    put("frequency", item.optInt("frequency", 2412))
                 })
-                toast("已添加 WiFi：$ssid")
+                toast("已添加 WiFi：${item.optString("ssid", "")}")
             },
             onDismiss = { wifiPickDialog = false }
         )

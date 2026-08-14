@@ -162,7 +162,7 @@ class WifiServiceHookAdapter(
             try {
                 val scan = ctor.newInstance()
                 setField(scan, "SSID", n.optString("ssid", ""))
-                setField(scan, "BSSID", n.optString("bssid", ""))
+                setField(scan, "BSSID", sanitizeBssid(n.optString("bssid", ""), n.optString("ssid", "")))
                 setField(scan, "level", n.optInt("rssi", -70))
                 setField(scan, "frequency", n.optInt("frequency", 2412))
                 setField(scan, "capabilities", n.optString("capabilities", "[WPA2-PSK-CCMP]"))
@@ -272,7 +272,7 @@ class WifiServiceHookAdapter(
         if (first != null) {
             try {
                 val ssid = first.optString("ssid", "")
-                val bssid = first.optString("bssid", "")
+                val bssid = sanitizeBssid(first.optString("bssid", ""), first.optString("ssid", ""))
                 val rssi = first.optInt("rssi", -70)
                 val freq = first.optInt("frequency", 2412)
                 // Oplus 15 WifiInfo 的字段全部 private（无 mSSID 字段，SSID 存 WifiSsid 对象），
@@ -336,6 +336,21 @@ class WifiServiceHookAdapter(
             }
         }
         return info
+    }
+
+    /**
+     * BSSID 兜底：空/非法时基于 SSID 生成合法本地管理 MAC（02:00:00:xx:xx:xx）。
+     * 空 BSSID 会让 system_server MacAddress.fromString("") 抛 IllegalArgumentException
+     * 导致 WifiHandlerThread FATAL（已实测系统崩溃）。
+     */
+    private fun sanitizeBssid(raw: String, ssid: String): String {
+        val trimmed = raw.trim().uppercase()
+        if (Regex("^([0-9A-F]{2}:){5}[0-9A-F]{2}$").matches(trimmed)) return trimmed
+        val h = ssid.hashCode()
+        return String.format(
+            "02:00:00:%02X:%02X:%02X",
+            (h ushr 16) and 0xFF, (h ushr 8) and 0xFF, h and 0xFF
+        )
     }
 
     private fun ipv4ToInt(addr: java.net.InetAddress): Int {

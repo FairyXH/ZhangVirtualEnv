@@ -122,8 +122,8 @@ fun GlassTextDialog(
 @Composable
 fun GlassWifiPickerDialog(
     title: String,
-    items: List<String>,
-    onSelect: (String) -> Unit,
+    items: List<org.json.JSONObject>,
+    onSelect: (org.json.JSONObject) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = glassColors()
@@ -184,9 +184,19 @@ fun GlassWifiPickerDialog(
                                     .padding(top = 8.dp)
                                     .verticalScroll(rememberScrollState())
                             ) {
-                                pageItems.forEach { ssid ->
+                                pageItems.forEach { item ->
+                                    val ssid = item.optString("ssid", "")
+                                    val bssid = item.optString("bssid", "")
+                                    val rssi = item.optInt("rssi", Int.MIN_VALUE)
+                                    val security = item.optString("security", "")
+                                    val line = buildString {
+                                        append(ssid)
+                                        if (bssid.isNotBlank()) append("  ").append(bssid)
+                                        if (rssi != Int.MIN_VALUE) append("  ").append(rssi).append("dBm")
+                                        if (security.isNotBlank()) append("  ").append(security)
+                                    }
                                     GlassPill(
-                                        onClick = { onSelect(ssid) },
+                                        onClick = { onSelect(item) },
                                         backdrop = backdrop,
                                         modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
                                         selected = false,
@@ -194,9 +204,9 @@ fun GlassWifiPickerDialog(
                                         height = 38.dp
                                     ) {
                                         BasicText(
-                                            ssid,
+                                            line,
                                             Modifier.padding(horizontal = 12.dp),
-                                            style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
                                         )
                                     }
                                 }
