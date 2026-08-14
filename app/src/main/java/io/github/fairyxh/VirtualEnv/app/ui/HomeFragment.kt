@@ -123,6 +123,8 @@ class HomeFragment : Fragment() {
     private var statusText by mutableStateOf("")
     private var statusDetail by mutableStateOf("")
     private var moduleEnabled by mutableStateOf(true)
+    /** Root 权限是否可用（su 可用）。 */
+    private var rootAvailable by mutableStateOf(false)
     private val featureStatusRows = mutableStateListOf<Pair<String, String>>()
 
     private var collectResult by mutableStateOf<String?>(null)
@@ -224,6 +226,21 @@ class HomeFragment : Fragment() {
         recordingStatus = getString(R.string.home_recording_idle)
         playbackStatus = getString(R.string.home_playback_idle)
         collectRecordingMode = false
+
+        // Root 权限检测（su 可用性）
+        Thread {
+            val root = try {
+                val proc = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+                val text = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+                proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                text.contains("uid=0")
+            } catch (_: Throwable) {
+                false
+            }
+            if (isAdded) {
+                requireActivity().runOnUiThread { rootAvailable = root }
+            }
+        }.start()
 
         refreshBackendStatus()
         refreshSavedItems()
@@ -350,6 +367,24 @@ class HomeFragment : Fragment() {
                                 statusDetail,
                                 Modifier.padding(top = 8.dp),
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        }
+                        // Root 权限状态（su 可用性）
+                        Row(
+                            Modifier.padding(top = 6.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StatusDot(
+                                enabled = rootAvailable,
+                                modifier = Modifier.size(8.dp)
+                            )
+                            BasicText(
+                                if (rootAvailable) "Root 权限：可用" else "Root 权限：不可用",
+                                Modifier.padding(start = 6.dp),
+                                style = TextStyle(
+                                    color = if (rootAvailable) Color(0xFF4CAF50) else colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
                             )
                         }
                         BasicText(

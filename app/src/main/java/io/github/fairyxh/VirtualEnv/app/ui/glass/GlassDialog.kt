@@ -1,5 +1,7 @@
 package io.github.fairyxh.VirtualEnv.app.ui.glass
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -14,6 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -103,6 +109,150 @@ fun GlassTextDialog(
                     contentPadding = 0.dp
                 ) {
                     GlassDialogContent(title, text, backdrop, onDismiss)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * WiFi 已保存列表弹窗（分页，每页 [PAGE_SIZE] 条）。
+ * 点击条目回调 onSelect(ssid)。
+ */
+@Composable
+fun GlassWifiPickerDialog(
+    title: String,
+    items: List<String>,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = glassColors()
+    var page by remember { mutableStateOf(0) }
+    val totalPages = (items.size + 14) / 15
+    if (page >= totalPages && totalPages > 0) page = totalPages - 1
+    val pageItems = items.drop(page * 15).take(15)
+
+    Dialog(onDismissRequest = onDismiss) {
+        val backdrop = rememberLayerBackdrop()
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        LaunchedEffect(dialogWindow) {
+            val w = dialogWindow ?: return@LaunchedEffect
+            w.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.MATCH_PARENT
+            )
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                w.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                w.setBackgroundBlurRadius(40)
+            }
+        }
+        DisposableEffect(dialogWindow) {
+            onDispose {
+                val w = dialogWindow ?: return@onDispose
+                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                if (android.os.Build.VERSION.SDK_INT >= 31) w.setBackgroundBlurRadius(0)
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp),
+                    cornerRadius = 22.dp,
+                    containerColor = colors.bgSecondary.copy(alpha = 0.62f),
+                    contentPadding = 0.dp
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        BasicText(
+                            title,
+                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        )
+                        if (items.isEmpty()) {
+                            BasicText(
+                                "未读取到系统已保存 WiFi（无权限时模块会用 Root 读取）",
+                                Modifier.padding(top = 12.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        } else {
+                            Column(
+                                Modifier
+                                    .padding(top = 8.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                pageItems.forEach { ssid ->
+                                    GlassPill(
+                                        onClick = { onSelect(ssid) },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                        height = 38.dp
+                                    ) {
+                                        BasicText(
+                                            ssid,
+                                            Modifier.padding(horizontal = 12.dp),
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
+                                        )
+                                    }
+                                }
+                            }
+                            Row(
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassPill(
+                                    onClick = { if (page > 0) page-- },
+                                    backdrop = backdrop,
+                                    selected = false,
+                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                    height = 34.dp
+                                ) {
+                                    BasicText(
+                                        "上一页",
+                                        Modifier.padding(horizontal = 12.dp),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                    )
+                                }
+                                BasicText(
+                                    "第 ${page + 1}/$totalPages 页 · 共 ${items.size} 个",
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                                GlassPill(
+                                    onClick = { if (page < totalPages - 1) page++ },
+                                    backdrop = backdrop,
+                                    selected = false,
+                                    containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                                    height = 34.dp
+                                ) {
+                                    BasicText(
+                                        "下一页",
+                                        Modifier.padding(horizontal = 12.dp),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
+                                    )
+                                }
+                            }
+                        }
+                        GlassPill(
+                            onClick = onDismiss,
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                            selected = false,
+                            containerColor = colors.bgTertiary.copy(alpha = 0.3f),
+                            height = 36.dp
+                        ) {
+                            BasicText(
+                                "关闭",
+                                Modifier.padding(horizontal = 12.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        }
+                    }
                 }
             }
         }

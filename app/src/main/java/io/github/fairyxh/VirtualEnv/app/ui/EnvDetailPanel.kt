@@ -50,6 +50,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassWifiPickerDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
@@ -137,8 +138,10 @@ fun EnvDetailPanel(
     var wifiConnected by remember { mutableStateOf(false) }
     var wifiLinkSpeed by remember { mutableStateOf("") }
     var wifiIp by remember { mutableStateOf("") }
-    /** 「从已保存 WiFi 选择」展开状态。 */
-    var wifiPickExpanded by remember { mutableStateOf(false) }
+    /** 「从已保存 WiFi 选择」弹窗状态与系统已保存 WiFi 列表。 */
+    var wifiPickDialog by remember { mutableStateOf(false) }
+    var wifiSystemNetworks by remember { mutableStateOf<List<String>>(emptyList()) }
+    var wifiSystemLoading by remember { mutableStateOf(false) }
     var bleName by remember { mutableStateOf("") }
     var bleAddress by remember { mutableStateOf("") }
     var bleRssi by remember { mutableStateOf("") }
@@ -802,6 +805,55 @@ fun EnvDetailPanel(
         }
     }
 
+    /**
+     * 读取系统已保存 WiFi（SSID 列表）：
+     * 1. WifiManager.configuredNetworks（普通权限，Android 10+ 通常受限）；
+     * 2. Root：`cmd wifi list-networks`；
+     * 3. Root：解析 WifiConfigStore.xml。
+     */
+    fun loadSystemSavedWifi(context: android.content.Context): List<String> {
+        val out = LinkedHashSet<String>()
+        try {
+            val wm = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
+                    as android.net.wifi.WifiManager
+            @Suppress("DEPRECATION")
+            wm.configuredNetworks?.forEach { c ->
+                val ssid = c.SSID?.removeSurrounding("\"").orEmpty()
+                if (ssid.isNotBlank()) out.add(ssid)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("ZVirtualEnv", "configuredNetworks read failed", t)
+        }
+        if (out.isEmpty()) {
+            try {
+                val proc = ProcessBuilder("su", "-c", "cmd wifi list-networks")
+                    .redirectErrorStream(true).start()
+                val text = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+                proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                Regex("\"(.*?)\"").findAll(text).forEach { m ->
+                    m.groupValues[1].takeIf { it.isNotBlank() }?.let { out.add(it) }
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("ZVirtualEnv", "root wifi list-networks failed", t)
+            }
+        }
+        if (out.isEmpty()) {
+            try {
+                val proc = ProcessBuilder(
+                    "su", "-c", "cat /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml"
+                ).redirectErrorStream(true).start()
+                val text = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+                proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                Regex("ssid=\"([^\"]+)\"").findAll(text).forEach { m ->
+                    m.groupValues[1].takeIf { it.isNotBlank() }?.let { out.add(it) }
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("ZVirtualEnv", "root WifiConfigStore read failed", t)
+            }
+        }
+        return out.toList().sorted()
+    }
+
     /** 从已保存 WiFi 快照加载网络列表到当前条目（替换当前 WiFi 条目）。 */
     fun loadWifiFromSaved(item: JSONObject) {
         val data = item.optJSONObject("data") ?: return
@@ -1182,53 +1234,31 @@ fun EnvDetailPanel(
                                         )
                                     }
                                     GlassPill(
-                                        onClick = { wifiPickExpanded = !wifiPickExpanded },
+                                        onClick = {
+                                            if (!wifiSystemLoading) {
+                                                wifiPickDialog = true
+                                                wifiSystemLoading = true
+                                                wifiSystemNetworks = emptyList()
+                                                Thread {
+                                                    val list = loadSystemSavedWifi(fragment.requireContext())
+                                                    fragment.requireActivity().runOnUiThread {
+                                                        wifiSystemNetworks = list
+                                                        wifiSystemLoading = false
+                                                    }
+                                                }.start()
+                                            }
+                                        },
                                         backdrop = backdrop,
                                         modifier = Modifier.padding(start = 8.dp),
-                                        selected = wifiPickExpanded,
-                                        containerColor = if (wifiPickExpanded) colors.accent.copy(alpha = 0.18f)
-                                        else colors.bgTertiary.copy(alpha = 0.3f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.3f),
                                         height = 30.dp
                                     ) {
                                         BasicText(
-                                            "从已保存 WiFi 选择",
+                                            if (wifiSystemLoading) "读取中…" else "从已保存 WiFi 选择",
                                             Modifier.padding(horizontal = 10.dp),
-                                            style = TextStyle(
-                                                color = if (wifiPickExpanded) colors.accent else colors.textPrimary,
-                                                fontSize = 12.sp
-                                            )
+                                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
                                         )
-                                    }
-                                }
-                                if (wifiPickExpanded) {
-                                    val wifiSaved = savedItems.filter { it.optString("type") == TYPE_WIFI }
-                                    if (wifiSaved.isEmpty()) {
-                                        BasicText(
-                                            "暂无已保存 WiFi 配置（先在上方保存一条）",
-                                            Modifier.padding(top = 8.dp),
-                                            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
-                                        )
-                                    }
-                                    wifiSaved.forEach { item ->
-                                        val data = item.optJSONObject("data")
-                                        val networks = data?.optJSONArray("networks")?.length() ?: 0
-                                        GlassPill(
-                                            onClick = {
-                                                loadWifiFromSaved(item)
-                                                wifiPickExpanded = false
-                                            },
-                                            backdrop = backdrop,
-                                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
-                                            selected = false,
-                                            containerColor = colors.bgTertiary.copy(alpha = 0.3f),
-                                            height = 36.dp
-                                        ) {
-                                            BasicText(
-                                                item.optString("name", "未命名") + "（$networks 个网络）",
-                                                Modifier.padding(horizontal = 12.dp),
-                                                style = TextStyle(color = colors.textPrimary, fontSize = 13.sp)
-                                            )
-                                        }
                                     }
                                 }
                                 EntryFormField("ssid", wifiSsid, { wifiSsid = it }, fragment.getString(R.string.env_wifi_ssid_hint), backdrop)
@@ -1612,6 +1642,23 @@ fun EnvDetailPanel(
             )
         }
 
+    if (wifiPickDialog) {
+        GlassWifiPickerDialog(
+            title = "选择系统已保存 WiFi",
+            items = wifiSystemNetworks,
+            onSelect = { ssid ->
+                wifiPickDialog = false
+                entries.add(JSONObject().apply {
+                    put("ssid", ssid)
+                    put("bssid", "")
+                    put("rssi", -60)
+                    put("frequency", 2412)
+                })
+                toast("已添加 WiFi：$ssid")
+            },
+            onDismiss = { wifiPickDialog = false }
+        )
+    }
     detailDialog?.let { item ->
         GlassTextDialog(
             title = fragment.getString(R.string.env_detail_data_title) + " · " + item.optString("name", ""),
