@@ -62,9 +62,18 @@ class BleStackHookAdapter(
         const val ACTION_FOUND = "android.bluetooth.device.action.FOUND"
         const val ACTION_DISCOVERY_STARTED = "android.bluetooth.adapter.action.DISCOVERY_STARTED"
         const val ACTION_DISCOVERY_FINISHED = "android.bluetooth.adapter.action.DISCOVERY_FINISHED"
+        const val ACTION_BOND_STATE_CHANGED = "android.bluetooth.device.action.BOND_STATE_CHANGED"
         const val PERM_BLUETOOTH_SCAN = "android.permission.BLUETOOTH_SCAN"
+        const val PERM_BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"
+        const val BOND_NONE = 10
+        const val BOND_BONDING = 11
+        const val BOND_BONDED = 12
+        private const val BOND_DELIVER_MS = 900L
         private const val CLASSIC_DELIVER_INTERVAL_MS = 800L
     }
+
+    /** 虚拟已配对地址集合（createBond 模拟成功后加入；getBondState 返回 BONDED）。 */
+    private val virtualBonded = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /** 经典/双模虚拟发现进行中（阻断真实 HAL 发现与真实 deviceFoundCallback）。 */
     private val virtualDiscoveryActive = AtomicBoolean(false)
@@ -82,6 +91,8 @@ class BleStackHookAdapter(
         hooked += hookTransitionalStartScan(classLoader)
         // 经典 BR/EDR 与双模设备发现（startDiscovery / 发现结果广播）
         hooked += hookClassicDiscovery(classLoader)
+        // 虚拟设备配对（createBond → BONDED；getBondState/removeBond 同步）
+        hooked += hookBonding(classLoader)
         // 用 LSPosed logdaemon 输出（android.util.Log 在部分系统进程可能不可见）
         logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble install classLoader=$classLoader hooked=$hooked")
         return hooked
@@ -306,6 +317,117 @@ class BleStackHookAdapter(
             ZLog.w(TAG_SCOPE, "classic discovery hook failed", t)
         }
         return hooked
+    }
+
+    /**
+     * 虚拟设备配对模拟（Oplus 15 蓝牙栈）：
+     * - `createBond(BluetoothDevice, ...)`：目标地址是虚拟设备（classic/dual）→ 阻断真实
+     *   BondStateMachine，投递 BONDING(11) → BONDED(12) 广播，并记入 virtualBonded。
+     * - `getBondState(BluetoothDevice)`：虚拟已配对地址返回 12（BONDED）。
+     * - `removeBond(BluetoothDevice)`：虚拟已配对地址 → 广播 NONE(10) 并移除，返回 true。
+     * 广播格式与 framework 一致：ACTION_BOND_STATE_CHANGED + EXTRA_DEVICE/EXTRA_BOND_STATE/
+     * EXTRA_PREVIOUS_BOND_STATE，权限 BLUETOOTH_CONNECT（全局广播）。
+     */
+    private fun hookBonding(classLoader: ClassLoader): Int {
+        var hooked = 0
+        try {
+            val serviceClass = HookSupport.findClass(classLoader, CLASS_ADAPTER_SERVICE) ?: return 0
+            HookSupport.findMethods(serviceClass, "createBond")
+                .filter { it.parameterCount >= 1 && it.parameterTypes[0].simpleName == "BluetoothDevice" }
+                .forEach { method ->
+                    val ok = registrar.register(method) { chain ->
+                        val service = chain.getThisObject()
+                        val device = chain.getArg(0) as? BluetoothDevice
+                        if (device != null && isVirtualDevice(device.address)) {
+                            startVirtualBond(service, device)
+                            return@register true
+                        }
+                        chain.proceed()
+                    }
+                    if (ok) {
+                        hooked++
+                        ZLog.i(TAG_SCOPE, "hooked AdapterService.createBond")
+                    }
+                }
+            HookSupport.findMethods(serviceClass, "getBondState")
+                .filter { it.parameterCount == 1 && it.parameterTypes[0].simpleName == "BluetoothDevice" }
+                .forEach { method ->
+                    val ok = registrar.register(method) { chain ->
+                        val device = chain.getArg(0) as? BluetoothDevice
+                        if (device != null && virtualBonded.containsKey(device.address)) {
+                            return@register BOND_BONDED
+                        }
+                        chain.proceed()
+                    }
+                    if (ok) {
+                        hooked++
+                        ZLog.i(TAG_SCOPE, "hooked AdapterService.getBondState")
+                    }
+                }
+            HookSupport.findMethods(serviceClass, "removeBond")
+                .filter { it.parameterCount == 1 && it.parameterTypes[0].simpleName == "BluetoothDevice" }
+                .forEach { method ->
+                    val ok = registrar.register(method) { chain ->
+                        val service = chain.getThisObject()
+                        val device = chain.getArg(0) as? BluetoothDevice
+                        if (device != null && virtualBonded.remove(device.address) != null) {
+                            deliverBondBroadcast(service, device, BOND_NONE, BOND_BONDED)
+                            return@register true
+                        }
+                        chain.proceed()
+                    }
+                    if (ok) {
+                        hooked++
+                        ZLog.i(TAG_SCOPE, "hooked AdapterService.removeBond")
+                    }
+                }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "bond hook failed", t)
+        }
+        return hooked
+    }
+
+    /** 目标地址是否属于虚拟设备（classic/dual）。 */
+    private fun isVirtualDevice(address: String?): Boolean {
+        if (address.isNullOrBlank()) return false
+        val virtual = cache.currentBle() ?: return false
+        val devices = virtual.optJSONArray("devices") ?: return false
+        val upper = address.uppercase()
+        for (i in 0 until devices.length()) {
+            val d = devices.optJSONObject(i) ?: continue
+            if (d.optString("address", "").uppercase() == upper && isClassicDevice(d)) return true
+        }
+        return false
+    }
+
+    /** 投递虚拟配对广播：BONDING(11) 立即，BONDED(12) 延迟。 */
+    private fun startVirtualBond(service: Any, device: BluetoothDevice) {
+        try {
+            logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble virtual bond start ${device.address}")
+            ZLog.i(TAG_SCOPE, "virtual bond start ${device.address}")
+            deliverBondBroadcast(service, device, BOND_BONDING, BOND_NONE)
+            val handler = Handler(Looper.getMainLooper())
+            handler.postDelayed({
+                virtualBonded[device.address] = true
+                deliverBondBroadcast(service, device, BOND_BONDED, BOND_BONDING)
+                logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble virtual bond bonded ${device.address}")
+                ZLog.i(TAG_SCOPE, "virtual bond bonded ${device.address}")
+            }, BOND_DELIVER_MS)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "virtual bond failed", t)
+        }
+    }
+
+    private fun deliverBondBroadcast(service: Any, device: BluetoothDevice, state: Int, previous: Int) {
+        try {
+            val intent = Intent(ACTION_BOND_STATE_CHANGED)
+            intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device)
+            intent.putExtra(BluetoothDevice.EXTRA_BOND_STATE, state)
+            intent.putExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, previous)
+            invokeSendBroadcast(service, intent, PERM_BLUETOOTH_CONNECT)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "send BOND_STATE_CHANGED failed", t)
+        }
     }
 
     /** 启动虚拟经典发现；无经典设备返回 false（调用方放行真实发现）。 */

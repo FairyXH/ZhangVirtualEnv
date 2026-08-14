@@ -3,6 +3,8 @@ package io.github.fairyxh.VirtualEnv.app.ui
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Intent
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -182,6 +184,26 @@ class SettingsFragment : Fragment() {
     private var proxSensor: Sensor? = null
 
     private val bleFound = LinkedHashMap<String, String>()
+    /** 经典发现（ACTION_FOUND）收集结果：address -> "name address rssi class" */
+    private val classicFound = LinkedHashMap<String, String>()
+    private val classicReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            if (intent?.action != BluetoothDevice.ACTION_FOUND) return
+            val device: BluetoothDevice? = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            if (device == null) return
+            val name = intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?: device.name ?: "(no name)"
+            val rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE)
+            val cls = intent.getParcelableExtra<android.bluetooth.BluetoothClass>(BluetoothDevice.EXTRA_CLASS)?.deviceClass
+            val line = "$name ${device.address} ${rssi}dBm" + (if (cls != null) " class=$cls" else "")
+            synchronized(bleFound) {
+                classicFound[device.address] = line
+                while (classicFound.size > BLE_RESULTS_LIMIT) {
+                    val it = classicFound.entries.iterator()
+                    if (it.hasNext()) it.remove()
+                }
+            }
+        }
+    }
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             // 刷新线程也会读取 getLastKnownLocation，这里只作触发
@@ -1236,6 +1258,18 @@ class SettingsFragment : Fragment() {
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test ble startScan failed", t)
         }
+        // 经典发现：注册 ACTION_FOUND 并主动 startDiscovery（蓝牙栈 Hook 会投递虚拟经典设备）
+        try {
+            val filter = android.content.IntentFilter(BluetoothDevice.ACTION_FOUND)
+            requireContext().registerReceiver(classicReceiver, filter)
+        } catch (_: Throwable) {
+        }
+        synchronized(bleFound) { classicFound.clear() }
+        try {
+            adapter?.startDiscovery()
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "env test classic startDiscovery failed", t)
+        }
         // 主动触发 WiFi 扫描（每 2 个周期一次）
         try {
             wifiManager?.startScan()
@@ -1501,9 +1535,15 @@ class SettingsFragment : Fragment() {
         val devices = data.optJSONArray("devices") ?: return Verdict.FAIL
         if (devices.length() == 0) return Verdict.FAIL
         val found: Set<String> = synchronized(bleFound) { bleFound.keys.toSet() }
+        val classic: Set<String> = synchronized(bleFound) { classicFound.keys.toSet() }
         for (i in 0 until devices.length()) {
-            val address = devices.optJSONObject(i)?.optString("address", "")?.uppercase()
-            if (!address.isNullOrBlank() && found.contains(address)) return Verdict.PASS
+            val d = devices.optJSONObject(i) ?: continue
+            val address = d.optString("address", "")?.uppercase()
+            if (address.isNullOrBlank()) continue
+            // classic/dual 设备可通过经典发现出现
+            val mode = d.optString("mode", "ble").lowercase()
+            if (found.contains(address)) return Verdict.PASS
+            if ((mode == "classic" || mode == "dual") && classic.contains(address)) return Verdict.PASS
         }
         return Verdict.FAIL
     }
@@ -1695,6 +1735,9 @@ class SettingsFragment : Fragment() {
         val sb = StringBuilder()
         synchronized(bleFound) {
             bleFound.values.forEach { sb.append(it).append("\n") }
+        }
+        synchronized(bleFound) {
+            classicFound.values.forEach { sb.append("[经典] ").append(it).append("\n") }
         }
         val bonded = adapter.bondedDevices
         if (bonded.isNotEmpty()) {
@@ -1947,6 +1990,14 @@ class SettingsFragment : Fragment() {
         envTestScheduler = null
         try {
             bleScanner?.stopScan(bleScanCallback)
+        } catch (_: Throwable) {
+        }
+        try {
+            BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
+        } catch (_: Throwable) {
+        }
+        try {
+            requireContext().unregisterReceiver(classicReceiver)
         } catch (_: Throwable) {
         }
         try {
