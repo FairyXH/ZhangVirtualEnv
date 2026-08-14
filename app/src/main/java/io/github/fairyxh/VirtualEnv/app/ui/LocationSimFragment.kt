@@ -1562,80 +1562,22 @@ class LocationSimFragment : Fragment() {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
-        // 1) 优先用模块当前生效位置（虚拟定位/路线等 Hook 层数据），不依赖高德 SDK
-        try {
-            Thread {
-                try {
-                    val result = ApiClient.getLocationStatus()
-                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                        val data = result.data ?: return@Thread
-                        val lat = data.optDouble("latitude", 0.0)
-                        val lon = data.optDouble("longitude", 0.0)
-                        if (lat != 0.0 && lon != 0.0) {
-                            val display = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(lat, lon)
-                            requireActivity().runOnUiThread {
-                                selectOnMap(com.amap.api.maps.model.LatLng(display.first, display.second))
-                                amap?.moveCamera(
-                                    CameraUpdateFactory.newLatLngZoom(
-                                        com.amap.api.maps.model.LatLng(display.first, display.second),
-                                        16f
-                                    )
-                                )
-                                Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
-                            }
-                            return@Thread
-                        }
+        // 直接走系统定位（真实 Hook 层数据链路）：模块虚拟定位开启时返回虚拟点，
+        // 未开启时返回真实 GPS/网络位置；不经过高德 SDK，避免定位失败/闪退。
+        Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
+        io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(context) { loc ->
+            requireActivity().runOnUiThread {
+                if (loc != null) {
+                    ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
+                    val display = selectOnMapFromWgs(loc.latitude, loc.longitude)
+                    if (display != null) {
+                        amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(display, 16f))
                     }
-                } catch (_: Throwable) {
-                }
-                // 2) 回退：高德 SDK 一次定位
-                locateByAmap()
-            }.start()
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "backend locate failed", t)
-            locateByAmap()
-        }
-    }
-
-    /** 高德 SDK 一次定位（原逻辑拆分，便于失败回退到系统定位）。 */
-    private fun locateByAmap() {
-        val context = requireContext()
-        try {
-            val client = amapLocationClient
-                ?: com.amap.api.location.AMapLocationClient(context).also { amapLocationClient = it }
-            client.setLocationListener { location ->
-                if (location == null || location.errorCode != 0) {
-                    ZLog.w(TAG_SCOPE, "locate error=${location?.errorCode} ${location?.errorInfo}")
-                    if (location?.errorCode == 7) {
-                        requireActivity().runOnUiThread {
-                            Toast.makeText(
-                                requireContext(),
-                                R.string.location_amap_key_error,
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                    fallbackLastKnown()
-                    return@setLocationListener
-                }
-                val latLng = LatLng(location.latitude, location.longitude)
-                ZLog.i(TAG_SCOPE, "located at ${location.latitude},${location.longitude}")
-                requireActivity().runOnUiThread {
-                    selectOnMap(latLng)
-                    amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+                    Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
+                } else {
+                    useLastKnownFallback()
                 }
             }
-            val option = com.amap.api.location.AMapLocationClientOption().apply {
-                locationMode = com.amap.api.location.AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                isOnceLocation = true
-                isNeedAddress = false
-            }
-            client.setLocationOption(option)
-            client.startLocation()
-            Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
-        } catch (t: Throwable) {
-            ZLog.e(TAG_SCOPE, "locate failed", t)
-            fallbackLastKnown()
         }
     }
 

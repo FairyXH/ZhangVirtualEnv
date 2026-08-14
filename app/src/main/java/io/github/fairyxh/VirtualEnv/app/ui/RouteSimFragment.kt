@@ -470,6 +470,18 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                                     )
                                 }
                                 GlassButton(
+                                    onClick = { fragment.undoLastPoint() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = mapReady,
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.route_undo),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                GlassButton(
                                     onClick = { fragment.updateMapFullscreen(true) },
                                     backdrop = backdrop,
                                     modifier = Modifier.weight(1f),
@@ -676,18 +688,6 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
                             ) {
                                 BasicText(
                                     getString(R.string.route_clear),
-                                    style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                )
-                            }
-                            GlassButton(
-                                onClick = { fragment.undoLastPoint() },
-                                backdrop = backdrop,
-                                modifier = Modifier.weight(1f),
-                                isInteractive = mapReady,
-                                surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
-                            ) {
-                                BasicText(
-                                    getString(R.string.route_undo),
                                     style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 )
                             }
@@ -1237,56 +1237,22 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
-        // 1) 优先用模块当前生效位置（虚拟定位/路线等 Hook 层数据），不依赖高德 SDK
-        try {
-            Thread {
-                try {
-                    val result = ApiClient.getLocationStatus()
-                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                        val data = result.data ?: return@Thread
-                        val lat = data.optDouble("latitude", 0.0)
-                        val lon = data.optDouble("longitude", 0.0)
-                        if (lat != 0.0 && lon != 0.0) {
-                            val display = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(lat, lon)
-                            requireActivity().runOnUiThread {
-                                amap?.moveCamera(
-                                    CameraUpdateFactory.newLatLngZoom(LatLng(display.first, display.second), 16f)
-                                )
-                                Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
-                            }
-                            return@Thread
-                        }
-                    }
-                } catch (_: Throwable) {
+        // 直接走系统定位（真实 Hook 层数据链路）：模块虚拟定位开启时返回虚拟点，
+        // 未开启时返回真实 GPS/网络位置；不经过高德 SDK，避免定位失败/闪退。
+        Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
+        io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(context) { loc ->
+            requireActivity().runOnUiThread {
+                if (loc != null) {
+                    ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
+                    val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(loc.latitude, loc.longitude)
+                    amap?.moveCamera(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
+                    )
+                    Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
+                } else {
+                    useLastKnownFallback()
                 }
-                // 2) 回退：高德 SDK 一次定位
-                locateByAmap()
-            }.start()
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "backend locate failed", t)
-            locateByAmap()
-        }
-    }
-
-    /** 高德 SDK 一次定位（原逻辑拆分，便于失败回退到系统定位）。 */
-    private fun locateByAmap() {
-        val context = requireContext()
-        try {
-            if (locationClient == null) {
-                locationClient = AMapLocationClient(context)
             }
-            val client = locationClient ?: return
-            client.setLocationListener(this)
-            val option = AMapLocationClientOption()
-            option.locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-            option.isOnceLocation = true
-            option.isNeedAddress = false
-            client.setLocationOption(option)
-            client.startLocation()
-            Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
-        } catch (t: Throwable) {
-            ZLog.e(TAG_SCOPE, "locate failed", t)
-            Toast.makeText(context, R.string.route_locate_failed, Toast.LENGTH_SHORT).show()
         }
     }
 

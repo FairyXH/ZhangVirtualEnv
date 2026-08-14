@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -1118,11 +1119,20 @@ class SettingsFragment : Fragment() {
                         val crashText = io.github.fairyxh.VirtualEnv.util.LogStore.crashRecords().joinToString("\n") { c ->
                             "[${c.id}] ${c.time} ${c.thread}\n${c.summary}"
                         }.ifEmpty { getString(R.string.settings_log_empty) }
-                        BasicText(
-                            crashText,
-                            Modifier.padding(top = 4.dp).fillMaxWidth(),
-                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                        )
+                        // 崩溃记录区：限高 + 内部滚动，避免把整卡撑得无限长
+                        Column(
+                            Modifier
+                                .padding(top = 4.dp)
+                                .fillMaxWidth()
+                                .heightIn(max = 120.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            BasicText(
+                                crashText,
+                                Modifier.fillMaxWidth(),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            )
+                        }
                         // 最近日志区
                         BasicText(
                             getString(R.string.settings_log_runtime_section),
@@ -1130,12 +1140,21 @@ class SettingsFragment : Fragment() {
                             style = TextStyle(color = colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         )
                         val logLines = fragment.logPreview
-                        BasicText(
-                            if (logLines.isEmpty()) getString(R.string.settings_log_empty)
-                            else logLines,
-                            Modifier.padding(top = 4.dp).fillMaxWidth(),
-                            style = TextStyle(color = colors.textPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        )
+                        // 运行日志区：限高 + 内部滚动，避免把整卡撑得无限长
+                        Column(
+                            Modifier
+                                .padding(top = 4.dp)
+                                .fillMaxWidth()
+                                .heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            BasicText(
+                                if (logLines.isEmpty()) getString(R.string.settings_log_empty)
+                                else logLines,
+                                Modifier.fillMaxWidth(),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            )
+                        }
                         Row(
                             Modifier
                                 .padding(top = 12.dp)
