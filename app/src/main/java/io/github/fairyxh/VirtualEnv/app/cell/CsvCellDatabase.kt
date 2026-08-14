@@ -39,6 +39,9 @@ class CsvCellDatabase(private val context: Context) {
         private const val META_PREFS = "opencellid_csv_meta"
         private const val MAX_CSV_BYTES = 200L * 1024 * 1024 // 200MB 安全上限
         private const val MAX_ROWS = 2_000_000
+
+        /** 单次离线查询返回上限（与 CellRepository.MAX_RESULTS 一致）。 */
+        private const val MAX_QUERY_RESULTS = 300
     }
 
     data class DbMeta(
@@ -179,7 +182,7 @@ class CsvCellDatabase(private val context: Context) {
 
     // ---------- 查询 ----------
 
-    /** 查询附近基站（合并所有已导入数据库，Haversine 过滤，跨库去重）。 */
+    /** 查询附近基站（合并所有已导入数据库，Haversine 过滤，跨库去重，按距离排序取前 [MAX_QUERY_RESULTS]）。 */
     fun queryNearby(latitude: Double, longitude: Double, radiusMeters: Int): List<CellInfo> {
         val radius = radiusMeters.coerceAtLeast(100)
         val latDelta = radius / 111_320.0
@@ -225,7 +228,9 @@ class CsvCellDatabase(private val context: Context) {
                 ZLog.w(TAG_SCOPE, "csv query db=${meta.id} failed: ${t.message}")
             }
         }
-        return out
+        // 按距离排序，截断到上限，避免大城区网格返回过多导致 UI 卡顿
+        return out.sortedBy { it.distanceMeters(latitude, longitude) }
+            .take(MAX_QUERY_RESULTS)
     }
 
     // ---------- 内部 ----------

@@ -104,6 +104,7 @@ class LocationSimFragment : Fragment() {
 
         private val DEFAULT_CENTER = LatLng(31.2304, 121.4737)
         private const val DEFAULT_ZOOM = 12f
+        private const val CELL_QUERY_PAGE_SIZE = 20
     }
 
     private data class SavedPoint(
@@ -139,10 +140,14 @@ class LocationSimFragment : Fragment() {
     private var cellQueryRadius by mutableStateOf("1500")
     private var cellQueryBusy by mutableStateOf(false)
     private var cellQueryStatus by mutableStateOf("")
-    private val cellQueryResults = mutableStateListOf<CellInfo>()
+    private var cellQueryPointText by mutableStateOf("")
+    private var cellQuerySourceText by mutableStateOf("")
+    private val cellQueryAllResults = mutableStateListOf<CellInfo>()
     private val cellQuerySelected = androidx.compose.runtime.mutableStateMapOf<Int, Boolean>()
     private var cellQueryResultLat by mutableStateOf(0.0)
     private var cellQueryResultLon by mutableStateOf(0.0)
+    private var cellQueryPage by mutableStateOf(0)
+    private var cellQueryTruncated by mutableStateOf(false)
 
     // ---------- 高德地图 ----------
 
@@ -703,6 +708,16 @@ class LocationSimFragment : Fragment() {
                                     Modifier.padding(top = 8.dp).fillMaxWidth(),
                                     style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
                                 )
+                            } else {
+                                BasicText(
+                                    getString(
+                                        R.string.location_cell_query_point,
+                                        latitudeText.toDoubleOrNull() ?: 0.0,
+                                        longitudeText.toDoubleOrNull() ?: 0.0
+                                    ),
+                                    Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                )
                             }
                             Row(
                                 Modifier.padding(top = 8.dp).fillMaxWidth(),
@@ -738,20 +753,37 @@ class LocationSimFragment : Fragment() {
                                 Modifier.padding(top = 2.dp).fillMaxWidth(),
                                 style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
                             )
+                            if (cellQuerySourceText.isNotEmpty()) {
+                                BasicText(
+                                    cellQuerySourceText,
+                                    Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                            }
                             if (cellQueryStatus.isNotEmpty()) {
                                 BasicText(
                                     cellQueryStatus,
-                                    Modifier.padding(top = 6.dp).fillMaxWidth(),
+                                    Modifier.padding(top = 4.dp).fillMaxWidth(),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
                             }
-                            if (cellQueryResults.isNotEmpty()) {
+                            if (cellQueryAllResults.isNotEmpty()) {
                                 BasicText(
                                     getString(R.string.location_cell_query_results_hint),
                                     Modifier.padding(top = 10.dp).fillMaxWidth(),
                                     style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
                                 )
-                                cellQueryResults.forEachIndexed { index, cell ->
+                                if (cellQueryTruncated) {
+                                    BasicText(
+                                        getString(R.string.location_cell_query_truncated),
+                                        Modifier.padding(top = 2.dp).fillMaxWidth(),
+                                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                                    )
+                                }
+                                val pageStart = fragment.cellQueryPage * CELL_QUERY_PAGE_SIZE
+                                val pageEnd = minOf(pageStart + CELL_QUERY_PAGE_SIZE, cellQueryAllResults.size)
+                                (pageStart until pageEnd).forEach { index ->
+                                    val cell = cellQueryAllResults[index]
                                     CellQueryRow(
                                         index = index,
                                         cell = cell,
@@ -761,6 +793,46 @@ class LocationSimFragment : Fragment() {
                                         onToggle = { fragment.toggleCellQuerySelection(index) },
                                         backdrop = backdrop
                                     )
+                                }
+                                val totalPages = maxOf(1, (cellQueryAllResults.size + CELL_QUERY_PAGE_SIZE - 1) / CELL_QUERY_PAGE_SIZE)
+                                Row(
+                                    Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    GlassPill(
+                                        onClick = { if (fragment.cellQueryPage > 0) fragment.cellQueryPrevPage() },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                        height = 34.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.location_cell_query_prev),
+                                            Modifier.padding(horizontal = 12.dp),
+                                            style = TextStyle(color = if (fragment.cellQueryPage > 0) colors.textPrimary else colors.textTertiary, fontSize = 12.sp)
+                                        )
+                                    }
+                                    BasicText(
+                                        getString(R.string.location_cell_query_page, fragment.cellQueryPage + 1, totalPages, cellQueryAllResults.size),
+                                        Modifier.weight(1f),
+                                        style = TextStyle(color = colors.textSecondary, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    )
+                                    GlassPill(
+                                        onClick = { if (fragment.cellQueryPage < totalPages - 1) fragment.cellQueryNextPage() },
+                                        backdrop = backdrop,
+                                        modifier = Modifier.weight(1f),
+                                        selected = false,
+                                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                                        height = 34.dp
+                                    ) {
+                                        BasicText(
+                                            getString(R.string.location_cell_query_next),
+                                            Modifier.padding(horizontal = 12.dp),
+                                            style = TextStyle(color = if (fragment.cellQueryPage < totalPages - 1) colors.textPrimary else colors.textTertiary, fontSize = 12.sp)
+                                        )
+                                    }
                                 }
                                 GlassButton(
                                     onClick = { fragment.saveCellsToSimulation() },
@@ -986,38 +1058,79 @@ class LocationSimFragment : Fragment() {
         cellQueryRadius = radius.toString()
         cellQueryBusy = true
         cellQueryStatus = getString(R.string.location_cell_query_running)
+        cellQuerySourceText = ""
         executor.execute {
             try {
                 val repository = CellRepository(requireContext())
-                val result = repository.queryNearbyCells(lat, lon, radius)
+                val query = repository.queryNearbyCells(lat, lon, radius)
                 requireActivity().runOnUiThread {
                     cellQueryBusy = false
-                    if (result.isSuccess) {
-                        val cells = result.getOrThrow()
-                        cellQueryResults.clear()
-                        cellQueryResults.addAll(cells)
-                        cellQuerySelected.clear()
-                        cells.indices.forEach { cellQuerySelected[it] = true }
-                        cellQueryResultLat = lat
-                        cellQueryResultLon = lon
-                        cellQueryStatus = if (cells.isEmpty()) {
-                            getString(R.string.location_cell_query_empty)
-                        } else {
-                            getString(R.string.location_cell_query_found, cells.size, radius)
-                        }
-                    } else {
-                        cellQueryResults.clear()
-                        cellQueryStatus = "查询失败：${result.exceptionOrNull()?.message ?: "未知错误"}"
+                    cellQueryAllResults.clear()
+                    cellQueryAllResults.addAll(query.cells)
+                    cellQuerySelected.clear()
+                    query.cells.indices.forEach { cellQuerySelected[it] = true }
+                    cellQueryResultLat = lat
+                    cellQueryResultLon = lon
+                    cellQueryPage = 0
+                    cellQueryTruncated = query.truncated
+                    cellQuerySourceText = buildSourceText(query)
+                    cellQueryStatus = buildResultStatus(query, lat, lon, radius)
+                    if (query.cells.isEmpty()) {
+                        cellQueryAllResults.clear()
                     }
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "cell query failed", t)
                 requireActivity().runOnUiThread {
                     cellQueryBusy = false
+                    cellQuerySourceText = ""
                     cellQueryStatus = "查询失败：${t.message}"
                 }
             }
         }
+    }
+
+    /** 来源与在线状态文案：区分离线命中 / 在线命中 / 在线请求失败 / 在线真的无结果。 */
+    private fun buildSourceText(query: CellRepository.NearbyQuery): String {
+        return when (query.source) {
+            "offline" -> getString(R.string.location_cell_query_source_offline)
+            "hybrid-offline" -> getString(R.string.location_cell_query_source_hybrid_offline)
+            "online-cache" -> getString(R.string.location_cell_query_source_online_cache)
+            "hybrid-online" -> getString(R.string.location_cell_query_source_hybrid_online)
+            "online" -> getString(R.string.location_cell_query_source_online)
+            else -> ""
+        }
+    }
+
+    private fun buildResultStatus(
+        query: CellRepository.NearbyQuery,
+        lat: Double,
+        lon: Double,
+        radius: Int
+    ): String {
+        val count = query.cells.size
+        if (query.onlineError != null) {
+            // 在线请求失败（含未配置 Key）
+            return getString(R.string.location_cell_query_online_failed, query.onlineError)
+        }
+        if (query.onlineEmpty) {
+            // 在线成功但无结果
+            return getString(R.string.location_cell_query_online_empty, count, radius)
+        }
+        return when (query.source) {
+            "offline" -> getString(R.string.location_cell_query_found, count, radius)
+            "hybrid-offline" -> getString(R.string.location_cell_query_found, count, radius)
+            else -> getString(R.string.location_cell_query_found_online, count, radius)
+        }
+    }
+
+    private fun cellQueryPrevPage() {
+        if (cellQueryPage > 0) cellQueryPage--
+    }
+
+    private fun cellQueryNextPage() {
+        val totalPages = maxOf(1, (cellQueryAllResults.size + CELL_QUERY_PAGE_SIZE - 1) / CELL_QUERY_PAGE_SIZE)
+        if (cellQueryPage < totalPages - 1) cellQueryPage++
     }
 
     private fun toggleCellQuerySelection(index: Int) {
@@ -1029,7 +1142,7 @@ class LocationSimFragment : Fragment() {
         if (cellQueryBusy) return
         val lat = cellQueryResultLat
         val lon = cellQueryResultLon
-        val selected = cellQueryResults.filterIndexed { index, _ -> cellQuerySelected[index] ?: true }
+        val selected = cellQueryAllResults.filterIndexed { index, _ -> cellQuerySelected[index] ?: true }
         if (selected.isEmpty()) {
             Toast.makeText(requireContext(), R.string.location_cell_query_none_selected, Toast.LENGTH_SHORT).show()
             return

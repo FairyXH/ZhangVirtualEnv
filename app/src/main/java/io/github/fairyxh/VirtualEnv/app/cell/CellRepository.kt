@@ -16,6 +16,9 @@ class CellRepository(private val context: Context) {
     companion object {
         private const val TAG_SCOPE = "OpenCellId"
         private const val DEFAULT_RADIUS_M = 1500
+
+        /** 单次查询返回给 UI 的最大条数（性能保护，超出截断并提示翻页/缩小半径）。 */
+        private const val MAX_RESULTS = 300
     }
 
     private val cache = OpenCellIdCache(context)
@@ -24,12 +27,34 @@ class CellRepository(private val context: Context) {
     /** CSV 离线数据库（支持多文件导入）。 */
     val csvDb = CsvCellDatabase(context)
 
+    /** 一次基站查询的完整结果（含来源与在线请求状态，供 UI 明确展示）。 */
+    data class NearbyQuery(
+        /** 当前查询模式。 */
+        val mode: OpenCellIdSettings.QueryMode,
+        /** 数据来源：offline / hybrid-offline / online-cache / online / hybrid-online。 */
+        val source: String,
+        /** 命中小区（已按距离排序，最多 [MAX_RESULTS] 条）。 */
+        val cells: List<CellInfo>,
+        /** 是否尝试过在线请求。 */
+        val onlineAttempted: Boolean,
+        /** 在线请求失败原因（null = 未失败；与 [onlineEmpty] 互斥）。 */
+        val onlineError: String?,
+        /** 在线请求成功但该区域无结果。 */
+        val onlineEmpty: Boolean,
+        /** 结果因超过 [MAX_RESULTS] 被截断。 */
+        val truncated: Boolean
+    ) {
+        val total: Int get() = cells.size
+    }
+
     /**
      * 查询附近基站（按设置页查询模式路由）。
      *
      * - OFFLINE：仅查询本地 CSV 数据库（无需 API Key）；
      * - ONLINE：仅查询 OpenCellID API；
      * - HYBRID：先查离线，命中返回；无结果再转在线。
+     *
+     * 在线请求失败与"真的无结果"通过 [NearbyQuery.onlineError] / [NearbyQuery.onlineEmpty] 区分。
      */
     fun queryNearbyCells(
         latitude: Double,
@@ -40,7 +65,7 @@ class CellRepository(private val context: Context) {
         mnc: Int? = null,
         lac: Int? = null,
         useCache: Boolean = true
-    ): Result<List<CellInfo>> {
+    ): NearbyQuery {
         val mode = OpenCellIdSettings.getQueryMode(context)
         val offlineCells = if (mode != OpenCellIdSettings.QueryMode.ONLINE) {
             val cells = csvDb.queryNearby(latitude, longitude, radiusMeters)
@@ -48,29 +73,63 @@ class CellRepository(private val context: Context) {
         } else {
             emptyList()
         }
+        val dedupedOffline = CellSignalCalculator.dedupe(offlineCells, latitude, longitude)
+            .sortedBy { it.distanceMeters(latitude, longitude) }
+
         if (mode == OpenCellIdSettings.QueryMode.OFFLINE) {
-            val cells = CellSignalCalculator.dedupe(offlineCells, latitude, longitude)
-            return Result.success(cells)
+            return NearbyQuery(
+                mode = mode,
+                source = "offline",
+                cells = dedupedOffline.take(MAX_RESULTS),
+                onlineAttempted = false,
+                onlineError = null,
+                onlineEmpty = false,
+                truncated = dedupedOffline.size > MAX_RESULTS
+            )
         }
-        if (mode == OpenCellIdSettings.QueryMode.HYBRID && offlineCells.isNotEmpty()) {
-            val cells = CellSignalCalculator.dedupe(offlineCells, latitude, longitude)
-            ZLog.i(TAG_SCOPE, "hybrid offline hit ${cells.size} cells")
-            return Result.success(cells)
+        if (mode == OpenCellIdSettings.QueryMode.HYBRID && dedupedOffline.isNotEmpty()) {
+            ZLog.i(TAG_SCOPE, "hybrid offline hit ${dedupedOffline.size} cells")
+            return NearbyQuery(
+                mode = mode,
+                source = "hybrid-offline",
+                cells = dedupedOffline.take(MAX_RESULTS),
+                onlineAttempted = false,
+                onlineError = null,
+                onlineEmpty = false,
+                truncated = dedupedOffline.size > MAX_RESULTS
+            )
         }
         // ONLINE 或 HYBRID 离线未命中 → API
         val apiKey = OpenCellIdSettings.getApiKey(context)
         if (apiKey.isNullOrBlank()) {
-            return Result.failure(
-                OpenCellIdApi.ApiFailure(
-                    if (offlineCells.isEmpty()) "请先在设置中填写 OpenCellID API Key 或导入 CSV 数据库"
-                    else "离线数据库无结果，且未配置 OpenCellID API Key"
-                )
+            return NearbyQuery(
+                mode = mode,
+                source = "online",
+                cells = emptyList(),
+                onlineAttempted = true,
+                onlineError = if (dedupedOffline.isEmpty()) {
+                    "请先在设置中填写 OpenCellID API Key 或导入 CSV 数据库"
+                } else {
+                    "离线数据库无结果，且未配置 OpenCellID API Key"
+                },
+                onlineEmpty = false,
+                truncated = false
             )
         }
         if (useCache) {
             cache.get(apiKey, latitude, longitude, radio, mcc, mnc, lac)?.let { cached ->
-                ZLog.i(TAG_SCOPE, "cache hit ${cached.size} cells")
-                return Result.success(cached)
+                val deduped = CellSignalCalculator.dedupe(cached, latitude, longitude)
+                    .sortedBy { it.distanceMeters(latitude, longitude) }
+                ZLog.i(TAG_SCOPE, "cache hit ${deduped.size} cells")
+                return NearbyQuery(
+                    mode = mode,
+                    source = "online-cache",
+                    cells = deduped.take(MAX_RESULTS),
+                    onlineAttempted = true,
+                    onlineError = null,
+                    onlineEmpty = deduped.isEmpty(),
+                    truncated = deduped.size > MAX_RESULTS
+                )
             }
         }
         val result = OpenCellIdApi.getNearbyCells(
@@ -78,10 +137,27 @@ class CellRepository(private val context: Context) {
         )
         if (result.isSuccess) {
             val cells = CellSignalCalculator.dedupe(result.getOrThrow(), latitude, longitude)
+                .sortedBy { it.distanceMeters(latitude, longitude) }
             cache.put(apiKey, latitude, longitude, radio, mcc, mnc, lac, cells)
-            return Result.success(cells)
+            return NearbyQuery(
+                mode = mode,
+                source = if (mode == OpenCellIdSettings.QueryMode.HYBRID) "hybrid-online" else "online",
+                cells = cells.take(MAX_RESULTS),
+                onlineAttempted = true,
+                onlineError = null,
+                onlineEmpty = cells.isEmpty(),
+                truncated = cells.size > MAX_RESULTS
+            )
         }
-        return result
+        return NearbyQuery(
+            mode = mode,
+            source = if (mode == OpenCellIdSettings.QueryMode.HYBRID) "hybrid-online" else "online",
+            cells = emptyList(),
+            onlineAttempted = true,
+            onlineError = result.exceptionOrNull()?.message ?: "在线查询失败",
+            onlineEmpty = false,
+            truncated = false
+        )
     }
 
     private fun filterCells(

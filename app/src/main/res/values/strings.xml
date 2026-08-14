@@ -189,11 +189,21 @@
     <string name="location_cell_query_expand">展开</string>
     <string name="location_cell_query_collapse">收起</string>
     <string name="location_cell_query_no_coord">请先在地图上选点或输入经纬度</string>
+    <string name="location_cell_query_point">查询点：%1$.6f, %2$.6f</string>
     <string name="location_cell_query_button">查询</string>
     <string name="location_cell_query_radius_hint">查询半径（米），默认 1500；每次查询按返回小区数消耗 OpenCellID credits</string>
     <string name="location_cell_query_running">正在查询附近基站…</string>
     <string name="location_cell_query_found">找到 %1$d 个基站（半径 %2$d 米），点击条目可取消选择</string>
+    <string name="location_cell_query_found_online">在线查询命中 %1$d 个基站（半径 %2$d 米）</string>
     <string name="location_cell_query_empty">附近未找到基站，可尝试增大查询半径</string>
+    <string name="location_cell_query_online_failed">在线查询失败：%1$s</string>
+    <string name="location_cell_query_online_empty">在线查询成功，但该区域无结果（%1$d 条 / 半径 %2$d 米）</string>
+    <string name="location_cell_query_source_offline">数据来源：离线 CSV 数据库</string>
+    <string name="location_cell_query_source_hybrid_offline">数据来源：混合模式 · 离线数据库命中</string>
+    <string name="location_cell_query_source_online_cache">数据来源：在线查询（本地缓存）</string>
+    <string name="location_cell_query_source_online">数据来源：OpenCellID 在线 API</string>
+    <string name="location_cell_query_source_hybrid_online">数据来源：混合模式 · 离线无结果，已转在线</string>
+    <string name="location_cell_query_truncated">结果较多，已按距离取最近 300 条（可缩小查询半径）</string>
     <string name="location_cell_query_results_hint">点击条目切换选中；信号强度由距离/覆盖半径/样本数算法估算</string>
     <string name="location_cell_query_save">保存选中基站到基站模拟</string>
     <string name="location_cell_query_saving">正在保存到基站模拟…</string>
@@ -201,6 +211,9 @@
     <string name="location_cell_query_none_selected">请先选择要保存的基站</string>
     <string name="location_cell_query_selected">已选</string>
     <string name="location_cell_query_unselected">未选</string>
+    <string name="location_cell_query_prev">上一页</string>
+    <string name="location_cell_query_next">下一页</string>
+    <string name="location_cell_query_page">第 %1$d/%2$d 页 · 共 %3$d 条</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
