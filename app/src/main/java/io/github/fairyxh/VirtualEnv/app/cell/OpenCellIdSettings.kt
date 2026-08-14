@@ -30,8 +30,15 @@ object OpenCellIdSettings {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun getApiKey(context: Context): String? =
-        prefs(context).getString(KEY_API_KEY, "")?.trim()?.ifEmpty { null }
+    fun getApiKey(context: Context): String? {
+        val raw = prefs(context).getString(KEY_API_KEY, "")?.trim()?.ifEmpty { null }
+        if (raw != null && raw.contains('*')) {
+            // 历史缺陷：旧版本曾把脱敏串回填进输入框并可能被保存；含 * 即视为脏值，清除并提示重新输入
+            prefs(context).edit().remove(KEY_API_KEY).apply()
+            return null
+        }
+        return raw
+    }
 
     fun setApiKey(context: Context, key: String) {
         prefs(context).edit().putString(KEY_API_KEY, key.trim()).apply()

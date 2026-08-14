@@ -254,7 +254,6 @@
     <string name="settings_opencellid_desc">BYOK 模式：自行在 opencellid.org 注册并填写 API Key，用于基站查询与真实数据贡献</string>
     <string name="settings_opencellid_key_label">API Key</string>
     <string name="settings_opencellid_key_hint">请输入 OpenCellID API Key</string>
-    <string name="settings_opencellid_show_key">显示 Key</string>
     <string name="settings_opencellid_test">测试 API Key</string>
     <string name="settings_opencellid_testing">正在测试…</string>
     <string name="settings_opencellid_contribute">为 opencellid 社区贡献数据</string>

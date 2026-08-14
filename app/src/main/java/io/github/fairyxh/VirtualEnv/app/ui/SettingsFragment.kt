@@ -62,7 +62,6 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -130,7 +129,6 @@ class SettingsFragment : Fragment() {
     private var amapSecurity by mutableStateOf("")
     private var privacyAgreed by mutableStateOf(false)
     private var openCellIdKey by mutableStateOf("")
-    private var openCellIdKeyVisible by mutableStateOf(false)
     private var openCellIdContribute by mutableStateOf(false)
     private var openCellIdTestStatus by mutableStateOf("")
     private var openCellIdTesting by mutableStateOf(false)
@@ -675,40 +673,35 @@ class SettingsFragment : Fragment() {
                             onValueChange = { openCellIdKey = it },
                             backdrop = backdrop,
                             modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
-                            placeholder = getString(R.string.settings_opencellid_key_hint),
-                            visualTransformation = if (openCellIdKeyVisible) {
-                                androidx.compose.ui.text.input.VisualTransformation.None
-                            } else {
-                                PasswordVisualTransformation()
-                            }
+                            placeholder = getString(R.string.settings_opencellid_key_hint)
                         )
                         Row(
                             Modifier
-                                .padding(top = 6.dp)
+                                .padding(top = 8.dp)
                                 .fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            GlassCheckbox(
-                                checked = openCellIdKeyVisible,
-                                onCheckedChange = { openCellIdKeyVisible = it }
-                            )
-                            BasicText(
-                                getString(R.string.settings_opencellid_show_key),
-                                Modifier
-                                    .padding(start = 8.dp)
-                                    .weight(1f),
-                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
-                            )
                             GlassButton(
                                 onClick = { fragment.testOpenCellIdKey() },
                                 backdrop = backdrop,
-                                modifier = Modifier.padding(start = 8.dp),
+                                modifier = Modifier.weight(1f),
                                 isInteractive = !openCellIdTesting,
                                 surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
                             ) {
                                 BasicText(
                                     getString(R.string.settings_opencellid_test),
                                     style = TextStyle(color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { fragment.saveOpenCellIdConfig() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_opencellid_save),
+                                    style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 )
                             }
                         }
@@ -836,21 +829,10 @@ class SettingsFragment : Fragment() {
                                 .fillMaxWidth(),
                             style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
                         )
-                        GlassButton(
-                            onClick = { fragment.saveOpenCellIdConfig() },
-                            backdrop = backdrop,
-                            modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
-                            tint = colors.accent
-                        ) {
-                            BasicText(
-                                getString(R.string.settings_opencellid_save),
-                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            )
-                        }
                         BasicText(
                             getString(R.string.settings_opencellid_attribution),
                             Modifier
-                                .padding(top = 8.dp)
+                                .padding(top = 10.dp)
                                 .fillMaxWidth()
                                 .clickable { fragment.openUrl(OPEN_CELL_ID_URL) },
                             style = TextStyle(color = colors.accent, fontSize = 12.sp)
@@ -1904,9 +1886,8 @@ class SettingsFragment : Fragment() {
     // ---------- OpenCellID 基站数据库 ----------
 
     private fun loadOpenCellIdConfig() {
-        // Key 不完整回填：仅显示脱敏提示，避免误提交/误复制
-        val saved = OpenCellIdSettings.getApiKey(requireContext())
-        openCellIdKey = if (saved.isNullOrBlank()) "" else OpenCellIdSettings.maskKey(saved)
+        // 明文回填（与高德 Key 一致），避免脱敏串被误保存/误测试
+        openCellIdKey = OpenCellIdSettings.getApiKey(requireContext()) ?: ""
         openCellIdContribute = OpenCellIdSettings.isContributeEnabled(requireContext())
         openCellIdQueryMode = OpenCellIdSettings.getQueryMode(requireContext())
         openCellIdTestStatus = ""
@@ -1922,13 +1903,7 @@ class SettingsFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.settings_opencellid_cleared, Toast.LENGTH_SHORT).show()
             return
         }
-        // 若输入的是上次回填的脱敏串（含 * 且与已存 Key 的脱敏一致），说明用户未修改，保持原值
-        val saved = OpenCellIdSettings.getApiKey(requireContext())
-        if (!saved.isNullOrBlank() && input.contains('*') && input == OpenCellIdSettings.maskKey(saved)) {
-            // 保留原 Key
-        } else {
-            OpenCellIdSettings.setApiKey(requireContext(), input)
-        }
+        OpenCellIdSettings.setApiKey(requireContext(), input)
         OpenCellIdSettings.setContributeEnabled(requireContext(), openCellIdContribute)
         ZLog.i(TAG_SCOPE, "opencellid config saved key=${OpenCellIdSettings.logSafe(OpenCellIdSettings.getApiKey(requireContext()))}")
         Toast.makeText(requireContext(), R.string.settings_opencellid_saved, Toast.LENGTH_SHORT).show()
