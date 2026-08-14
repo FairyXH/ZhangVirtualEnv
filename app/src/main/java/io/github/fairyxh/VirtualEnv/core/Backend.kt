@@ -135,8 +135,161 @@ class Backend private constructor(private val dataDir: File) {
         return HookObserver.snapshotJson()
     }
 
+    // ---------- 模块总开关（总闸） ----------
+
+    @Volatile
+    private var moduleEnabled: Boolean = true
+
+    /** 总开关关闭前的完整状态快照（重新开启时恢复）。 */
+    @Volatile
+    private var preMasterOffSnapshot: org.json.JSONObject? = null
+
+    /** 模块 APK 路径（用于读取 scope.list 生成报告）。 */
+    @Volatile
+    private var moduleApkPath: String? = null
+
+    /** 模块版本号（报告适配用）。 */
+    @Volatile
+    private var moduleVersion: String = ""
+
+    fun setModuleApkPath(path: String?) {
+        moduleApkPath = path
+    }
+
+    fun setModuleVersion(version: String) {
+        moduleVersion = version
+    }
+
+    fun moduleVersion(): String = moduleVersion
+
+    /** 模块总开关是否开启（关闭时 Hook 全部放行真实数据）。 */
+    fun isModuleEnabled(): Boolean = moduleEnabled
+
+    /**
+     * 模块总开关：关闭时一键停用所有功能（位置/路线/摇杆/全部环境引擎/Sim 固化），
+     * 数据保留在引擎内；重新开启时恢复关闭前的完整状态。
+     */
+    fun setModuleEnabled(enabled: Boolean) {
+        synchronized(this) {
+            if (enabled == moduleEnabled) return
+            moduleEnabled = enabled
+            configManager.setModuleEnabled(enabled)
+            if (enabled) {
+                val snap = preMasterOffSnapshot
+                preMasterOffSnapshot = null
+                if (snap != null) {
+                    applyEnvStateSnapshot(snap)
+                }
+                ZLog.i(TAG_SCOPE, "module master enabled (restored)")
+            } else {
+                preMasterOffSnapshot = envStateSnapshotJson()
+                locationEngine.setEnabled(false)
+                routeEngine.stop()
+                joystickEngine.setVector(false, 0.0, 0.0, 5.0)
+                wifiEngine.setEnabled(false)
+                cellEngine.setEnabled(false)
+                bleEngine.setEnabled(false)
+                gnssEngine.setEnabled(false)
+                sensorEngine.setEnabled(false)
+                simEngine.setEnabled(false)
+                CarrierConfigPersister.resetAll()
+                ENV_ENGINE_TYPES.forEach { persistEnvState(it) }
+                ZLog.i(TAG_SCOPE, "module master disabled: all engines stopped (data retained)")
+            }
+        }
+    }
+
+    fun moduleStatusJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("enabled", moduleEnabled)
+        }
+    }
+
+    // ---------- Hook 状态报告（各作用域 Hook 点状态） ----------
+
+    /** 其他进程（phone/bluetooth/app）上报的 Hook 状态快照。 */
+    private val hookStatusByProcess = java.util.concurrent.ConcurrentHashMap<String, org.json.JSONObject>()
+
+    fun reportHookStatus(process: String, status: org.json.JSONObject) {
+        if (process.isBlank()) return
+        hookStatusByProcess[process] = status
+        ZLog.i(
+            TAG_SCOPE,
+            "hook status reported process=$process hooked=${status.optInt("hooked")} failed=${status.optInt("failed")}"
+        )
+    }
+
+    /** 汇总各作用域 Hook 状态（system_server 实时 + 其他进程上报）。 */
+    fun hookStatusJson(): org.json.JSONObject {
+        val processes = org.json.JSONObject()
+        processes.put("system", io.github.fairyxh.VirtualEnv.core.HookStatusRegistry.snapshot())
+        hookStatusByProcess.forEach { (k, v) -> processes.put(k, v) }
+        return org.json.JSONObject().apply {
+            put("exportedAt", System.currentTimeMillis())
+            put("moduleEnabled", moduleEnabled)
+            put("moduleVersion", moduleVersion)
+            put("device", deviceInfoJson())
+            put("profile", profileInfoJson())
+            put("scopes", scopeListJson())
+            put("processes", processes)
+        }
+    }
+
+    /** 设备信息（报告适配用）。 */
+    fun deviceInfoJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("model", android.os.Build.MODEL)
+            put("manufacturer", android.os.Build.MANUFACTURER)
+            put("device", android.os.Build.DEVICE)
+            put("product", android.os.Build.PRODUCT)
+            put("fingerprint", android.os.Build.FINGERPRINT)
+            put("sdk", android.os.Build.VERSION.SDK_INT)
+            put("release", android.os.Build.VERSION.RELEASE)
+        }
+    }
+
+    /** 从模块 APK 读取 scope.list（作用域清单）。 */
+    private fun scopeListJson(): org.json.JSONArray {
+        val arr = org.json.JSONArray()
+        try {
+            val apkPath = moduleApkPath
+            if (apkPath != null) {
+                java.util.zip.ZipFile(apkPath).use { zip ->
+                    val entry = zip.getEntry("assets/META-INF/xposed/scope.list")
+                        ?: zip.getEntry("META-INF/xposed/scope.list")
+                    if (entry != null) {
+                        zip.getInputStream(entry).use { stream ->
+                            stream.readBytes().toString(Charsets.UTF_8).lines()
+                        }.map { it.trim() }.filter { it.isNotBlank() }.forEach { arr.put(it) }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "read scope list failed", t)
+        }
+        return arr
+    }
+
+    /** 完整调试报告（设置页导出用：Hook 状态 + 全引擎状态 + 配置 + 观测 + 测试报告）。 */
+    fun fullDebugReportJson(): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("reportType", "module")
+            put("exportedAt", System.currentTimeMillis())
+            put("hookStatus", hookStatusJson())
+            put("location", locationStatusJson())
+            put("route", routeStatusJson())
+            put("joystick", joystickStatusJson())
+            put("env", envStatusJson())
+            put("settings", settingsStatusJson())
+            put("observe", HookObserver.snapshotJson())
+            put("testReport", testReport ?: org.json.JSONObject())
+            put("configExport", exportConfigJson())
+        }
+    }
+
     private fun start() {
         configManager = ConfigManager(dataDir)
+        moduleEnabled = configManager.isModuleEnabled()
         databaseManager = DatabaseManager(File(dataDir, "zve.db"))
         timelineEngine = DefaultTimelineEngine()
         environmentManager = DefaultEnvironmentManager(databaseManager)
@@ -173,6 +326,20 @@ class Backend private constructor(private val dataDir: File) {
         restoreEnvStates()
         // 自动托管：各环境引擎的“最优配置”由 Backend 基于当前虚拟位置自动生成
         setupAutoEnvProviders()
+        // 总开关持久化关闭：不恢复任何虚拟输出（Hook 全部放行真实数据）
+        if (!moduleEnabled) {
+            locationEngine.setEnabled(false)
+            routeEngine.stop()
+            joystickEngine.setVector(false, 0.0, 0.0, 5.0)
+            wifiEngine.setEnabled(false)
+            cellEngine.setEnabled(false)
+            bleEngine.setEnabled(false)
+            gnssEngine.setEnabled(false)
+            sensorEngine.setEnabled(false)
+            simEngine.setEnabled(false)
+            CarrierConfigPersister.resetAll()
+            ZLog.w(TAG_SCOPE, "module master is OFF from persisted config: all engines disabled")
+        }
         ZLog.i(TAG_SCOPE, "Backend components started")
     }
 
@@ -275,6 +442,8 @@ class Backend private constructor(private val dataDir: File) {
 
     /** Hook 层数据入口：路线运行时输出路线位置，否则输出单点；未启用时 null（放行真实数据）。摇杆开启时在基准位置叠加位移。 */
     fun currentLocation(): Location? {
+        // 模块总开关关闭：Hook 放行真实数据
+        if (!moduleEnabled) return null
         val base = routeEngine.currentLocation() ?: locationEngine.currentLocation()
         return joystickEngine.applyTo(base) ?: base
     }
@@ -317,6 +486,10 @@ class Backend private constructor(private val dataDir: File) {
 
     /** App 开关虚拟定位（经 ApiServer 调用）。开启时与路线模拟互斥：先停路线。 */
     fun setLocationEnabled(enabled: Boolean) {
+        if (enabled && !moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "setLocationEnabled ignored: module master OFF")
+            return
+        }
         if (enabled) {
             // 互斥：单点虚拟定位与路线模拟不能同时开启
             routeEngine.stop()
@@ -654,6 +827,10 @@ class Backend private constructor(private val dataDir: File) {
         smoothReturn: Boolean? = null
     ): org.json.JSONObject? {
         val route = databaseManager.getRoute(id) ?: return null
+        if (!moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "startRoute ignored id=$id: module master OFF")
+            return null
+        }
         // 互斥：启动路线模拟时关闭单点虚拟定位
         if (locationEngine.isEnabled()) {
             setLocationEnabled(false)
@@ -709,6 +886,10 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 悬浮窗摇杆向量更新（App 控制端调用）。 */
     fun setJoystickVector(enabled: Boolean, dx: Double, dy: Double, speedKmh: Double) {
+        if (enabled && !moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "setJoystickVector ignored: module master OFF")
+            return
+        }
         joystickEngine.setVector(enabled, dx, dy, speedKmh)
     }
 
@@ -754,6 +935,10 @@ class Backend private constructor(private val dataDir: File) {
     /** 一键使用已保存地点：设置坐标并启用虚拟定位。 */
     fun useLocationPoint(id: Long): org.json.JSONObject? {
         val point = databaseManager.getLocationPoint(id) ?: return null
+        if (!moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "useLocationPoint ignored id=$id: module master OFF")
+            return null
+        }
         val latitude = point.optDouble("latitude", Double.NaN)
         val longitude = point.optDouble("longitude", Double.NaN)
         if (latitude.isNaN() || longitude.isNaN()) return null
@@ -787,6 +972,10 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 一键使用环境快照：把已保存的 env_snapshot 数据加载到对应模拟引擎。 */
     fun useEnvSnapshot(id: Long): org.json.JSONObject? {
+        if (!moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "useEnvSnapshot ignored id=$id: module master OFF")
+            return null
+        }
          val snapshot = databaseManager.queryEnvSnapshots()
              .firstOrNull { it.optLong("id", -1L) == id }
              ?: return null
@@ -971,6 +1160,10 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 单类型开关：关闭时 Hook 放行真实数据，数据保留；开启时恢复。 */
     fun setEnvEnabled(type: String, enabled: Boolean): Boolean {
+        if (enabled && !moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "setEnvEnabled ignored type=$type: module master OFF")
+            return false
+        }
         when (type) {
             "wifi" -> wifiEngine.setEnabled(enabled)
             "cell" -> cellEngine.setEnabled(enabled)
@@ -1027,6 +1220,10 @@ class Backend private constructor(private val dataDir: File) {
      * 返回生成的完整配置 JSON（检测器可据此判定 PASS/FAIL）。
      */
     fun generateRandomEnv(): org.json.JSONObject {
+        if (!moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "generateRandomEnv ignored: module master OFF")
+            return org.json.JSONObject().apply { put("disabled", true) }
+        }
         val rnd = ThreadLocalRandom.current()
 
         // 单点位置：国内常见区域随机偏移
@@ -1346,6 +1543,10 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 一键加载配置状态预设：应用保存时的完整虚拟配置（含持久化）。 */
     fun loadConfigPreset(id: Long): org.json.JSONObject? {
+        if (!moduleEnabled) {
+            ZLog.w(TAG_SCOPE, "loadConfigPreset ignored id=$id: module master OFF")
+            return null
+        }
         val preset = databaseManager.queryConfigPresets()
             .firstOrNull { it.optLong("id", -1L) == id }
             ?: return null

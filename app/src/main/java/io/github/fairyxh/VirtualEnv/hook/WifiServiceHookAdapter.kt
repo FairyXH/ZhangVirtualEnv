@@ -40,7 +40,8 @@ class WifiServiceHookAdapter(
 
     /** 位置虚拟化启用（单点或路线任一开启；采集暂停时强制放行）。 */
     private fun virtualLocationEnabled(): Boolean =
-        !backend.isSuspended() &&
+        backend.isModuleEnabled() &&
+            !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     /** 节流：同一调用点 5s 内只打一条 I 级观测日志。 */

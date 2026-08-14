@@ -52,7 +52,8 @@ class GnssDataBlockHookAdapter(
 
     /** 虚拟定位启用（单点或路线任一开启；采集暂停时放行）。 */
     private fun virtualLocationEnabled(): Boolean =
-        !backend.isSuspended() &&
+        backend.isModuleEnabled() &&
+            !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     private val statusExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->

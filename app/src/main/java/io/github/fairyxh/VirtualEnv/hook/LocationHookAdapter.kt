@@ -84,7 +84,8 @@ class LocationHookAdapter(
 
     /** 虚拟定位启用（单点或路线任一开启；采集暂停时放行原始行为）。 */
     private fun virtualLocationEnabled(): Boolean =
-        !backend.isSuspended() &&
+        backend.isModuleEnabled() &&
+            !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     // ---------- 单次查询：getLastLocation ----------

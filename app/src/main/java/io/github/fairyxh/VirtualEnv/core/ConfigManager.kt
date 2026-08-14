@@ -24,6 +24,8 @@ class ConfigManager(private val configDir: File) {
         private const val KEY_BEARING = "bearing"
         private const val KEY_SETTINGS = "settings"
         private const val KEY_JITTER_ENABLED = "jitterEnabled"
+        private const val KEY_MODULE = "module"
+        private const val KEY_MODULE_ENABLED = "enabled"
     }
 
     private val configFile = File(configDir, FILE_NAME)
@@ -62,6 +64,13 @@ class ConfigManager(private val configDir: File) {
 
     fun setLocationEnabled(enabled: Boolean) {
         update(KEY_LOCATION) { it.put(KEY_ENABLED, enabled) }
+    }
+
+    /** 模块总开关（默认开启；关闭后一键停用模块所有功能）。 */
+    fun isModuleEnabled(): Boolean = load().optJSONObject(KEY_MODULE)?.optBoolean(KEY_MODULE_ENABLED, true) ?: true
+
+    fun setModuleEnabled(enabled: Boolean) {
+        update(KEY_MODULE) { it.put(KEY_MODULE_ENABLED, enabled) }
     }
 
     fun setPoint(latitude: Double, longitude: Double, speed: Float, bearing: Float) {

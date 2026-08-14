@@ -122,6 +122,8 @@ class SettingsFragment : Fragment() {
     private var launcherHidden by mutableStateOf(false)
     private var showDeveloperNotice by mutableStateOf(false)
     private var jitterEnabled by mutableStateOf(true)
+    private var hookStatusSummary by mutableStateOf("")
+    private var hookStatusDetail by mutableStateOf("")
 
     private fun setJitterSwitch(enabled: Boolean) {
         jitterEnabled = enabled
@@ -255,6 +257,120 @@ class SettingsFragment : Fragment() {
         if (uri != null) exportConfigTo(uri)
     }
 
+    /** Hook 状态报告导出：SAF 创建 JSON 文件后写入完整调试报告。 */
+    private val exportReportLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) exportReportTo(uri)
+    }
+
+    /** 导出完整调试报告（Hook 状态 + 全引擎状态 + 配置 + 观测 + 测试报告）。 */
+    private fun onExportHookReport() {
+        exportReportLauncher.launch(
+            "ZVE_HookReport_${io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.settings_hook_status_title))}.json"
+        )
+    }
+
+    /** 拉取后端完整调试报告并写入 SAF 文件。 */
+    private fun exportReportTo(uri: android.net.Uri) {
+        Thread {
+            try {
+                val result = io.github.fairyxh.VirtualEnv.app.ApiClient.getReportExport()
+                if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    runOnUi {
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.settings_backup_export_failed, result.message),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@Thread
+                }
+                val json = result.data ?: org.json.JSONObject()
+                val text = json.toString(2)
+                val ctx = requireContext()
+                val out = ctx.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("open output stream failed")
+                out.use { it.write(text.toByteArray(StandardCharsets.UTF_8)) }
+                ZLog.i(TAG_SCOPE, "hook report exported ${text.length} chars")
+                runOnUi {
+                    Toast.makeText(requireContext(), R.string.settings_hook_status_exported, Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "hook report export failed", t)
+                runOnUi {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.settings_backup_export_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }.apply {
+            name = "ZVE-HookReportExport"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** 拉取各作用域 Hook 状态并生成设置页摘要。 */
+    private fun loadHookStatus() {
+        Thread {
+            try {
+                val result = io.github.fairyxh.VirtualEnv.app.ApiClient.getHookStatus()
+                val data = result.data
+                requireActivity().runOnUiThread {
+                    if (data == null) {
+                        hookStatusSummary = getString(R.string.settings_hook_status_failed, result.message)
+                        return@runOnUiThread
+                    }
+                    val processes = data.optJSONObject("processes")
+                    val lines = mutableListOf<String>()
+                    val detail = StringBuilder()
+                    var totalOk = 0
+                    var totalFail = 0
+                    if (processes != null) {
+                        val keys = processes.keys().asSequence().toList().sorted()
+                        for (k in keys) {
+                            val p = processes.optJSONObject(k) ?: continue
+                            val ok = p.optInt("hooked", 0)
+                            val fail = p.optInt("failed", 0)
+                            totalOk += ok
+                            totalFail += fail
+                            lines.add("$k $ok/${ok + fail}")
+                            val points = p.optJSONObject("points")
+                            if (points != null) {
+                                val failedKeys = points.keys().asSequence().toList()
+                                    .filter { !points.optBoolean(it, false) }
+                                if (failedKeys.isNotEmpty()) {
+                                    detail.append("[$k] 失败 ").append(failedKeys.size).append(" 处：\n")
+                                    failedKeys.forEach { detail.append("  ").append(it).append('\n') }
+                                }
+                            }
+                        }
+                    }
+                    hookStatusSummary = if (totalOk + totalFail > 0) {
+                        "作用域 ${lines.size} 个 · 成功 $totalOk · 失败 $totalFail\n${lines.joinToString(" · ")}"
+                    } else {
+                        getString(R.string.settings_hook_status_empty)
+                    }
+                    hookStatusDetail = detail.toString().ifEmpty {
+                        getString(R.string.settings_hook_status_ok_detail)
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "load hook status failed", t)
+                requireActivity().runOnUiThread {
+                    hookStatusSummary = getString(R.string.settings_hook_status_failed, t.message ?: "")
+                }
+            }
+        }.apply {
+            name = "ZVE-HookStatusLoad"
+            isDaemon = true
+            start()
+        }
+    }
+
     /** 配置导入：SAF 选择备份 JSON 文件后读取并恢复。 */
     private val importConfigLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -279,6 +395,7 @@ class SettingsFragment : Fragment() {
         loadAmapConfig()
         initLauncherHideToggle()
         loadJitterSetting()
+        loadHookStatus()
 
         return androidx.compose.ui.platform.ComposeView(context).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -647,6 +764,46 @@ class SettingsFragment : Fragment() {
                                 BasicText(
                                     getString(R.string.settings_backup_import),
                                     style = TextStyle(color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Hook 状态与报告卡
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        SectionTitle(getString(R.string.settings_hook_status_title))
+                        SectionDesc(getString(R.string.settings_hook_status_desc))
+                        BasicText(
+                            hookStatusSummary.ifEmpty { getString(R.string.settings_hook_status_loading) },
+                            Modifier.padding(top = 8.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                        )
+                        BasicText(
+                            hookStatusDetail.ifEmpty { "" },
+                            Modifier.padding(top = 6.dp).fillMaxWidth(),
+                            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        )
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassButton(
+                                onClick = { fragment.onExportHookReport() },
+                                backdrop = backdrop,
+                                modifier = Modifier.weight(1f),
+                                tint = colors.accent
+                            ) {
+                                BasicText(
+                                    getString(R.string.settings_hook_status_export),
+                                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 )
                             }
                         }

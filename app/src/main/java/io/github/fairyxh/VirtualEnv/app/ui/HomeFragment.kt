@@ -52,6 +52,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassInputDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassSegmented
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -119,6 +120,7 @@ class HomeFragment : Fragment() {
     private var statusDotEnabled by mutableStateOf(false)
     private var statusText by mutableStateOf("")
     private var statusDetail by mutableStateOf("")
+    private var moduleEnabled by mutableStateOf(true)
     private val featureStatusRows = mutableStateListOf<Pair<String, String>>()
 
     private var collectResult by mutableStateOf<String?>(null)
@@ -295,6 +297,31 @@ class HomeFragment : Fragment() {
                             getString(R.string.home_status_title),
                             style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                         )
+                        // 模块总开关（总闸）：关闭后一键停用模块所有功能
+                        Row(
+                            Modifier
+                                .padding(top = 12.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    getString(R.string.home_module_switch_title),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                )
+                                BasicText(
+                                    getString(R.string.home_module_switch_desc),
+                                    Modifier.padding(top = 2.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                )
+                            }
+                            GlassToggle(
+                                selected = { moduleEnabled },
+                                onSelect = { toggleModuleEnabled(it) },
+                                backdrop = backdrop,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
                         Row(
                             Modifier
                                 .padding(top = 12.dp)
@@ -302,7 +329,7 @@ class HomeFragment : Fragment() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             StatusDot(
-                                enabled = statusDotEnabled,
+                                enabled = statusDotEnabled && moduleEnabled,
                                 modifier = Modifier.size(10.dp)
                             )
                             BasicText(
@@ -1020,10 +1047,17 @@ class HomeFragment : Fragment() {
         executor.execute {
             val reachable = ApiClient.ping()
             val info = if (reachable) ApiClient.getSystemInfo() else null
+            val moduleResult = if (reachable) ApiClient.getModuleStatus() else null
             requireActivity().runOnUiThread {
                 statusDotEnabled = reachable
                 if (reachable) {
-                    statusText = getString(R.string.home_status_ok)
+                    val masterOn = moduleResult?.data?.optBoolean("enabled", true) ?: true
+                    moduleEnabled = masterOn
+                    statusText = if (masterOn) {
+                        getString(R.string.home_status_ok)
+                    } else {
+                        getString(R.string.home_module_switch_off)
+                    }
                     val enabledText = if (ApiClient.getLocationStatus().data?.optBoolean("enabled", false) == true) {
                         getString(R.string.location_enabled)
                     } else {
@@ -1043,6 +1077,23 @@ class HomeFragment : Fragment() {
     }
 
     // ---------- 悬浮窗统一入口（主页） ----------
+
+    /** 模块总开关切换：关闭后一键停用模块所有功能（Hook 放行真实数据）。 */
+    private fun toggleModuleEnabled(enabled: Boolean) {
+        val old = moduleEnabled
+        moduleEnabled = enabled // 乐观更新
+        executor.execute {
+            val result = ApiClient.setModuleEnabled(enabled)
+            requireActivity().runOnUiThread {
+                if (result.code == ApiResult.CODE_OK) {
+                    refreshBackendStatus()
+                } else {
+                    moduleEnabled = old
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     private fun openFloatWindow() {
         val context = requireContext()

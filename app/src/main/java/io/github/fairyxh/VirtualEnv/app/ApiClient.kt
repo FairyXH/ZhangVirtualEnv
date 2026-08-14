@@ -277,6 +277,21 @@ object ApiClient {
     /** 当前生效 Profile 信息（排障用）。 */
     fun getProfileStatus(): ApiResult = get("/api/profile/status")
 
+    /** 模块总开关状态。 */
+    fun getModuleStatus(): ApiResult = get("/api/module/status")
+
+    /** 模块总开关切换（关闭 = 一键停用模块所有功能）。 */
+    fun setModuleEnabled(enabled: Boolean): ApiResult {
+        val body = JSONObject().apply { put("enabled", enabled) }
+        return post("/api/module/enable", body)
+    }
+
+    /** 各作用域 Hook 状态（设置页展示/导出报告用）。 */
+    fun getHookStatus(): ApiResult = get("/api/hook/status")
+
+    /** 完整调试报告（设置页导出用）。 */
+    fun getReportExport(): ApiResult = get("/api/report/export")
+
     private fun envPath(type: String): String {
         return when (type) {
             "ble" -> "bluetooth"

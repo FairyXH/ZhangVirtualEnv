@@ -2,12 +2,15 @@ package io.github.fairyxh.VirtualEnv.hook
 
 import android.util.Log
 import io.github.fairyxh.VirtualEnv.core.Backend
+import io.github.fairyxh.VirtualEnv.core.HookStatusRegistry
+import io.github.fairyxh.VirtualEnv.core.HookStatusReporter
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import java.io.File
+import java.lang.reflect.Executable
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -29,6 +32,12 @@ class VirtualEnvEntry : XposedModule() {
     companion object {
         private const val TAG = "ZVirtualEnv"
         private const val TAG_SCOPE = "Entry"
+
+        /** Hook 点标识：类.方法(参数类型列表)，用于状态报告。 */
+        private fun hookKey(executable: Executable): String {
+            val params = executable.parameterTypes.joinToString(",") { it.simpleName }
+            return "${executable.declaringClass.name}.${executable.name}($params)"
+        }
     }
 
     private var backend: Backend? = null
@@ -46,6 +55,7 @@ class VirtualEnvEntry : XposedModule() {
         if (param.isSystemServer) return
 
         processName = param.processName
+        HookStatusRegistry.setProcess(param.processName)
         // App 进程：初始化 EnvStateCache 与注册器。
         // 具体 Hook 安装延迟到 onPackageReady（此时才有宿主 classLoader）。
         try {
@@ -75,13 +85,15 @@ class VirtualEnvEntry : XposedModule() {
                 ClassLoader.getSystemClassLoader()
             }
             val registrar = HookRegistrar { executable, interceptor ->
-                try {
+                val ok = try {
                     hook(executable).intercept(interceptor)
                     true
                 } catch (t: Throwable) {
                     ZLog.e(TAG_SCOPE, "app hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
+                HookStatusRegistry.record(hookKey(executable), ok)
+                ok
             }
             val pkg = try { param.packageName } catch (t: Throwable) { "" }
 
@@ -117,6 +129,11 @@ class VirtualEnvEntry : XposedModule() {
                 FrameworkEnvHookAdapter(cache, registrar).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] framework env hooks installed for pkg=$pkg")
             }
+            // 上报本进程 Hook 状态（system_server 汇总后供设置页展示/导出报告）
+            HookStatusReporter.reportWithRetry(
+                io.github.fairyxh.VirtualEnv.util.ApiToken.readFromApk(moduleApplicationInfo.sourceDir),
+                processName
+            )
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "[$TAG_SCOPE] onPackageReady hook install failed", t)
         }
@@ -154,10 +171,19 @@ class VirtualEnvEntry : XposedModule() {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onSystemServerStarting")
         try {
             if (backend != null) return
+            HookStatusRegistry.setProcess("system")
 
             // Backend 数据目录：system_server 可写目录 /data/system
             val backend = Backend.initialize(File("/data/system"))
             this.backend = backend
+            backend.setModuleApkPath(moduleApplicationInfo.sourceDir)
+            // BuildConfig 可能未生成（AGP 9 默认关闭），用反射读取模块版本
+            backend.setModuleVersion(
+                runCatching {
+                    Class.forName("io.github.fairyxh.VirtualEnv.BuildConfig")
+                        .getField("VERSION_NAME").get(null) as? String
+                }.getOrDefault("") ?: ""
+            )
 
             // 加载 Profile（从模块 APK assets/profiles 读取）
             backend.profileManager.load(moduleApplicationInfo.sourceDir)
@@ -171,13 +197,15 @@ class VirtualEnvEntry : XposedModule() {
 
             // 安装 Hook Adapter
             val registrar = HookRegistrar { executable, interceptor ->
-                try {
+                val ok = try {
                     hook(executable).intercept(interceptor)
                     true
                 } catch (t: Throwable) {
                     ZLog.e(TAG_SCOPE, "hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
                     false
                 }
+                HookStatusRegistry.record(hookKey(executable), ok)
+                ok
             }
             LocationHookAdapter(backend, registrar).install(param.classLoader)
             // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位

@@ -237,6 +237,11 @@ class ApiServer(
                 path == "/api/sim/status" && method == "GET" -> envStatus("sim")
                 path == "/api/sim/set" && method == "POST" -> envSet("sim", body)
                 path == "/api/profile/status" && method == "GET" -> profileStatus()
+                path == "/api/module/status" && method == "GET" -> moduleStatus()
+                path == "/api/module/enable" && method == "POST" -> moduleEnable(body)
+                path == "/api/hook/status" && method == "POST" -> hookStatusReport(body)
+                path == "/api/hook/status" && method == "GET" -> hookStatusGet()
+                path == "/api/report/export" && method == "GET" -> reportExport()
                 path == "/api/debug/random-env" && method == "POST" -> randomEnv()
                 path == "/api/debug/observe/start" && method == "POST" -> observeStart()
                 path == "/api/debug/observe/end" && method == "POST" -> observeEnd()
@@ -559,6 +564,41 @@ class ApiServer(
         return ApiResult.ok("ok", backend.profileInfoJson())
     }
 
+    /** 模块总开关状态。 */
+    private fun moduleStatus(): ApiResult {
+        return ApiResult.ok("ok", backend.moduleStatusJson())
+    }
+
+    /** 模块总开关切换（关闭 = 一键停用模块所有功能）。 */
+    private fun moduleEnable(body: String): ApiResult {
+        val enabled = JSONObject(body).optBoolean("enabled", true)
+        backend.setModuleEnabled(enabled)
+        return ApiResult.ok("ok", backend.moduleStatusJson())
+    }
+
+    /** 各作用域进程上报 Hook 状态快照。 */
+    private fun hookStatusReport(body: String): ApiResult {
+        val json = try {
+            JSONObject(body)
+        } catch (t: Throwable) {
+            return ApiResult.error("bad hook status json: ${t.message}")
+        }
+        val process = json.optString("process", "")
+        val status = json.optJSONObject("status") ?: return ApiResult.error("status required")
+        backend.reportHookStatus(process, status)
+        return ApiResult.ok("ok")
+    }
+
+    /** 汇总各作用域 Hook 状态（报告/设置页展示）。 */
+    private fun hookStatusGet(): ApiResult {
+        return ApiResult.ok("ok", backend.hookStatusJson())
+    }
+
+    /** 完整调试报告导出。 */
+    private fun reportExport(): ApiResult {
+        return ApiResult.ok("ok", backend.fullDebugReportJson())
+    }
+
     /** 调试辅助：生成全套随机虚拟环境并启用，返回生成的配置。 */
     private fun randomEnv(): ApiResult {
         val data = backend.generateRandomEnv()
@@ -804,6 +844,9 @@ class ApiServer(
             put("apiVersion", 1)
             put("phase", "1")
             put("package", "io.github.fairyxh.VirtualEnv")
+            put("moduleEnabled", backend.isModuleEnabled())
+            put("moduleVersion", backend.moduleVersion())
+            put("device", backend.deviceInfoJson())
         }
         return ApiResult.ok("ok", data)
     }

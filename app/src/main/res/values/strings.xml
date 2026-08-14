@@ -22,6 +22,9 @@
     <!-- Home -->
     <string name="home_subtitle">虚拟环境测试框架模块，用于应用开发调试与系统环境模拟测试。模块永久免费，禁止倒卖。如果你是买来的请立即退款并举报。</string>
     <string name="home_status_title">模块状态</string>
+    <string name="home_module_switch_title">模块总开关</string>
+    <string name="home_module_switch_desc">关闭后一键停用模块所有功能，Hook 全部放行真实数据</string>
+    <string name="home_module_switch_off">模块总开关已关闭（全部功能已停用）</string>
     <string name="home_status_checking">正在检测…</string>
     <string name="home_status_ok">模块已激活，Backend 运行中</string>
     <string name="home_status_detail">Phase %1$s · 虚拟定位 %2$s</string>
@@ -235,6 +238,14 @@
     <string name="settings_amap_privacy_link">《高德开放平台隐私权政策》</string>
     <string name="settings_amap_privacy_required">请先阅读并同意高德隐私政策</string>
     <string name="settings_no_browser">未找到浏览器</string>
+    <string name="settings_hook_status_title">Hook 状态与报告</string>
+    <string name="settings_hook_status_desc">各作用域 Hook 点注册状态（用于适配排查与调试），可导出完整调试报告</string>
+    <string name="settings_hook_status_loading">正在获取 Hook 状态…</string>
+    <string name="settings_hook_status_empty">暂无 Hook 状态（模块未激活或作用域进程未上报）</string>
+    <string name="settings_hook_status_ok_detail">各 Hook 点均已注册成功，无失败项。</string>
+    <string name="settings_hook_status_failed">Hook 状态获取失败：%1$s</string>
+    <string name="settings_hook_status_export">导出报告</string>
+    <string name="settings_hook_status_exported">Hook 调试报告已导出</string>
     <string name="settings_backup_title">配置导入导出</string>
     <string name="settings_backup_desc">导出模块整体设置（位置/路线/已保存地点/环境快照/环境配置/配置状态/应用设置）为 JSON 备份文件，或从备份文件恢复。导入会覆盖当前全部配置并立即生效（不含录像数据）</string>
     <string name="settings_backup_export">导出配置</string>

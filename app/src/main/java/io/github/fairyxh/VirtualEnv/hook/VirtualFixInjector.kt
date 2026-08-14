@@ -59,7 +59,8 @@ class VirtualFixInjector(
 
     /** 虚拟位置启用（单点或路线任一开启；采集暂停时停止注入）。 */
     private fun virtualLocationEnabled(): Boolean =
-        !backend.isSuspended() &&
+        backend.isModuleEnabled() &&
+            !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
     /**
