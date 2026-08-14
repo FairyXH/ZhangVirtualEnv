@@ -23,8 +23,7 @@ class OplusServiceStartBypass(
         private const val SERVICE_RECORD = "com.android.server.am.ServiceRecord"
         private const val ACTIVE_SERVICES = "com.android.server.am.ActiveServices"
 
-        /** 仅放行百度地图的定位服务，避免影响其他服务。 */
-        private const val TARGET_PKG = "com.baidu.BaiduMap"
+        /** 志愿汇等应用会内置该服务，不能按宿主包名限定。 */
         private const val TARGET_SERVICE = "com.baidu.location.f"
     }
 
@@ -90,7 +89,7 @@ class OplusServiceStartBypass(
             val ok = registrar.register(method) { chain ->
                 val callingPkg = chain.getArg(0) as? String
                 val r = chain.getArg(4)
-                if (callingPkg == TARGET_PKG || isBaiduLocService(r)) {
+                if (isBaiduLocService(r)) {
                     ZLog.i(TAG_SCOPE, "setFgsRestrictionLocked target baidu loc service (pkg=$callingPkg), force allow after")
                     val original = chain.proceed()
                     try {
@@ -148,25 +147,32 @@ class OplusServiceStartBypass(
         }
     }
 
-    /** 反射判断 ServiceRecord 是否为百度定位服务。 */
+    /** 反射判断 ServiceRecord 是否为任意宿主包内的百度定位服务组件。 */
     private fun isBaiduLocService(self: Any?): Boolean {
         if (self == null) return false
         return try {
             val pkg = self.javaClass.getDeclaredField("packageName").also { it.isAccessible = true }.get(self) as? String
-            if (pkg != TARGET_PKG) {
-                ZLog.d(TAG_SCOPE, "isBaiduLocService pkg=$pkg class=${self.javaClass.name}")
-                return false
-            }
             // 优先 serviceInfo.name（ComponentName），兜底 intent component
             val serviceInfo = self.javaClass.getDeclaredField("serviceInfo").also { it.isAccessible = true }.get(self)
             if (serviceInfo != null) {
                 val cn = serviceInfo as? android.content.ComponentName
-                if (cn != null && cn.className == TARGET_SERVICE) return true
+                if (cn != null && cn.className == TARGET_SERVICE) {
+                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
+                    return true
+                }
                 val name = serviceInfo.javaClass.getDeclaredField("name").also { it.isAccessible = true }.get(serviceInfo) as? String
-                if (name == TARGET_SERVICE) return true
+                if (name == TARGET_SERVICE) {
+                    ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
+                    return true
+                }
             }
             val intent = self.javaClass.getDeclaredField("intent").also { it.isAccessible = true }.get(self) as? android.content.Intent
-            intent?.component?.className == TARGET_SERVICE
+            if (intent?.component?.className == TARGET_SERVICE) {
+                ZLog.d(TAG_SCOPE, "matched baidu loc service pkg=$pkg")
+                true
+            } else {
+                false
+            }
         } catch (t: Throwable) {
             ZLog.d(TAG_SCOPE, "isBaiduLocService reflect failed: ${t.message}")
             false
