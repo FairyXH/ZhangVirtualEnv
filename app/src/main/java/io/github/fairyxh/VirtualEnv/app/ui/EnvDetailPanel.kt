@@ -830,8 +830,12 @@ fun EnvDetailPanel(
                     .redirectErrorStream(true).start()
                 val text = proc.inputStream.readBytes().toString(Charsets.UTF_8)
                 proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
-                Regex("\"(.*?)\"").findAll(text).forEach { m ->
-                    m.groupValues[1].takeIf { it.isNotBlank() }?.let { out.add(it) }
+                // cmd wifi list-networks 输出：<id> <ssid> <security>，SSID 不带引号
+                text.lineSequence().forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty() || trimmed.startsWith("Network Id")) return@forEach
+                    val m = Regex("^\\d+\\s+(.+?)\\s{2,}\\S+.*$").find(trimmed) ?: return@forEach
+                    m.groupValues[1].trim().takeIf { it.isNotBlank() }?.let { out.add(it) }
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("ZVirtualEnv", "root wifi list-networks failed", t)
