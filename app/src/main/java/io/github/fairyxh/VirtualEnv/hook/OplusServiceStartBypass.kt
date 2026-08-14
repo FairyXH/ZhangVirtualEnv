@@ -129,18 +129,28 @@ class OplusServiceStartBypass(
         return hooked
     }
 
-    /** 强制写入 allow-start 相关字段（0=ALLOWED）。 */
+    /**
+     * 强制写入 allow-start 相关字段。
+     *
+     * reason code 取值来自 PowerExemptionManager.reasonCodeToString：
+     *   -1=DENIED、0=UNKNOWN、12=PROC_STATE_TOP（调用方处于前台，允许启动）。
+     * 早期误写 0（UNKNOWN）导致服务仍被 ColorOS 后台启动限制拦截。
+     * 同时覆盖 mAllowWiu_*（Oplus 15 新增的 While-In-Use 限制字段）。
+     */
     private fun forceAllowStart(r: Any) {
         val names = arrayOf(
             "mAllowStart_noBinding",
             "mAllowStart_inBindService",
-            "mAllowStart_byBindings"
+            "mAllowStart_byBindings",
+            "mAllowWiu_noBinding",
+            "mAllowWiu_inBindService",
+            "mAllowWiu_byBindings"
         )
         for (n in names) {
             try {
                 val f = r.javaClass.getDeclaredField(n)
                 f.isAccessible = true
-                f.set(r, 0)
+                f.setInt(r, 12)
             } catch (t: Throwable) {
                 ZLog.d(TAG_SCOPE, "force field $n failed: ${t.message}")
             }
