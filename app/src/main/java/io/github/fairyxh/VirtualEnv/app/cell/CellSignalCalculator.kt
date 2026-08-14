@@ -16,8 +16,9 @@ import kotlin.random.Random
  * 算法设计（确定性为主、轻度随机）：
  * 1. 计算查询点到小区的大圆距离 [dist]；
  * 2. 覆盖半径 [range]（缺失时按制式取典型值）；
- * 3. 距离衰减：penalty = 12 * distRatio^1.5 dB（distRatio = clamp(dist / range)），
- *    基站正下方几乎无衰减、覆盖边缘衰减约 12dB；
+ * 3. 距离衰减：penalty = 25 * distRatio^1.2 dB（distRatio = clamp(dist / range)），
+ *    基站正下方几乎无衰减、覆盖边缘衰减约 25dB（城市环境典型路径损耗），
+ *    同制式下远近基站信号拉开明显差距；
  * 4. 基准信号：优先用 OpenCellID averageSignalStrength，否则按制式默认值；
  * 5. 样本置信度抖动：samples 越少抖动越大（样本 <10 时 ±2.5dB，<50 时 ±1.5dB，否则 ±0.8dB），
  *    模拟真实测量的波动；
@@ -63,7 +64,7 @@ object CellSignalCalculator {
         val dist = cell.distanceMeters(queryLat, queryLon)
         val range = max(cell.rangeMeters ?: (defaultRangeMeters[radio] ?: 1000), 50)
         val distRatio = min(dist / range, MAX_DIST_RATIO)
-        val penalty = 12.0 * distRatio.pow(1.5)
+        val penalty = 25.0 * distRatio.pow(1.2)
 
         val base = cell.averageSignalStrength
             ?: (defaultSignalDbm[radio] ?: -95)
@@ -128,20 +129,31 @@ object CellSignalCalculator {
         return min(max(value, minVal.toDouble()), maxVal.toDouble())
     }
 
-    /** 摘要：算法参数（用于 UI 说明）。 */
+    /**
+     * 摘要：距离 / 覆盖 / 样本 + **算法估算信号**（与保存到基站模拟的数值一致）。
+     * 使用稳定随机源，UI 重组时数值不闪烁。
+     */
     fun describe(cell: CellInfo, queryLat: Double, queryLon: Double): String {
         val dist = cell.distanceMeters(queryLat, queryLon).toInt()
         val range = cell.rangeMeters ?: (defaultRangeMeters[(cell.radio ?: "LTE").uppercase()] ?: 1000)
         val samples = cell.samples ?: 0
-        return "距离 ${dist}m · 覆盖 ${range}m · 样本 $samples · 信号 ${cell.averageSignalStrength ?: "—"}dBm"
+        val entry = computeEntry(cell, queryLat, queryLon, stableRandom(queryLat, queryLon))
+        val signal = when (entry.optString("type", "")) {
+            "LTE", "NR" -> entry.optInt("rsrp", Int.MIN_VALUE)
+            "GSM", "WCDMA" -> entry.optInt("rssi", Int.MIN_VALUE)
+            else -> Int.MIN_VALUE
+        }
+        val signalText = if (signal == Int.MIN_VALUE) "—" else "$signal"
+        return "距离 ${dist}m · 覆盖 ${range}m · 样本 $samples · 估算信号 ${signalText}dBm"
     }
 
     /**
      * 由 OpenCellID 结果构造完整 cell 配置数据（`/api/cell/set` 的 data）。
      *
+     * 默认使用稳定随机源：同一查询点每次保存信号一致，可复现。
      * @return 空 JSONObject（无有效条目）时表示没有可保存的基站。
      */
-    fun buildCellConfig(cells: List<CellInfo>, queryLat: Double, queryLon: Double, random: Random = Random.Default): JSONObject {
+    fun buildCellConfig(cells: List<CellInfo>, queryLat: Double, queryLon: Double, random: Random = stableRandom(queryLat, queryLon)): JSONObject {
         val entries = org.json.JSONArray()
         cells.forEach { cell ->
             val entry = computeEntry(cell, queryLat, queryLon, random)
