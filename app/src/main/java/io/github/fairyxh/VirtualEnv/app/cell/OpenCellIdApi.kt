@@ -62,7 +62,8 @@ object OpenCellIdApi {
         val bbox = bboxFor(latitude, longitude, radiusMeters)
 
         val query = StringBuilder("key=").append(urlEncode(apiKey))
-            .append("&BBOX=").append(urlEncode(bbox))
+            // BBOX 逗号分隔：逗号在 query 中合法，不 URL 编码（编码 %2C 可能被部分服务端原样解析）
+            .append("&BBOX=").append(bbox)
             .append("&limit=").append(limit.coerceIn(1, DEFAULT_LIMIT))
             .append("&format=json")
         radio?.takeIf { it.isNotBlank() }?.let { query.append("&radio=").append(urlEncode(it.uppercase())) }
@@ -77,6 +78,8 @@ object OpenCellIdApi {
         }
         val body = resp.body ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
         val parsed = parseBody(body) ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
+        // OpenCellID 对无效 Key / 权限不足等错误也返回 HTTP 200，错误在 body：{"error":"...","code":N}
+        parseApiError(parsed, resp.httpCode)?.let { return Result.failure(it) }
         val cellsArr = parsed.optJSONArray("cells") ?: JSONArray()
         val cells = mutableListOf<CellInfo>()
         for (i in 0 until cellsArr.length()) {
@@ -103,6 +106,7 @@ object OpenCellIdApi {
         }
         val body = resp.body ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
         val parsed = parseBody(body) ?: return Result.failure(ApiFailure("OpenCellID 返回格式异常"))
+        parseApiError(parsed, resp.httpCode)?.let { return Result.failure(it) }
         val count = parsed.optJSONArray("cells")?.length() ?: 0
         return Result.success("API Key 有效（返回 $count 个小区）")
     }
@@ -121,9 +125,12 @@ object OpenCellIdApi {
         while (idx < measurements.size) {
             val batch = measurements.subList(idx, minOf(idx + MAX_UPLOAD_BATCH, measurements.size))
             val payload = JSONObject().apply { put("measurements", JSONArray(batch)) }
-            val code = uploadJson(apiKey, payload)
-            if (code !in 200..299) {
-                return Result.failure(mapHttp(code, null))
+            val resp = uploadJson(apiKey, payload)
+            if (resp.httpCode !in 200..299) {
+                return Result.failure(mapHttp(resp.httpCode, parseBodySafe(resp.body)))
+            }
+            parseBodySafe(resp.body)?.let { parsed ->
+                parseApiError(parsed, resp.httpCode)?.let { return Result.failure(it) }
             }
             idx += batch.size
         }
@@ -160,7 +167,7 @@ object OpenCellIdApi {
         }
     }
 
-    private fun uploadJson(apiKey: String, payload: JSONObject): Int {
+    private fun uploadJson(apiKey: String, payload: JSONObject): HttpResponse {
         var conn: HttpURLConnection? = null
         return try {
             val boundary = "----ZVE" + System.currentTimeMillis()
@@ -189,16 +196,26 @@ object OpenCellIdApi {
             val code = conn.responseCode
             val resp = if (code in 200..299) readStream(conn.inputStream) else readStream(conn.errorStream)
             ZLog.i(TAG_SCOPE, "uploadJson http=$code resp=${resp?.take(160)}")
-            code
+            HttpResponse(code, resp)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "uploadJson network error: ${t.message}")
-            -1
+            HttpResponse(-1, null)
         } finally {
             try {
                 conn?.disconnect()
             } catch (_: Throwable) {
             }
         }
+    }
+
+    /** 解析 OpenCellID 业务错误体（错误时 HTTP 仍可能为 200）：`{"error":"...","code":N}`。 */
+    private fun parseApiError(body: JSONObject, httpCode: Int): ApiFailure? {
+        val code = body.optInt("code", 0)
+        val error = body.optString("error", "")
+        if (error.isNotEmpty() || (body.has("code") && code != 0)) {
+            return mapHttp(httpCode, body)
+        }
+        return null
     }
 
     private fun parseBodySafe(body: String?): JSONObject? {
@@ -234,15 +251,22 @@ object OpenCellIdApi {
 
     private fun mapHttp(httpCode: Int, body: JSONObject?): ApiFailure {
         val apiCode = body?.optInt("code", -1) ?: -1
+        val apiError = body?.optString("error", "") ?: ""
         return when {
-            httpCode == 401 || apiCode == 2 -> ApiFailure("API Key 无效", httpCode, apiCode)
-            httpCode == 400 || apiCode == 3 -> ApiFailure("请求参数错误", httpCode, apiCode)
-            httpCode == 403 || apiCode == 4 -> ApiFailure("API Key 未获得社区 API 权限（需贡献数据或白名单）", httpCode, apiCode)
-            httpCode == 500 || apiCode == 5 -> ApiFailure("OpenCellID 服务暂时不可用", httpCode, apiCode)
-            httpCode == 503 || apiCode == 6 -> ApiFailure("请求过于频繁，请稍后重试", httpCode, apiCode)
-            httpCode == 429 || apiCode == 7 -> ApiFailure("今日 API 使用量已达到限制", httpCode, apiCode)
+            apiCode == 2 || httpCode == 401 -> ApiFailure(
+                if (apiError.isNotEmpty()) "API Key 无效：$apiError" else "API Key 无效",
+                httpCode, apiCode
+            )
+            apiCode == 3 || httpCode == 400 -> ApiFailure("请求参数错误", httpCode, apiCode)
+            apiCode == 4 || httpCode == 403 -> ApiFailure("API Key 未获得社区 API 权限（需贡献数据或白名单）", httpCode, apiCode)
+            apiCode == 5 || httpCode == 500 -> ApiFailure("OpenCellID 服务暂时不可用", httpCode, apiCode)
+            apiCode == 6 || httpCode == 503 -> ApiFailure("请求过于频繁，请稍后重试", httpCode, apiCode)
+            apiCode == 7 || httpCode == 429 -> ApiFailure("今日 API 使用量已达到限制", httpCode, apiCode)
             httpCode == -1 -> ApiFailure("网络请求失败，请检查网络连接")
-            else -> ApiFailure("OpenCellID 请求失败（HTTP $httpCode）", httpCode, apiCode)
+            else -> ApiFailure(
+                if (apiError.isNotEmpty()) "OpenCellID 请求失败：$apiError" else "OpenCellID 请求失败（HTTP $httpCode）",
+                httpCode, apiCode
+            )
         }
     }
 

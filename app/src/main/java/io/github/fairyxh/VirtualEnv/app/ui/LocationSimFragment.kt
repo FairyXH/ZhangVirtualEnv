@@ -1013,7 +1013,7 @@ class LocationSimFragment : Fragment() {
             selected = selected,
             containerColor = if (selected) colors.accent.copy(alpha = 0.16f)
             else colors.bgTertiary.copy(alpha = 0.3f),
-            height = 56.dp
+            height = 76.dp
         ) {
             Row(
                 Modifier
@@ -1025,6 +1025,11 @@ class LocationSimFragment : Fragment() {
                     BasicText(
                         cell.summary(),
                         style = TextStyle(color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    )
+                    // 基站自身经纬度：便于确认是否真的在查询范围内
+                    BasicText(
+                        String.format("%.6f, %.6f", cell.latitude, cell.longitude),
+                        style = TextStyle(color = colors.accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     )
                     BasicText(
                         CellSignalCalculator.describe(cell, queryLat, queryLon),
