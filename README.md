@@ -73,7 +73,7 @@ Users are responsible for their own usage.
 | 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配百度地图等严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
 | SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
-| BLE | 虚拟 Beacon 扫描结果，可采集真实设备后模拟 |
+| 蓝牙（BLE / 经典 / 双模） | 虚拟 Beacon 扫描（BLE）+ **经典 BR/EDR 发现模拟**（`startDiscovery` → 逐个 ACTION_FOUND，蓝牙栈内 Hook 全局生效）；设备可配「连接模式」：BLE 仅 / 经典仅 / 双模，支持 `classOfDevice` / `classicRssi`；虚拟发现期间丢弃真实设备（详见 `docs/reverse/classic-bluetooth-discovery-simulation.md`） |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），测试进程中接管真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
 | 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
