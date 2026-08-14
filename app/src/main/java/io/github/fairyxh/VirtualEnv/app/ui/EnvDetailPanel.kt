@@ -1163,11 +1163,24 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
+                                // RandomButtonRow 内部 fillMaxWidth，不能与其他按钮嵌套同一行
                                 Row(
                                     Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.End
                                 ) {
-                                    RandomButtonRow(fragment, backdrop) { randomFillForm() }
+                                    GlassPill(
+                                        onClick = { randomFillForm() },
+                                        backdrop = backdrop,
+                                        selected = false,
+                                        containerColor = colors.accent.copy(alpha = 0.18f),
+                                        height = 30.dp
+                                    ) {
+                                        BasicText(
+                                            fragment.getString(R.string.env_random_title),
+                                            Modifier.padding(horizontal = 12.dp),
+                                            style = TextStyle(color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        )
+                                    }
                                     GlassPill(
                                         onClick = { wifiPickExpanded = !wifiPickExpanded },
                                         backdrop = backdrop,
@@ -1175,14 +1188,14 @@ fun EnvDetailPanel(
                                         selected = wifiPickExpanded,
                                         containerColor = if (wifiPickExpanded) colors.accent.copy(alpha = 0.18f)
                                         else colors.bgTertiary.copy(alpha = 0.3f),
-                                        height = 36.dp
+                                        height = 30.dp
                                     ) {
                                         BasicText(
                                             "从已保存 WiFi 选择",
                                             Modifier.padding(horizontal = 10.dp),
                                             style = TextStyle(
                                                 color = if (wifiPickExpanded) colors.accent else colors.textPrimary,
-                                                fontSize = 13.sp
+                                                fontSize = 12.sp
                                             )
                                         )
                                     }
