@@ -170,8 +170,10 @@ object VrenvTransfer {
                 put("signalDbm", rssi)
                 put("connected", bssid == connectedBssid?.uppercase(Locale.ROOT))
                 frequencyToChannel(freq)?.let { put("channel", it) } ?: put("channel", JSONObject.NULL)
-                put("capabilities", JSONObject.NULL)
-                put("encryptionType", JSONObject.NULL)
+                // 对方 virtual_wifi.capabilities / encryption_type 为 TEXT NOT NULL：
+                // 空字符串可写入，JSONObject.NULL 会触发 NOT NULL constraint failed
+                put("capabilities", "")
+                put("encryptionType", "")
                 put("latitude", JSONObject.NULL)
                 put("longitude", JSONObject.NULL)
                 put("firstSeenAt", ts)
