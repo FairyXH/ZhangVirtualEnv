@@ -310,7 +310,21 @@ gnss:     PASS | 卫星总数: 16 使用: 5
 
 ## 5. 新设备如何适配
 
-当前主要验证机型为 Oplus Android 15（API 35）。换新设备/系统版本时按以下流程适配：
+当前已适配并验证机型：**Oplus Android 15（API 35）**；已完成 **Android 16（API 36）增量适配**（2026-08，分析材料 `Adapt\Android 16\`，分析文档见 `docs/reverse/android16-adapt/`：Hook 清单 / 15-16 Diff / 16 设计 / 多版本架构 / 兼容性测试模板）。
+
+Android 16 适配结论（不破坏 Android 15 基线）：
+
+| 功能 | Android 16 状态 | 处理 |
+|---|---|---|
+| 虚拟定位 / GNSS / WiFi / 经典蓝牙 / 配对 / SIM 属性层 / RIL / 框架层 | ✅ 完全兼容 | 签名一致，无改动 |
+| BLE 扫描（蓝牙栈） | ✅ 适配 | Android 16 移除 `TransitionalScanHelper` / `BluetoothGattBinder` / `BluetoothScanBinder`，统一落点迁移到 `ScanController.startScan(int, ScanSettings, List, AttributionSource)`；`ScannerApp` 回调字段由 `callback` 变为 `mCallback`（`BleStackHookAdapter` 已双候选） |
+| ColorOS 服务启动绕过 | ✅ 适配 | Android 16 的 `ActiveServicesExtImpl` 变为接口 `IActiveServicesExt`（4 参签名一致），`OplusServiceStartBypass` 已双候选 |
+| SIM Binder 服务端 | ✅ 适配 | Android 16 的 `PhoneInterfaceManager` 恢复无后缀方法（`getSimOperator` 等），原有方法列表已覆盖；追加 `ForPhone` 变体（`getSimOperatorNameForPhone` 等） |
+| Profile 选择 | ✅ 修正 | 新增 `android16.json`（minSdk 36），`android15.json` 收窄 `maxSdk=35`，`com.android.phone` 进程按 `SDK_INT` 选择 sim profile |
+
+真机验证清单与待确认项见 `docs/reverse/android16-adapt/Android16_Compatibility_Test.md`（SubscriptionInfoInternal 类可能在 telephony-common.jar、IActiveServicesExt 实现类可能在 oplus-framework.jar、FGS 新逻辑字段等）。Android 17/18 适配流程见 `MultiVersion_Architecture.md`。
+
+换新设备/系统版本时按以下流程适配：
 
 ### 5.1 确定作用域
 
