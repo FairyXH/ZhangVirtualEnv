@@ -2,7 +2,7 @@
   "name": "android16",
   "android": 16,
   "minSdk": 36,
-  "maxSdk": 99,
+  "maxSdk": 36,
   "device": "*",
   "hooks": {
     "location": {
