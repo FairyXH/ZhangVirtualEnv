@@ -258,15 +258,12 @@ class SystemSensorBackend(
         timestampNanos: Long
     ): Boolean {
         return try {
-            // SensorManager.mSensorManager -> SystemSensorManager（含 mInstance long native 指针）
-            val ssmField = SensorManager::class.java.getDeclaredField("mSensorManager")
-            ssmField.isAccessible = true
-            val ssm = ssmField.get(sm) ?: return false
-            val ssmClass = ssm.javaClass
+            // sm 本身就是 SystemSensorManager 实例（继承 SensorManager），直接取其 native 指针与方法
+            val ssmClass = sm.javaClass
             val handle = sensor.javaClass.getMethod("getHandle").invoke(sensor) as Int
 
-            // 1) mInstance
-            val instance = readLongField(ssm, "mInstance", "mNativeInstance") ?: run {
+            // 1) mInstance（long native 指针）
+            val instance = readLongField(sm, "mInstance", "mNativeInstance", "mPtr") ?: run {
                 ZLog.w(TAG_SCOPE, "invokeNativeInject: mInstance not found; fields=${ssmClass.declaredFields.map { it.name }}")
                 return false
             }
@@ -292,7 +289,7 @@ class SystemSensorBackend(
                 return false
             }
             method.isAccessible = true
-            val ret = method.invoke(ssm, instance, handle, values, accuracy, timestampNanos) as? Boolean
+            val ret = method.invoke(sm, instance, handle, values, accuracy, timestampNanos) as? Boolean
             ZLog.i(TAG_SCOPE, "invokeNativeInject: method=${method.name} handle=$handle -> $ret")
             ret == true
         } catch (t: Throwable) {
