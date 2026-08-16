@@ -141,7 +141,14 @@ class VirtualEnvEntry : XposedModule() {
         val phoneSubInfo = mutableListOf<String>()
         val phoneObj = mutableListOf<String>()
         try {
-            val assets = hostClassLoader.getResourceAsStream("assets/profiles/android15.json")
+            // 按 SDK 选择 sim profile：Android 16 使用 android16.json（类/方法候选差异见 docs/reverse/android16-adapt）
+            val sdk = android.os.Build.VERSION.SDK_INT
+            val profileName = when {
+                sdk >= 36 -> "android16.json"
+                sdk >= 35 -> "android15.json"
+                else -> "android14.json"
+            }
+            val assets = hostClassLoader.getResourceAsStream("assets/profiles/$profileName")
                 ?: hostClassLoader.getResourceAsStream("assets/profiles/default.json")
             if (assets != null) {
                 val text = assets.bufferedReader(Charsets.UTF_8).use { it.readText() }
