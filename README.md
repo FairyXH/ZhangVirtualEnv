@@ -66,20 +66,20 @@ Users are responsible for their own usage.
 | 类别 | 能力 |
 |---|---|
 | 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动；**摇杆松手保留当前位置**（不溜回原点），斜向移动经方向平滑 + 注入频率对齐（摇杆启用时 fix/push 加速至 ~200-250ms）后顺滑无锯齿；**随机抖动可在设置页关闭**（`/api/settings/jitter`） |
-| 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值（详见 `docs/reverse/nr-cell-nci-sentinel-fix.md`）；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（百度等严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置，详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`） |
-| OpenCellID 基站数据库 | BYOK 模式接入 OpenCellID：设置页填写/测试 API Key（明文显示，与高德 Key 一致；仅日志脱敏）；**CSV 离线数据库**支持导入多个 OpenCellID 官方下载 CSV（如 460.csv，行偏移+网格索引随机读行，无需 API Key），查询模式三选一：**离线 / 在线 / 混合（离线优先，无结果自动转在线）**；位置页**可收起「基站查询」卡片**按当前选点查询附近基站（BBOX 面积受限自动分片拼接 + Haversine 二次过滤 + 结果分页/经纬度/估算信号），一键保存到基站模拟（信号强度由距离/覆盖半径/样本数算法估算）；可选**为 OpenCellID 社区贡献真实测量数据**（默认关闭：一键采集结果下方显示上传结果；**录像持续采集出现新基站自动实时上传**，会话级去重；仅挂起窗口内的真实观测，虚拟数据严禁上传；详见 `docs/reverse/opencellid-integration.md`） |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，百度等 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）；志愿汇 5.8.8 内置百度定位服务的 Oplus 启动限制适配见 `docs/reverse/zhiyuanhui-5.8.8-location-analysis.md` |
-| 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防百度原生 locSDK/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（志愿汇带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递），详见 `docs/reverse/baidu-location-freshness-filter-bypass.md` |
-| 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（仿泡泡虚拟定位）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，百度地图摇杆移动实时生效（详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`） |
-| 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配百度地图等严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
+| 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（严格网络定位 SDK 可按 `&cdmall=` 反算虚拟位置） |
+| OpenCellID 基站数据库 | BYOK 模式接入 OpenCellID：设置页填写/测试 API Key（明文显示，与地图 Key 一致；仅日志脱敏）；**CSV 离线数据库**支持导入多个 OpenCellID 官方下载 CSV（如 460.csv，行偏移+网格索引随机读行，无需 API Key），查询模式三选一：**离线 / 在线 / 混合（离线优先，无结果自动转在线）**；位置页**可收起「基站查询」卡片**按当前选点查询附近基站（BBOX 面积受限自动分片拼接 + Haversine 二次过滤 + 结果分页/经纬度/估算信号），一键保存到基站模拟（信号强度由距离/覆盖半径/样本数算法估算）；可选**为 OpenCellID 社区贡献真实测量数据**（默认关闭：一键采集结果下方显示上传结果；**录像持续采集出现新基站自动实时上传**，会话级去重；仅挂起窗口内的真实观测，虚拟数据严禁上传） |
+| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，严格定位 SDK 的卫星数判定（usedInFix > 2）与 NMEA 一致性校验通过，GPS fix 才会被采纳；fix 统一携带 `satellites` extras 兜底；**针对内置定位服务的第三方应用**，其 Oplus 启动限制适配按服务组件类名在 system_server 放行，不把该应用加入作用域 |
+| 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（防定位 SDK 原生实现/系统过滤按旧时间戳拒收），并旁路 `LocationProviderManager$LocationRegistration$1.test` 的 minUpdateInterval / minUpdateDistance 过滤（部分应用带 10m 距离过滤时静态坐标不再被丢弃，持续 1Hz 投递） |
+| 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（与主流虚拟定位方案同一链路思路）：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，地图类应用摇杆移动实时生效 |
+| 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成最优环境（GNSS 卫星 24/used12、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频），专门适配严格定位 SDK；**是否启用该类型模拟仍由用户开关控制** |
 | SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
 | WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
-| 蓝牙（BLE / 经典 / 双模） | 虚拟 Beacon 扫描（BLE）+ **经典 BR/EDR 发现模拟**（`startDiscovery` → 逐个 ACTION_FOUND，蓝牙栈内 Hook 全局生效）；设备可配「连接模式」：BLE 仅 / 经典仅 / 双模，支持 `classOfDevice` / `classicRssi`；虚拟发现期间丢弃真实设备（详见 `docs/reverse/classic-bluetooth-discovery-simulation.md`） |
+| 蓝牙（BLE / 经典 / 双模） | 虚拟 Beacon 扫描（BLE）+ **经典 BR/EDR 发现模拟**（`startDiscovery` → 逐个 ACTION_FOUND，蓝牙栈内 Hook 全局生效）；设备可配「连接模式」：BLE 仅 / 经典仅 / 双模，支持 `classOfDevice` / `classicRssi`；虚拟发现期间丢弃真实设备 |
 | GNSS | 虚拟卫星状态（卫星数/使用数/星座），测试进程中接管真实卫星回调 |
 | 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
 | 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
-| 采集导入导出 | 主页已保存采集卡右上角「导入导出」：点击后列表变复选框单选，一次一份；快照可导出为 **VirtualRegion 兼容 `.vrenv.json`**（`virtualregion-environment` 格式，含 name/location/wifi/cells/bluetooth，详见 `docs/reverse/saved-collect-vrenv-import-export.md`），也可导入 vrenv 文件生成 collect 快照并拆分轨道（与本地采集一致，可回放）；录像不支持导出 |
-| Hook 层观测 | 采集真实环境时在各 Hook 点记录**未虚拟化前的真实数据**（位置/基站/WiFi/GNSS），采集包附带 `hookObserve` 字段用于 Hook 层检验（不只普通 App 视角）；一键采集位置自动保存到“已保存地点/位置模拟”；基站采集 mcc/mnc 优先字符串 getter（Oplus 15 旧 int getter 不可靠，详见 `docs/reverse/hook-observe-and-collect-fixes.md`） |
+| 采集导入导出 | 主页已保存采集卡右上角「导入导出」：点击后列表变复选框单选，一次一份；快照可导出为 **VirtualRegion 兼容 `.vrenv.json`**（`virtualregion-environment` 格式，含 name/location/wifi/cells/bluetooth），也可导入 vrenv 文件生成 collect 快照并拆分轨道（与本地采集一致，可回放）；录像不支持导出 |
+| Hook 层观测 | 采集真实环境时在各 Hook 点记录**未虚拟化前的真实数据**（位置/基站/WiFi/GNSS），采集包附带 `hookObserve` 字段用于 Hook 层检验（不只普通 App 视角）；一键采集位置自动保存到“已保存地点/位置模拟”；基站采集 mcc/mnc 优先字符串 getter（部分 ROM 旧 int getter 不可靠） |
 | 配置状态预设 | 主页一键保存当前完整测试配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
 | 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
 | 模块总开关（总闸） | 主页“模块状态”卡一键停用模块**所有**功能（位置/路线/摇杆/WiFi/基站/BLE/GNSS/传感器/SIM 固化），Hook 全部放行真实数据；重新开启恢复关闭前完整状态（持久化，重启保持） |
@@ -89,8 +89,8 @@ Users are responsible for their own usage.
 ### 设计原则
 
 - **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
-- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.google.android.gms`、`com.android.location.fused`、`com.oplus.location`）与模块自身/检测器。**不向 scope 添加百度/微信/高德等第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。GMS 为必要系统服务（提供定位/位置服务），与 VirtualRegion 的 GMS 处理对照见 `docs/reverse/virtualregion-gms-hook-comparison.md`。
-- **志愿汇适配仍是系统层**：志愿汇包 `com.zzw.october` 内置 `com.baidu.location.f`，Oplus 启动限制 Hook 按服务组件类名匹配并在 `system_server` 放行，不把志愿汇或任何第三方应用加入 `scope.list`。
+- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.google.android.gms`、`com.android.location.fused`、`com.oplus.location`）与模块自身/检测器。**不向 scope 添加任何第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。GMS 为必要系统服务（提供定位/位置服务），与 VirtualRegion 的 GMS 处理一致，必须保留在作用域内。
+- **内置定位服务的第三方应用适配仍是系统层**：部分第三方应用内置定位服务组件，Oplus 启动限制 Hook 按服务组件类名匹配并在 `system_server` 放行，不把任何第三方应用加入 `scope.list`。
 - **API 保密**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开，不暴露接口存在。
 - **fail-open**：任何 Hook 点异常时放行原始逻辑，避免影响宿主稳定性。
 
@@ -123,10 +123,10 @@ Users are responsible for their own usage.
 - `core/Backend.kt` — system_server 内的核心服务，持有各 Engine 与持久化
 - `core/EnvStateCache.kt` — App 进程侧 500ms 轮询缓存，Hook 层读取快照
 - `hook/FrameworkEnvHookAdapter.kt` — 普通 App 进程内的框架 API Hook
-- `hook/LocationHookAdapter.kt` — system_server 定位 Hook：provider 上报替换 + **全局 ILocationListener Proxy 出口替换 + 500ms 主动推送**（百度摇杆实时投递）
+- `hook/LocationHookAdapter.kt` — system_server 定位 Hook：provider 上报替换 + **全局 ILocationListener Proxy 出口替换 + 500ms 主动推送**（摇杆实时投递）
 - `hook/PhoneInterfaceManagerHookAdapter.kt` — phone 进程 Binder 层基站 Hook
 - `hook/SimTelephonyHookAdapter.kt` — phone 进程 ITelephony / IPhoneSubInfo SIM 身份与信号 Hook
-- `hook/SimSystemPropertyHookAdapter.kt` — phone 进程 TelephonyProperties 系统属性层 SIM 身份虚拟化（Oplus 15 必需，详见 `docs/reverse/oplus15-sim-property-layer-fix.md`）
+- `hook/SimSystemPropertyHookAdapter.kt` — phone 进程 TelephonyProperties 系统属性层 SIM 身份虚拟化（部分 ROM 上 `getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读 `gsm.sim.operator.*`/`gsm.operator.*` 系统属性，必须拦截属性写入层才能全局生效；`TelephonyProperties` 类在 Android 15 为 `android.internal.telephony.sysprop.TelephonyProperties`、Android 16 迁移为 `android.sysprop.TelephonyProperties`，模块按双候选自动命中，属性进程级全局且不 Hook 第三方进程）
 - `hook/SimSubscriptionHookAdapter.kt` — system_server ISub SubscriptionInfo 全局改写
 - `hook/StepSensorInjector.kt` — 传感器连续模拟注入器（pending + refresh）
 - `profile/` — 不同系统版本的适配 Profile
@@ -182,13 +182,13 @@ adb reboot
 控制端主界面分为：
 
 - **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整测试配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放；**已保存采集卡右上角「导入导出」**：进入选择模式后勾选一份快照导出为 `.vrenv.json`，或直接导入 vrenv 文件生成采集（一次一份，录像不支持导出）
-- **位置模拟**：地图选点设置单点位置（高德 GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）；底部**可收起「基站查询」卡片**：按当前选点/输入坐标通过 OpenCellID 查询附近基站（默认半径 1500 米，可调），展示制式/运营商/距离/信号/样本，点击条目勾选后**一键保存到基站模拟**（信号强度由距离/覆盖半径/样本数算法估算）
+- **位置模拟**：地图选点设置单点位置（地图 SDK GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）；底部**可收起「基站查询」卡片**：按当前选点/输入坐标通过 OpenCellID 查询附近基站（默认半径 1500 米，可调），展示制式/运营商/距离/信号/样本，点击条目勾选后**一键保存到基站模拟**（信号强度由距离/覆盖半径/样本数算法估算）
 - **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照；每个类型条目表单右上角提供**随机**按钮，一键生成合法随机参数
-  - **自动托管（严格定位适配）**：基站 / WiFi / BLE / GNSS / 传感器子页面顶部提供「自动托管」开关。开启后该类型忽略手动配置，由模块基于当前虚拟位置自动生成最优且自洽的环境（GNSS 卫星 24 / usedInFix 12 / cn0 38，满足百度等 SDK 的 `a > 2` 卫星数判定；基站回退带合法 ID + 虚拟坐标的 CDMA，通过百度 `c.a.b()` 有效性校验并按 `&cdmall=` 反算；WiFi / BLE / 步频派生合法默认值）。**是否进行该类型环境模拟仍由用户开关决定**，开启虚拟定位时 UI 仅提示建议打开环境模拟；关闭自动托管后恢复手动配置（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）
-  - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与 Nrfr 相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**Oplus 15 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 拦截 `TelephonyProperties` setter 并 1s 轮询重写（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
+  - **自动托管（严格定位适配）**：基站 / WiFi / BLE / GNSS / 传感器子页面顶部提供「自动托管」开关。开启后该类型忽略手动配置，由模块基于当前虚拟位置自动生成最优且自洽的环境（GNSS 卫星 24 / usedInFix 12 / cn0 38，满足严格定位 SDK 的 `a > 2` 卫星数判定；基站回退带合法 ID + 虚拟坐标的 CDMA，通过定位 SDK 内部有效性校验并按 `&cdmall=` 反算；WiFi / BLE / 步频派生合法默认值）。**是否进行该类型环境模拟仍由用户开关决定**，开启虚拟定位时 UI 仅提示建议打开环境模拟；关闭自动托管后恢复手动配置
+  - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与同类虚拟定位方案相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**部分 ROM 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 拦截 `TelephonyProperties` setter 并 1s 轮询重写（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
 - **环境配置持久化**：**wifi/cell/ble/gnss/sensor/sim 六类环境引擎的上次配置（数据 + 开关 + 来源快照）自动持久化到 `env_state` 表**（system_server 的 zve.db），重启后自动恢复并直接生效（enabled=true 的类型开机即应用）；环境页卡片实时显示“使用中 · 配置摘要/使用配置：快照名”，清除配置后持久化记录同步删除
 - **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
-- **设置**：高德地图 Key（可选，用于地图可视化）、**OpenCellID 基站数据库**（BYOK：自行在 [opencellid.org](https://opencellid.org) 注册并填写 API Key，明文显示、仅日志脱敏；一键**测试 API Key**；**查询模式**离线/在线/混合三选一；**CSV 离线数据库**可导入多个 OpenCellID 官方下载 CSV 文件（无需 API Key，支持删除，可离线查询附近基站）；「为 opencellid 社区贡献数据」复选框默认关闭，开启后主页一键采集会顺带把**挂起窗口内的真实观测**（位置 + 基站标识 + 信号 + 测量时间）批量上传到 OpenCellID，虚拟基站/虚拟坐标严禁上传）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
+- **设置**：地图 SDK Key（可选，用于地图可视化）、**OpenCellID 基站数据库**（BYOK：自行在 [opencellid.org](https://opencellid.org) 注册并填写 API Key，明文显示、仅日志脱敏；一键**测试 API Key**；**查询模式**离线/在线/混合三选一；**CSV 离线数据库**可导入多个 OpenCellID 官方下载 CSV 文件（无需 API Key，支持删除，可离线查询附近基站）；「为 opencellid 社区贡献数据」复选框默认关闭，开启后主页一键采集会顺带把**挂起窗口内的真实观测**（位置 + 基站标识 + 信号 + 测量时间）批量上传到 OpenCellID，虚拟基站/虚拟坐标严禁上传）、API Token、**桌面图标隐藏开关**（启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
 
 所有操作走本地 API，无需外部网络（地图 SDK、OpenCellID 查询与数据贡献除外）。
 
@@ -310,19 +310,24 @@ gnss:     PASS | 卫星总数: 16 使用: 5
 
 ## 5. 新设备如何适配
 
-当前已适配并验证机型：**Oplus Android 15（API 35）**；已完成 **Android 16（API 36）增量适配**（2026-08，分析材料 `Adapt\Android 16\`，分析文档见 `docs/reverse/android16-adapt/`：Hook 清单 / 15-16 Diff / 16 设计 / 多版本架构 / 兼容性测试模板）。
+当前已适配并验证机型：**Oplus Android 15（API 35）**；已完成 **Android 16（API 36）增量适配**（2026-08，基于 `Adapt\Android 16\` 实际系统文件静态分析与构建验证；真机运行验证尚未进行）。
 
 Android 16 适配结论（不破坏 Android 15 基线）：
 
 | 功能 | Android 16 状态 | 处理 |
 |---|---|---|
-| 虚拟定位 / GNSS / WiFi / 经典蓝牙 / 配对 / SIM 属性层 / RIL / 框架层 | ✅ 完全兼容 | 签名一致，无改动 |
-| BLE 扫描（蓝牙栈） | ✅ 适配 | Android 16 移除 `TransitionalScanHelper` / `BluetoothGattBinder` / `BluetoothScanBinder`，统一落点迁移到 `ScanController.startScan(int, ScanSettings, List, AttributionSource)`；`ScannerApp` 回调字段由 `callback` 变为 `mCallback`（`BleStackHookAdapter` 已双候选） |
+| 虚拟定位 / GNSS / WiFi / 经典蓝牙 / 配对 / SIM 属性层 / RIL / 框架层 | ✅ 静态兼容 | 签名一致，无改动 |
+| BLE 扫描（蓝牙栈） | ✅ 适配 | Android 16 移除 `TransitionalScanHelper` / `BluetoothGattBinder` / `BluetoothScanBinder`，统一落点迁移到 `ScanController.startScan(int, ScanSettings, List, AttributionSource)`；`ScannerApp` 回调字段由 `callback` 变为 `mCallback`（`BleStackHookAdapter` 已双候选 + API 36 门控） |
 | ColorOS 服务启动绕过 | ✅ 适配 | Android 16 的 `ActiveServicesExtImpl` 变为接口 `IActiveServicesExt`（4 参签名一致），`OplusServiceStartBypass` 已双候选 |
-| SIM Binder 服务端 | ✅ 适配 | Android 16 的 `PhoneInterfaceManager` 恢复无后缀方法（`getSimOperator` 等），原有方法列表已覆盖；追加 `ForPhone` 变体（`getSimOperatorNameForPhone` 等） |
-| Profile 选择 | ✅ 修正 | 新增 `android16.json`（minSdk 36），`android15.json` 收窄 `maxSdk=35`，`com.android.phone` 进程按 `SDK_INT` 选择 sim profile |
+| SIM Binder 服务端 | ✅ 适配 | Android 16 的 `PhoneInterfaceManager` 保留无后缀方法 + 少量 `ForPhone` 变体；核心 SIM 身份由 `PhoneSubInfoController`（telephony-common.jar）与 Phone 对象层覆盖，均已在 `SimTelephonyHookAdapter` 候选内 |
+| SIM 系统属性层 | ✅ 适配 | Android 16 将 `TelephonyProperties` 从 `android.internal.telephony.sysprop` 迁移到 `android.sysprop`（setter 签名一致），`SimSystemPropertyHookAdapter` 已双候选 |
+| RIL 防御层 | ✅ 适配 | Android 16 `RIL.getCellInfoList(Message, WorkSource)` 为 2 参，`RilDefensiveHookAdapter` 已按"第 1 参 Message"匹配 |
+| Subscription | ✅ 适配 | `SubscriptionManagerService` / `SubscriptionInfoInternal.toSubscriptionInfo()` 均在 telephony-common.jar 确认，`SimSubscriptionHookAdapter` 候选命中 |
+| Profile 选择 | ✅ 修正 | 新增 `android16.json`（minSdk 36, maxSdk 36），`android15.json` 收窄 `maxSdk=35`，`com.android.phone` 进程按 `SDK_INT` 精确选择 sim profile（API 37+ 回退 default.json，不误用 android16） |
 
-真机验证清单与待确认项见 `docs/reverse/android16-adapt/Android16_Compatibility_Test.md`（SubscriptionInfoInternal 类可能在 telephony-common.jar、IActiveServicesExt 实现类可能在 oplus-framework.jar、FGS 新逻辑字段等）。Android 17/18 适配流程见 `MultiVersion_Architecture.md`。
+**Android 16 真机待确认项**（静态材料无法覆盖，拿到真机后逐项验证）：`IActiveServicesExt` 实现类位置（oplus-framework.jar 中未发现，可能在 oplus-system-server.jar，决定接口 default Hook 是否足够）、FGS 新逻辑（`USE_NEW_BFSL_LOGIC` 等是否仍读旧字段）、`WifiServiceImpl` 动态类名、SIM 系统属性实际调用链。
+
+**Android 17/18 未来适配流程**：为每个新版本新增独立 Profile（如 `android17.json`，minSdk=37, maxSdk=37）并把上一版本的 maxSdk 收窄到其 API 上限，保证新版本不误用旧配置；对每个 Hook 点按"类名/方法签名/字段"候选列表做差异分析，只新增候选或新 hook 函数，不修改已验证旧版本逻辑；新增 Hook 一律 fail-open。已知 Android 16 与 15 的关键差异（蓝牙栈迁移、AM ext 接口化、SIM 方法/属性类迁移、RIL 2 参签名）作为 Android 17 差异对照基线。
 
 换新设备/系统版本时按以下流程适配：
 
@@ -364,7 +369,7 @@ io.github.fairyxh.VirEnvDetector
 | `ScanResult` / `BluetoothDevice` | public 构造与 `getRemoteDevice` |
 | `SignalStrength` | 是否 public `(CellSignalStrength[])` 构造；无则用无参 + `mCellSignalStrengths` 字段（`VirtualSignalFactory` 已双方案回退） |
 | `PhoneInterfaceManager` / `PhoneSubInfoController` | SIM 身份方法（getSimOperator 等）的参数个数/顺序：AOSP 是 `(String callingPackage, String callingFeatureId)`，老版本可能只有 1 参 |
-| `TelephonyManager` 读系统属性 | **Oplus 15 上 `getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 不走 Binder，直接读 `gsm.sim.operator.*`/`gsm.operator.*` 系统属性**；需在 `com.android.phone` 拦截 `android.internal.telephony.sysprop.TelephonyProperties` 的 6 个 `List<String>` setter（`SimSystemPropertyHookAdapter`），属性为进程级全局，无需 Hook 第三方 App |
+| `TelephonyManager` 读系统属性 | **部分 ROM 上 `getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 不走 Binder，直接读 `gsm.sim.operator.*`/`gsm.operator.*` 系统属性**；需在 `com.android.phone` 拦截 `TelephonyProperties` 的 6 个 `List<String>` setter（`SimSystemPropertyHookAdapter`，Android 15/16 双类候选），属性为进程级全局，无需 Hook 第三方 App |
 | `SubscriptionManagerService` / `SubscriptionController` | system_server 里 ISub 实现类名：Android 12+ 为 `SubscriptionManagerService`，旧版为 `SubscriptionController`（`SimSubscriptionHookAdapter` 已按 Profile 多候选） |
 
 真机反射枚举示例（模块日志）：
@@ -380,7 +385,7 @@ io.github.fairyxh.VirEnvDetector
 - `hook/FrameworkEnvHookAdapter.kt`：如 `GnssStatus$Builder` 方法签名不同，修改反射参数列表
 - `hook/StepSensorInjector.kt`：如 SensorEvent 构造不同，修改 buildEvent
 - `hook/SimTelephonyHookAdapter.kt`：SIM 身份方法按“方法名 + 返回类型”查找，参数个数变化自动兼容（1~4 参均可命中）；`VirtualSignalFactory` 对 SignalStrength 构造提供数组构造/字段反射双回退
-- `hook/SimSystemPropertyHookAdapter.kt`：Oplus 15 系统属性层；6 个 `TelephonyProperties` setter 全挂 + 1s 轮询按配置重写属性（配置变化无需电话栈重新写入）；禁用时放行真实值
+- `hook/SimSystemPropertyHookAdapter.kt`：系统属性层；6 个 `TelephonyProperties` setter 全挂 + 1s 轮询按配置重写属性（配置变化无需电话栈重新写入）；禁用时放行真实值；Android 15/16 双类候选
 - `hook/SimSubscriptionHookAdapter.kt`：ISub 实现类名与 SubscriptionInfo 字段名均可经 Profile 调整
 - `profile/`：建议为不同系统版本建立 Profile，将签名差异收口到 Profile 配置；SIM 相关可配置 `sim.phoneInterfaceClasses` / `sim.phoneSubInfoClasses` / `sim.subscriptionClasses`
 
@@ -397,19 +402,19 @@ adb logcat -s VirEnvDetector:I
 
 ### 5.5 已知坑
 
-- **Oplus 15 SIM 属性层**：`TelephonyManager` 五个运营商/国家字段直接读系统属性，Binder Hook 无效；必须用 `SimSystemPropertyHookAdapter`。属性按 phoneId 逗号分隔（如 `gsm.sim.operator.numeric=[45500,46002]`），只替换配置槽位、保留未配置槽位真实值；详细逆向链路见 `docs/reverse/oplus15-sim-property-layer-fix.md`
+- **系统属性层 SIM**：部分 ROM 的 `TelephonyManager` 五个运营商/国家字段直接读系统属性，Binder Hook 无效；必须用 `SimSystemPropertyHookAdapter`。属性按 phoneId 逗号分隔（如 `gsm.sim.operator.numeric=[45500,46002]`），只替换配置槽位、保留未配置槽位真实值；Android 15 类路径 `android.internal.telephony.sysprop.TelephonyProperties`、Android 16 迁移为 `android.sysprop.TelephonyProperties`，均已在候选内
 - **SIM 引擎配置持久化**：六类环境引擎配置均持久化在 `env_state` 表（数据+开关+来源快照），重启自动恢复；恢复的 SIM 配置会自动重新 CarrierConfig 固化（enabled）或 reset（disabled）
 - **jadx CLI 反编译 framework.jar 很慢**：framework.jar 是 dex 且体积大；优先真机反射枚举
 - **LTE 值范围**：TAC 16 位、CI 28 位、PCI 0~503，random 生成必须落在范围内
 - **GNSS 真实回调覆盖**：必须拦截 `registerGnssStatusCallback`（不 proceed）并周期投递虚拟状态，否则真实卫星（几十颗）会覆盖虚拟值导致判定波动
-- **百度 NMEA 状态必须 V**：百度 `c.f.e(Location)` 对 NMEA 状态 A（ad=true）且坐标有效的 fix 返回 400 → 走 mock 分支 → 定位失败；状态 V（ad=false）才返回 0 走正常 GPS 路径（详见 `docs/reverse/baidu-sdk-gnss-cellinfo-analysis.md`）
-- **fix 必须带 `satellites` extras**：百度 `C0107f` 在 GnssStatus 未上报（`f.a==0`）时从 fix extras 读卫星数，缺失 → `a>2` 失败 → GPS 不上报；`LocationFresh.fresh()` 已统一补默认 12
-- **NMEA listener 注销后必须清理**：DeadObjectException 不处理会导致 `ab` 停更，fix 与 NMEA 间隔 ≥3s 触发百度状态重置（e() 返回 200/500）→ 定位失败；`GnssDataBlockHookAdapter` 已实现 dead listener 自愈
-- **百度摇杆实时性**：除了 provider 注入，还必须做**全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（`LocationHookAdapter`），否则百度等 SDK 在无真实 GPS fix 时收不到持续 fix，摇杆位移不生效（逆向泡泡虚拟定位所得，详见 `docs/reverse/paopao-joystick-global-listener-analysis.md`）
+- **定位 SDK NMEA 状态必须 V**：定位 SDK 的 fix 判定对 NMEA 状态 A（ad=true）且坐标有效的 fix 返回 400 → 走 mock 分支 → 定位失败；状态 V（ad=false）才返回 0 走正常 GPS 路径
+- **fix 必须带 `satellites` extras**：定位 SDK 在 GnssStatus 未上报（`f.a==0`）时从 fix extras 读卫星数，缺失 → `a>2` 失败 → GPS 不上报；`LocationFresh.fresh()` 已统一补默认 12
+- **NMEA listener 注销后必须清理**：DeadObjectException 不处理会导致 `ab` 停更，fix 与 NMEA 间隔 ≥3s 触发定位 SDK 状态重置（e() 返回 200/500）→ 定位失败；`GnssDataBlockHookAdapter` 已实现 dead listener 自愈
+- **摇杆实时性**：除了 provider 注入，还必须做**全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（`LocationHookAdapter`），否则定位 SDK 在无真实 GPS fix 时收不到持续 fix，摇杆位移不生效（主流虚拟定位方案同一链路思路）
 - **ApiServer 假死**：`acceptLoop` 单次 accept 异常不得 break（否则监听 socket 在但连接全挂，App 端显示 Backend 离线）；已改为异常重试 + socket 重建 + 固定线程池
 - **NetworkOnMainThread**：检测器 API 调用必须在后台线程，UI 更新回主线程
 - **HMA / HideMyAppList**：不影响 LSPosed Hook 注入；检测器需要 Root 才能直读模块持久化配置
-- **高德地图坐标是 GCJ-02**：地图选点/POI/高德定位坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后才能注入系统（否则偏差数百米）；内部持久化统一 WGS-84，回显地图时 `wgs84ToGcj02` 转回。**本次更新前保存的旧地点/路线坐标是 GCJ 语义，建议重新选点保存**
+- **地图 SDK 坐标是 GCJ-02**：地图选点/POI/定位坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后才能注入系统（否则偏差数百米）；内部持久化统一 WGS-84，回显地图时 `wgs84ToGcj02` 转回。**本次更新前保存的旧地点/路线坐标是 GCJ 语义，建议重新选点保存**
 - **流式录像**：录像使用 `StreamEnvironmentSampler` 持续监听 + 快照截帧，间隔输入框为 `numberDecimal`（支持 0.1s 小数）；录像中断（system_server 重启/崩溃）后自动标记 `interrupted` 并按实际帧数据恢复时长/帧数
 - **回放平滑插值**：默认开启；帧间位置按时间插值 + 小随机抖动（约 ±1.5m），可用 `/api/recording/smooth` 关闭；检测器回放中容差 800m
 - **桌面图标隐藏**：设置页开关通过禁用 `Launcher` activity-alias 实现；主 Activity（LSPosed `MODULE_SETTINGS` 入口）始终可用，不要手动禁用 MainActivity 组件
@@ -430,11 +435,10 @@ ZhangVirtualEnv/
 │       │   └── util/         # 日志、Token 等
 │       ├── assets/           # api_token.txt
 │       └── resources/META-INF/xposed/  # module.prop / scope.list
-├── docs/reverse/             # 逆向分析文档与验证脚本（新 Agent 先读这里）
 └── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
 ```
 
-逆向与真机验证过程记录见 `docs/reverse/`（重点：`env-live-test-and-hook-fixes.md`、`config-preset-and-import-export.md`、`paopao-joystick-global-listener-analysis.md`）。
+> 逆向分析、Hook 签名核对与真机验证过程记录保存在本地开发机（**不随本仓库分发**）。仓库内 README 已直接给出关键结论，不依赖任何外部文档即可使用本项目。
 
 ---
 
