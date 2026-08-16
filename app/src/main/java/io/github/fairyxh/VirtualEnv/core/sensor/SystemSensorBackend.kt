@@ -403,19 +403,38 @@ class SystemSensorBackend(
                 false,
                 systemServerClassLoader() ?: return false
             )
-            val method = clazz.getMethod(
-                "sendRuntimeSensorEventNative",
-                Long::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                Long::class.javaPrimitiveType,
-                FloatArray::class.java
-            )
+            val method = findSendRuntimeSensorEventMethod(clazz) ?: return false
+            method.isAccessible = true
             (method.invoke(null, ptr, handle, type, SystemClock.elapsedRealtimeNanos(), payload) as? Boolean) == true
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "sendRuntimeSensorEventNative type=$type failed", t)
             false
         }
+    }
+
+    /** 定位 sendRuntimeSensorEventNative 方法（R8 可能重命名，用名称+签名多候选匹配）。 */
+    private fun findSendRuntimeSensorEventMethod(clazz: Class<*>): java.lang.reflect.Method? {
+        val sig = arrayOf(
+            Long::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            Long::class.javaPrimitiveType,
+            FloatArray::class.java
+        )
+        for (name in listOf("sendRuntimeSensorEventNative", "sendRuntimeSensorEvent", "m881\$\$Nest\$smsendRuntimeSensorEventNative")) {
+            runCatching {
+                val m = clazz.getDeclaredMethod(name, *sig)
+                if (m.returnType == Boolean::class.javaPrimitiveType) return m
+            }
+        }
+        // 兜底：遍历 declaredMethods，名称含 RuntimeSensorEvent 且签名匹配
+        return runCatching {
+            clazz.declaredMethods.firstOrNull { m ->
+                (m.name.contains("RuntimeSensorEvent") || m.name.contains("sendRuntimeSensorEvent")) &&
+                    m.parameterTypes.contentEquals(sig) &&
+                    m.returnType == Boolean::class.javaPrimitiveType
+            }
+        }.getOrNull()
     }
 
     // ---------- 通道 1：@SystemApi Data Injection 反射（system_server 有权限） ----------
