@@ -51,19 +51,20 @@ class StepSensorInjector(private val cache: EnvStateCache) {
     )
 
     private val lock = Any()
-    private val listeners = ConcurrentHashMap<Any, ListenerEntry>()
-    private val pending = ConcurrentHashMap<Any, Pair<Any, Int>>() // listener -> (sensor, type)
+    private val listeners = ConcurrentHashMap<Pair<Any, Int>, ListenerEntry>() // (listener,type) -> entry
+    private val pending = ConcurrentHashMap<Pair<Any, Int>, Pair<Any, Int>>() // (listener,type) -> (sensor, type)
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-StepInjector").apply { isDaemon = true }
     }
 
     /** 注册监听：传感器模拟开启且类型命中时启动注入；否则保持原生行为。 */
     fun onListenerRegistered(listener: Any, sensor: Any, type: Int) {
-        if (listeners.containsKey(listener)) return
+        val key = listener to type
+        if (listeners.containsKey(key)) return
         val period = resolvePeriod(type)
         if (period == null) {
             // 模拟尚未就绪（例如配置刚启用、缓存未刷新）：先挂起，等 refresh() 补启动
-            pending[listener] = sensor to type
+            pending[key] = sensor to type
             ZLog.d(TAG_SCOPE, "sensor injector pending type=$type (config not ready)")
             return
         }
@@ -72,23 +73,26 @@ class StepSensorInjector(private val cache: EnvStateCache) {
 
     /** 启动注入（内部）。 */
     private fun startInject(listener: Any, sensor: Any, type: Int, period: Long) {
+        val key = listener to type
         val future = scheduler.scheduleWithFixedDelay(
             { tick(listener, sensor, type) },
             period,
             period,
             TimeUnit.MILLISECONDS
         )
-        listeners[listener] = ListenerEntry(listener, sensor, type, future)
-        pending.remove(listener)
+        listeners[key] = ListenerEntry(listener, sensor, type, future)
+        pending.remove(key)
         ZLog.i(TAG_SCOPE, "sensor injector started type=$type period=${period}ms")
     }
 
     /** 取消该 listener 的注入（unregister 时调用）。 */
     fun onListenerUnregistered(listener: Any) {
-        pending.remove(listener)
-        val entry = listeners.remove(listener) ?: return
-        entry.future.cancel(false)
-        ZLog.i(TAG_SCOPE, "sensor injector stopped type=${entry.type}")
+        val keys = listeners.keys.filter { it.first === listener }
+        keys.forEach { key ->
+            listeners.remove(key)?.future?.cancel(false)
+            ZLog.i(TAG_SCOPE, "sensor injector stopped type=${key.second}")
+        }
+        pending.keys.filter { it.first === listener }.forEach { pending.remove(it) }
     }
 
     /** 状态变化时检查：模拟关闭则停止全部注入；配置就绪则补启动挂起的 listener。 */
@@ -107,15 +111,15 @@ class StepSensorInjector(private val cache: EnvStateCache) {
         if (pending.isEmpty()) return
         val iter = pending.entries.iterator()
         while (iter.hasNext()) {
-            val (listener, pair) = iter.next()
+            val (key, pair) = iter.next()
             val (sensor, type) = pair
-            if (listeners.containsKey(listener)) {
+            if (listeners.containsKey(key)) {
                 iter.remove()
                 continue
             }
             val period = resolvePeriod(type)
             if (period != null) {
-                startInject(listener, sensor, type, period)
+                startInject(key.first, sensor, type, period)
             }
         }
     }
@@ -221,7 +225,7 @@ class StepSensorInjector(private val cache: EnvStateCache) {
 
     /** 录像事件流回放：按相对时间推进事件索引，完整重放录制时的事件序列。 */
     private fun tickEventStream(listener: Any, sensor: Any, type: Int, events: org.json.JSONArray) {
-        val entry = listeners[listener] ?: return
+        val entry = listeners[listener to type] ?: return
         val elapsed = android.os.SystemClock.elapsedRealtime() - entry.sessionStartElapsed
         // 二分查找最后一个 t <= elapsed 的事件
         var lo = 0
