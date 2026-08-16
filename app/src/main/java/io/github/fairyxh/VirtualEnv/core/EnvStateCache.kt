@@ -49,6 +49,9 @@ class EnvStateCache(
     private var lastSensorTickMs: Long = 0L
     private var jitterEnabled: Boolean = true
 
+    /** system_server 侧传感器后端状态（全局模式是否已生效）。 */
+    private var sensorBackendStatus: io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus? = null
+
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-EnvCache").apply { isDaemon = true }
     }
@@ -80,6 +83,10 @@ class EnvStateCache(
                 sensor = data.optJSONObject("sensor")
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
+                sensorBackendStatus = data.optJSONObject("sensor")
+                    ?.optJSONObject("backendStatus")
+                    ?.let { io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus.fromJson(it) }
+                    ?: io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus()
                 gnss = data.optJSONObject("gnss")
                     ?.takeIf { it.optBoolean("enabled", false) }
                     ?.optJSONObject("data")
@@ -89,6 +96,16 @@ class EnvStateCache(
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh env cache failed: ${t.message}")
+        }
+        // 跨进程同步系统后端状态（SYSTEM 生效时 App 进程抑制本地 Hook 注入）
+        try {
+            val sysStatus = synchronized(lock) { sensorBackendStatus }
+            if (sysStatus != null) {
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager
+                    .updateSystemStatusFromCache(sysStatus)
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "sync sensor backend status failed: ${t.message}")
         }
         try {
             val loc = rawGet("/api/location/status") ?: return
@@ -155,6 +172,10 @@ class EnvStateCache(
 
     /** 当前虚拟传感器数据（加速度/陀螺仪/计步等）；未启用时 null。 */
     fun currentSensor(): JSONObject? = synchronized(lock) { sensor }
+
+    /** system_server 侧传感器后端状态（未同步时返回默认 NONE）。 */
+    fun sensorBackendStatus(): io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus =
+        synchronized(lock) { sensorBackendStatus ?: io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus() }
 
     /** 当前虚拟 GNSS 数据；未启用时 null。 */
     fun currentGnss(): JSONObject? = synchronized(lock) { gnss }

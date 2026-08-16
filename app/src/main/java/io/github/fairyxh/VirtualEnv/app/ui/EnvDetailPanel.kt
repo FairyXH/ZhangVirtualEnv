@@ -152,6 +152,9 @@ fun EnvDetailPanel(
     var bleRaw by remember { mutableStateOf("") }
     var bleIntervalMs by remember { mutableStateOf("") }
     var sensorStep by remember { mutableStateOf("") }
+    // 传感器后端选择：auto（自动）/ system（全局系统模式）/ legacy（应用兼容模式）
+    var sensorBackend by remember { mutableStateOf(io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO) }
+    var sensorBackendStatus by remember { mutableStateOf("") }
     var gnssCount by remember { mutableStateOf("") }
     var gnssUsed by remember { mutableStateOf("") }
     var gnssCn0 by remember { mutableStateOf("") }
@@ -636,7 +639,10 @@ fun EnvDetailPanel(
                     toast(fragment.getString(R.string.env_sensor_step_hint))
                     return null
                 }
-                JSONObject().apply { put("stepFrequency", step) }
+                JSONObject().apply {
+                    put("stepFrequency", step)
+                    put("backend", sensorBackend)
+                }
             }
             TYPE_GNSS -> JSONObject().apply {
                 put("satelliteCount", gnssCount.toIntOrNull() ?: -1)
@@ -664,6 +670,25 @@ fun EnvDetailPanel(
                         R.string.env_detail_inactive
                     }
                 )
+                if (type == TYPE_SENSOR) {
+                    val dataObj = data?.optJSONObject("data")
+                    dataObj?.optString("backend")?.takeIf { it.isNotBlank() }?.let { sensorBackend = it }
+                    val backendStatus = data?.optJSONObject("backendStatus")
+                    if (backendStatus != null) {
+                        val typeName = backendStatus.optString("type", "NONE")
+                        val started = backendStatus.optBoolean("started", false)
+                        val mode = backendStatus.optInt("injectMode", -1)
+                        val reason = backendStatus.optString("reason", "")
+                        sensorBackendStatus = when {
+                            typeName == "SYSTEM" && started -> "当前：全局系统模式（SensorService Injection, mode=$mode）"
+                            typeName == "SYSTEM" && !started -> "当前：全局系统模式（未启动${if (reason.isNotBlank()) "：$reason" else ""}）"
+                            typeName == "LEGACY" -> "当前：应用兼容模式（LSPosed App Hook）"
+                            else -> "当前：未启用"
+                        }
+                    } else {
+                        sensorBackendStatus = "当前：未启用"
+                    }
+                }
             }
         }
     }
@@ -1427,6 +1452,38 @@ fun EnvDetailPanel(
                                     fragment.getString(R.string.env_sensor_title),
                                     style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                                 )
+                                BasicText(
+                                    sensorBackendStatus,
+                                    Modifier.padding(top = 4.dp),
+                                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                                )
+                                // 后端选择：自动 / 全局系统模式 / 应用兼容模式
+                                Row(
+                                    Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    BackendChoice(
+                                        label = "自动",
+                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO,
+                                        backdrop = backdrop,
+                                        colors = colors,
+                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO }
+                                    )
+                                    BackendChoice(
+                                        label = "全局系统",
+                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_SYSTEM,
+                                        backdrop = backdrop,
+                                        colors = colors,
+                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_SYSTEM }
+                                    )
+                                    BackendChoice(
+                                        label = "应用兼容",
+                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_LEGACY,
+                                        backdrop = backdrop,
+                                        colors = colors,
+                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_LEGACY }
+                                    )
+                                }
                                 RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("step", sensorStep, { sensorStep = it }, fragment.getString(R.string.env_sensor_step_hint), backdrop)
                             }
@@ -2162,6 +2219,34 @@ private fun RandomButtonRow(
                 style = TextStyle(color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             )
         }
+    }
+}
+
+/** 传感器后端选择小按钮（自动 / 全局系统 / 应用兼容）。 */
+@Composable
+private fun BackendChoice(
+    label: String,
+    selected: Boolean,
+    backdrop: Backdrop,
+    colors: io.github.fairyxh.VirtualEnv.app.ui.glass.GlassColors,
+    onClick: () -> Unit
+) {
+    GlassPill(
+        onClick = onClick,
+        backdrop = backdrop,
+        selected = selected,
+        containerColor = if (selected) colors.accent.copy(alpha = 0.18f)
+        else colors.bgTertiary.copy(alpha = 0.3f),
+        height = 32.dp
+    ) {
+        BasicText(
+            label,
+            Modifier.padding(horizontal = 8.dp),
+            style = TextStyle(
+                color = if (selected) colors.accent else colors.textPrimary,
+                fontSize = 12.sp
+            )
+        )
     }
 }
 

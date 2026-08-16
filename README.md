@@ -154,6 +154,28 @@ SDK Key 需在开放平台按当前应用包名与签名 SHA1 配置，应用内
 └────────────────────────────┘
 ```
 
+### 传感器测试数据注入架构
+
+传感器连续测试数据（步频/步数/加速度事件流）通过**多级测试数据后端**注入，根据设备能力自动选择：
+
+```
+传感器测试数据引擎（VirtualSensorEngine）
+        │
+        ▼
+传感器后端管理器（SensorBackendManager，自动选择）
+        ├─ 全局系统后端（SystemSensorBackend）
+        │    基于 SensorService 数据注入（系统服务层，对测试目标全局生效，
+        │    无需为目标应用配置作用域）；Android 13+ 且设备支持时优先启用。
+        └─ 应用兼容后端（AppHookSensorBackend）
+             基于 Framework API 测试适配（兼容旧版本 / 厂商限制 / 用户手动指定）。
+
+选择策略：sensor.backend = auto（默认，系统后端失败自动回退）/ system / legacy
+```
+
+- 两套后端实现统一 `SensorBackend` 接口，上层业务与 UI 不感知具体注入方式；
+- 全局系统后端不可用时自动回退应用兼容后端，不影响既有测试流程；
+- 控制端传感器面板展示当前后端模式（全局系统 / 应用兼容）与运行状态。
+
 ### 核心组件
 
 | 组件 | 说明 |
@@ -167,7 +189,13 @@ SDK Key 需在开放平台按当前应用包名与签名 SHA1 配置，应用内
 | `hook/SimTelephonyHookAdapter.kt` | Telephony API 测试适配（SIM 身份 / 运营商 / 信号强度 Profile） |
 | `hook/SimSystemPropertyHookAdapter.kt` | Telephony 系统属性层测试适配（部分 ROM 运营商字段直读系统属性时的写入适配） |
 | `hook/SimSubscriptionHookAdapter.kt` | Subscription 数据测试适配（订阅信息测试数据） |
-| `hook/StepSensorInjector.kt` | 传感器连续测试数据注入器 |
+| `hook/StepSensorInjector.kt` | 传感器连续测试数据注入器（应用兼容后端核心） |
+| `core/sensor/SensorBackend.kt` | 传感器后端统一接口与状态模型 |
+| `core/sensor/SensorBackendManager.kt` | 传感器后端管理器（自动选择 / 回退策略） |
+| `core/sensor/SystemSensorBackend.kt` | 全局系统传感器后端（SensorService 数据注入） |
+| `core/sensor/AppHookSensorBackend.kt` | 应用兼容传感器后端（包装 StepSensorInjector） |
+| `core/sensor/VirtualSensorEngine.kt` | 传感器测试数据引擎（步频/步数/时间戳/噪声） |
+| `core/sensor/VirtualSensorConfig.kt` | 传感器测试数据配置模型 |
 | `profile/` | 不同系统版本的测试适配 Profile |
 
 ### 模块结构

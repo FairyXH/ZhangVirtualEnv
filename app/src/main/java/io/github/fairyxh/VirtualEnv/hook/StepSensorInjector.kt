@@ -118,6 +118,18 @@ class StepSensorInjector(private val cache: EnvStateCache) {
         }
     }
 
+    /** 停止全部注入但保留调度器（suppress 时调用，后续 refresh 可恢复）。 */
+    fun stopAll() {
+        val iter = listeners.entries.iterator()
+        while (iter.hasNext()) {
+            val entry = iter.next()
+            entry.value.future.cancel(false)
+            iter.remove()
+        }
+        pending.clear()
+        ZLog.i(TAG_SCOPE, "sensor injector stopped all (suppressed)")
+    }
+
     /** 计算该传感器类型的注入周期；未命中任何模拟模式时返回 null（不注入）。 */
     private fun resolvePeriod(type: Int): Long? {
         val sensorData = cache.currentSensor()

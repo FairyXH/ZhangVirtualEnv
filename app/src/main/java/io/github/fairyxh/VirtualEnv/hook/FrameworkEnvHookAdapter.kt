@@ -44,8 +44,9 @@ class FrameworkEnvHookAdapter(
         startRefreshLoop()
     }
 
-    /** 步频模拟注入器（进程内单例）。 */
-    private val stepInjector = StepSensorInjector(cache)
+    /** 传感器多级后端统一入口（App 进程侧由 SensorBackendManager 路由到 AppHookSensorBackend）。 */
+    private val sensorManager
+        get() = io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager
 
     /** 周期刷新：配置就绪后补启动挂起的 sensor 注入（register 时配置未就绪的竞态）。 */
     private val refreshExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
@@ -58,7 +59,7 @@ class FrameworkEnvHookAdapter(
     private fun startRefreshLoop() {
         refreshExecutor.scheduleWithFixedDelay(
             {
-                runCatching { stepInjector.refresh() }
+                runCatching { sensorManager.refresh() }
                 runCatching { flushPendingBle() }
             },
             300,
@@ -100,7 +101,7 @@ class FrameworkEnvHookAdapter(
                         val listener = chain.getArg(0)
                         val sensor = chain.getArg(1)
                         val type = sensor.javaClass.getMethod("getType").invoke(sensor) as? Int ?: -1
-                        stepInjector.onListenerRegistered(listener, sensor, type)
+                        sensorManager.onListenerRegistered(listener, sensor, type)
                     } catch (t: Throwable) {
                         ZLog.w(TAG_SCOPE, "step register hook failed", t)
                     }
@@ -117,7 +118,7 @@ class FrameworkEnvHookAdapter(
                 val ok = registrar.register(method) { chain ->
                     val listener = chain.getArg(0)
                     try {
-                        stepInjector.onListenerUnregistered(listener)
+                        sensorManager.onListenerUnregistered(listener)
                     } catch (t: Throwable) {
                         ZLog.w(TAG_SCOPE, "step unregister hook failed", t)
                     }

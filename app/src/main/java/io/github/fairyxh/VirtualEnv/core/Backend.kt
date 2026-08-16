@@ -194,6 +194,7 @@ class Backend private constructor(private val dataDir: File) {
                 simEngine.setEnabled(false)
                 CarrierConfigPersister.resetAll()
                 ENV_ENGINE_TYPES.forEach { persistEnvState(it) }
+                notifySensorBackendConfigChanged()
                 ZLog.i(TAG_SCOPE, "module master disabled: all engines stopped (data retained)")
             }
         }
@@ -1101,7 +1102,10 @@ class Backend private constructor(private val dataDir: File) {
             "cell" -> cellEngine.update(data)
             "ble" -> bleEngine.update(data)
             "gnss" -> gnssEngine.update(data)
-            "sensor" -> sensorEngine.update(data)
+            "sensor" -> {
+                sensorEngine.update(data)
+                notifySensorBackendConfigChanged()
+            }
             "sim" -> {
                 simEngine.update(data)
                 // Nrfr 同款固化：CarrierConfig 持久化覆盖（禁用框架后仍生效）
@@ -1112,6 +1116,19 @@ class Backend private constructor(private val dataDir: File) {
         persistEnvState(type)
         ZLog.i(TAG_SCOPE, "env data set type=$type keys=${data.length()}")
         return true
+    }
+
+    /** 传感器配置/开关变化：通知后端管理器重新选择（system_server 全局后端或回退）。 */
+    private fun notifySensorBackendConfigChanged() {
+        try {
+            if (io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.isInitialized()) {
+                val config = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
+                    .fromStatus(sensorEngine.statusJson())
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.updateConfig(config)
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "notify sensor backend config change failed", t)
+        }
     }
 
     /** 将 SIM 配置的每个卡槽固化到 CarrierConfig（Nrfr 接口：ICarrierConfigLoader.overrideConfig）。 */
@@ -1194,7 +1211,10 @@ class Backend private constructor(private val dataDir: File) {
             "cell" -> cellEngine.setEnabled(enabled)
             "ble" -> bleEngine.setEnabled(enabled)
             "gnss" -> gnssEngine.setEnabled(enabled)
-            "sensor" -> sensorEngine.setEnabled(enabled)
+            "sensor" -> {
+                sensorEngine.setEnabled(enabled)
+                notifySensorBackendConfigChanged()
+            }
             "sim" -> {
                 simEngine.setEnabled(enabled)
                 if (enabled) {
@@ -1219,7 +1239,16 @@ class Backend private constructor(private val dataDir: File) {
             "cell" -> cellEngine.statusJson()
             "ble" -> bleEngine.statusJson()
             "gnss" -> gnssEngine.statusJson()
-            "sensor" -> sensorEngine.statusJson()
+            "sensor" -> {
+                val s = sensorEngine.statusJson()
+                // 附加后端状态：UI 展示当前模式（SYSTEM / LEGACY / NONE）
+                try {
+                    s.put("backendStatus", io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.statusJson())
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "append sensor backend status failed", t)
+                }
+                s
+            }
             "sim" -> simEngine.statusJson()
             else -> return null
         }

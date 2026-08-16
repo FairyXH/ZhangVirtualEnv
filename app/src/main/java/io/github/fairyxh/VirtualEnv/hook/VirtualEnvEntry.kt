@@ -55,6 +55,13 @@ class VirtualEnvEntry : XposedModule() {
             if (appCache != null) return
             val apiToken = io.github.fairyxh.VirtualEnv.util.ApiToken.readFromApk(moduleApplicationInfo.sourceDir)
             appCache = io.github.fairyxh.VirtualEnv.core.EnvStateCache(apiToken)
+            // 传感器多级后端：App 进程初始化兼容模式（legacy Hook 包装）
+            try {
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.initAppProcess(appCache!!)
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.start()
+            } catch (t: Throwable) {
+                log(Log.ERROR, TAG, "[$TAG_SCOPE] app sensor backend init failed", t)
+            }
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "[$TAG_SCOPE] onModuleLoaded cache init failed", t)
         }
@@ -198,6 +205,17 @@ class VirtualEnvEntry : XposedModule() {
             backend.startApiServer(token = apiToken)
             if (apiToken.isBlank()) {
                 log(Log.WARN, TAG, "[$TAG_SCOPE] api token missing/blank, ApiServer will reject all requests")
+            }
+
+            // 传感器多级后端：system_server 侧初始化全局模式（SensorService Data Injection）
+            try {
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.initSystemServer {
+                    io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
+                        .fromStatus(backend.sensorEngine.statusJson())
+                }
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.start()
+            } catch (t: Throwable) {
+                log(Log.ERROR, TAG, "[$TAG_SCOPE] sensor backend init failed", t)
             }
 
             // 安装 Hook Adapter
