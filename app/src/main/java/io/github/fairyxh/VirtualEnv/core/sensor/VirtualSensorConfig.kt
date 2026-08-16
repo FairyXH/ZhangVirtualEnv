@@ -39,8 +39,6 @@ data class VirtualSensorConfig(
         const val TYPE_STEP_COUNTER = 19
 
         const val BACKEND_AUTO = "auto"
-        const val BACKEND_SYSTEM = "system"
-        const val BACKEND_LEGACY = "legacy"
 
         val DEFAULT_SENSOR_TYPES = listOf(TYPE_STEP_COUNTER, TYPE_STEP_DETECTOR, TYPE_ACCELEROMETER)
 

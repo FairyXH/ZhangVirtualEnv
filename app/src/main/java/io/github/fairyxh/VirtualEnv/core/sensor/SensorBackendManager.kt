@@ -162,19 +162,8 @@ object SensorBackendManager {
                 ZLog.i(TAG_SCOPE, "Sensor Backend Manager:\n[!] Sensor simulation disabled\nSelected backend: NONE")
                 return
             }
-            val preference = cfg.backend.ifBlank { VirtualSensorConfig.BACKEND_AUTO }
-            if (preference == VirtualSensorConfig.BACKEND_LEGACY) {
-                statusRef.set(
-                    SensorBackendStatus(
-                        type = SensorBackendType.LEGACY,
-                        started = false,
-                        reason = "USER_PREF_LEGACY"
-                    )
-                )
-                ZLog.i(TAG_SCOPE, "Sensor Backend Manager:\n[!] User preference legacy\nSelected backend: LEGACY")
-                return
-            }
-            // auto / system：尝试全局后端
+            // 默认系统全局模式：尝试 SensorService Data Injection；失败自动回退
+            // LEGACY（仅 LSPosed 作用域内进程生效，由 App 进程侧自行启用）。
             backend.updateConfig(cfg)
             backend.start()
             val status = backend.getStatus()
@@ -182,9 +171,6 @@ object SensorBackendManager {
             if (ok) {
                 statusRef.set(status)
                 ZLog.i(TAG_SCOPE, "Sensor Backend Manager:\n[✓] System injection available\nSelected backend: SYSTEM")
-            } else if (preference == VirtualSensorConfig.BACKEND_SYSTEM) {
-                statusRef.set(status.copy(reason = "FORCED_SYSTEM_FAILED"))
-                ZLog.w(TAG_SCOPE, "Sensor Backend Manager:\n[!] Forced system backend unavailable\nReason: ${status.reason}\nSelected backend: NONE")
             } else {
                 statusRef.set(
                     SensorBackendStatus(
@@ -193,7 +179,7 @@ object SensorBackendManager {
                         reason = status.reason.ifBlank { "SYSTEM_INJECTION_FAILED" }
                     )
                 )
-                ZLog.w(TAG_SCOPE, "Sensor Backend Manager:\n[!] Sensor injection unavailable\nReason: ${status.reason.ifBlank { "UNKNOWN" }}\nFallback: LEGACY App Hook enabled")
+                ZLog.w(TAG_SCOPE, "Sensor Backend Manager:\n[!] Sensor injection unavailable\nReason: ${status.reason.ifBlank { "UNKNOWN" }}\nFallback: LEGACY App Hook enabled (scope apps only)")
             }
         }
     }

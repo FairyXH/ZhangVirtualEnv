@@ -36,8 +36,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
@@ -152,9 +159,11 @@ fun EnvDetailPanel(
     var bleRaw by remember { mutableStateOf("") }
     var bleIntervalMs by remember { mutableStateOf("") }
     var sensorStep by remember { mutableStateOf("") }
-    // 传感器后端选择：auto（自动）/ system（全局系统模式）/ legacy（应用兼容模式）
-    var sensorBackend by remember { mutableStateOf(io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO) }
+    // 当前后端模式状态（只读展示：全局系统 / 应用兼容 / 未启用）
     var sensorBackendStatus by remember { mutableStateOf("") }
+    // 内置传感器检测器状态
+    var sensorTestRunning by remember { mutableStateOf(false) }
+    var sensorTestResult by remember { mutableStateOf("") }
     var gnssCount by remember { mutableStateOf("") }
     var gnssUsed by remember { mutableStateOf("") }
     var gnssCn0 by remember { mutableStateOf("") }
@@ -639,10 +648,7 @@ fun EnvDetailPanel(
                     toast(fragment.getString(R.string.env_sensor_step_hint))
                     return null
                 }
-                JSONObject().apply {
-                    put("stepFrequency", step)
-                    put("backend", sensorBackend)
-                }
+                JSONObject().apply { put("stepFrequency", step) }
             }
             TYPE_GNSS -> JSONObject().apply {
                 put("satelliteCount", gnssCount.toIntOrNull() ?: -1)
@@ -671,8 +677,6 @@ fun EnvDetailPanel(
                     }
                 )
                 if (type == TYPE_SENSOR) {
-                    val dataObj = data?.optJSONObject("data")
-                    dataObj?.optString("backend")?.takeIf { it.isNotBlank() }?.let { sensorBackend = it }
                     val backendStatus = data?.optJSONObject("backendStatus")
                     if (backendStatus != null) {
                         val typeName = backendStatus.optString("type", "NONE")
@@ -680,17 +684,90 @@ fun EnvDetailPanel(
                         val mode = backendStatus.optInt("injectMode", -1)
                         val reason = backendStatus.optString("reason", "")
                         sensorBackendStatus = when {
-                            typeName == "SYSTEM" && started -> "当前：全局系统模式（SensorService Injection, mode=$mode）"
-                            typeName == "SYSTEM" && !started -> "当前：全局系统模式（未启动${if (reason.isNotBlank()) "：$reason" else ""}）"
-                            typeName == "LEGACY" -> "当前：应用兼容模式（LSPosed App Hook）"
-                            else -> "当前：未启用"
+                            typeName == "SYSTEM" && started -> "全局系统模式已生效（SensorService 注入, mode=$mode）"
+                            typeName == "SYSTEM" && !started -> "全局系统模式（未启动${if (reason.isNotBlank()) "：$reason" else ""}）"
+                            typeName == "LEGACY" -> "应用兼容模式（LSPosed 作用域内生效）"
+                            else -> "未启用"
                         }
                     } else {
-                        sensorBackendStatus = "当前：未启用"
+                        sensorBackendStatus = "未启用"
                     }
                 }
             }
         }
+    }
+
+    /**
+     * 内置传感器检测器：注册真实 SensorManager 监听 5 秒，统计
+     * STEP_COUNTER / STEP_DETECTOR / ACCELEROMETER 事件送达情况。
+     *
+     * - 全局系统模式：事件来自 SensorService Data Injection（模块自身无需注入）；
+     * - 应用兼容模式：事件由本进程 Hook 注入（模块 App 在 LSPosed 作用域内）。
+     * 无论哪种后端，模块 App 都能直接验证传感器事件是否送达。
+     */
+    fun runSensorSelfTest(context: Context, fragment: androidx.fragment.app.Fragment) {
+        if (sensorTestRunning) return
+        sensorTestRunning = true
+        sensorTestResult = "检测中…（5 秒，请保持静止观察）"
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        if (sm == null) {
+            sensorTestRunning = false
+            sensorTestResult = "SensorManager 不可用"
+            return
+        }
+        val stepSensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        val detectorSensor = sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+        val accelSensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val sensors = listOfNotNull(stepSensor, detectorSensor, accelSensor)
+        if (sensors.isEmpty()) {
+            sensorTestRunning = false
+            sensorTestResult = "无可用传感器"
+            return
+        }
+        val handler = Handler(Looper.getMainLooper())
+        var stepEvents = 0
+        var detectorEvents = 0
+        var accelEvents = 0
+        var lastStep = -1L
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                when (event.sensor?.type) {
+                    Sensor.TYPE_STEP_COUNTER -> {
+                        stepEvents++
+                        if (event.values.isNotEmpty()) lastStep = event.values[0].toLong()
+                    }
+                    Sensor.TYPE_STEP_DETECTOR -> detectorEvents++
+                    Sensor.TYPE_ACCELEROMETER -> accelEvents++
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        sensors.forEach { s ->
+            try {
+                sm.registerListener(listener, s, SensorManager.SENSOR_DELAY_NORMAL, handler)
+            } catch (t: Throwable) {
+                android.util.Log.w("ZVirtualEnv", "self test register sensor ${s.type} failed", t)
+            }
+        }
+        handler.postDelayed({
+            sensors.forEach { s -> runCatching { sm.unregisterListener(listener, s) } }
+            sensorTestRunning = false
+            val backend = sensorBackendStatus
+            sensorTestResult = buildString {
+                append("后端：").append(backend.ifBlank { "未知" }).append('\n')
+                append("STEP_COUNTER 事件：").append(stepEvents)
+                if (stepEvents > 0) append("（最新步数 ").append(lastStep).append("）")
+                append('\n')
+                append("STEP_DETECTOR 事件：").append(detectorEvents).append('\n')
+                append("ACCELEROMETER 事件：").append(accelEvents).append('\n')
+                if (stepEvents > 0 || detectorEvents > 0) {
+                    append("结论：传感器事件送达 ✅")
+                } else {
+                    append("结论：未收到事件（检查传感器模拟开关与后端状态）")
+                }
+            }
+        }, 5000)
     }
 
     fun setAutoManaged(auto: Boolean) {
@@ -1457,35 +1534,27 @@ fun EnvDetailPanel(
                                     Modifier.padding(top = 4.dp),
                                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                                 )
-                                // 后端选择：自动 / 全局系统模式 / 应用兼容模式
-                                Row(
-                                    Modifier.padding(top = 10.dp).fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    BackendChoice(
-                                        label = "自动",
-                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO,
-                                        backdrop = backdrop,
-                                        colors = colors,
-                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_AUTO }
-                                    )
-                                    BackendChoice(
-                                        label = "全局系统",
-                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_SYSTEM,
-                                        backdrop = backdrop,
-                                        colors = colors,
-                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_SYSTEM }
-                                    )
-                                    BackendChoice(
-                                        label = "应用兼容",
-                                        selected = sensorBackend == io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_LEGACY,
-                                        backdrop = backdrop,
-                                        colors = colors,
-                                        onClick = { sensorBackend = io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig.BACKEND_LEGACY }
-                                    )
-                                }
                                 RandomButtonRow(fragment, backdrop) { randomFillForm() }
                                 EntryFormField("step", sensorStep, { sensorStep = it }, fragment.getString(R.string.env_sensor_step_hint), backdrop)
+                                // 内置检测器：注册真实 SensorManager 监听，验证全局/兼容链路事件送达
+                                GlassButton(
+                                    onClick = { runSensorSelfTest(context, fragment) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                    surfaceColor = colors.bgTertiary.copy(alpha = 0.4f)
+                                ) {
+                                    BasicText(
+                                        if (sensorTestRunning) "内置检测运行中…" else "内置检测",
+                                        style = TextStyle(color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                if (sensorTestResult.isNotBlank()) {
+                                    BasicText(
+                                        sensorTestResult,
+                                        Modifier.padding(top = 8.dp),
+                                        style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2219,34 +2288,6 @@ private fun RandomButtonRow(
                 style = TextStyle(color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             )
         }
-    }
-}
-
-/** 传感器后端选择小按钮（自动 / 全局系统 / 应用兼容）。 */
-@Composable
-private fun BackendChoice(
-    label: String,
-    selected: Boolean,
-    backdrop: Backdrop,
-    colors: io.github.fairyxh.VirtualEnv.app.ui.glass.GlassColors,
-    onClick: () -> Unit
-) {
-    GlassPill(
-        onClick = onClick,
-        backdrop = backdrop,
-        selected = selected,
-        containerColor = if (selected) colors.accent.copy(alpha = 0.18f)
-        else colors.bgTertiary.copy(alpha = 0.3f),
-        height = 32.dp
-    ) {
-        BasicText(
-            label,
-            Modifier.padding(horizontal = 8.dp),
-            style = TextStyle(
-                color = if (selected) colors.accent else colors.textPrimary,
-                fontSize = 12.sp
-            )
-        )
     }
 }
 
