@@ -39,7 +39,7 @@ object SensorBackendManager {
 
     // system_server 侧
     private var systemBackend: SystemSensorBackend? = null
-    private var engine: VirtualSensorEngine? = null
+    private var engine: io.github.fairyxh.VirtualEnv.core.sensor.motion.VirtualMotionEngine? = null
     private var systemConfigProvider: (() -> VirtualSensorConfig?)? = null
 
     // App 进程侧
@@ -56,7 +56,10 @@ object SensorBackendManager {
             if (role.get() == Role.SYSTEM_SERVER) return
             role.set(Role.SYSTEM_SERVER)
             systemConfigProvider = configProvider
-            engine = VirtualSensorEngine(configProvider)
+            engine = io.github.fairyxh.VirtualEnv.core.sensor.motion.VirtualMotionEngine().apply {
+                updateProfile(configProvider()?.toMotionProfile()
+                    ?: io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile.STATIONARY)
+            }
             systemBackend = SystemSensorBackend(
                 sensorManagerProvider = { SystemSensorBackend.systemServerSensorManager() },
                 engine = engine!!,

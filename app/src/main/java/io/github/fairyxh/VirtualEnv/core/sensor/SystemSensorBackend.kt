@@ -4,6 +4,9 @@ import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.SystemClock
+import io.github.fairyxh.VirtualEnv.core.sensor.motion.ActivityMode
+import io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile
+import io.github.fairyxh.VirtualEnv.core.sensor.motion.VirtualMotionEngine
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -15,29 +18,21 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * 全局系统传感器后端（SensorService 系统级注入，两种通道）。
  *
- * 运行在 **system_server** 进程。
+ * 运行在 **system_server** 进程。数据统一来自 [VirtualMotionEngine]
+ * （人体运动模型），本类只负责探测/调度/注入。
  *
  * 通道 1（首选）：`SensorManager.initDataInjection / injectSensorData`
  * （@SystemApi，Oplus 15 实测 MODE_NOT_SUPPORTED，native 未实现）。
  *
- * 通道 2（回退，Oplus 15 实证可用）：`SensorService.sendRuntimeSensorEventNative`
- * （public static native，JADX 实证签名 `(long mPtr, int handle, int type,
- * long timestampNanos, float[] values):boolean`）。
- * 绕过 Java 层 `LocalService.sendSensorEvent` 的 mRuntimeSensorHandles 检查，
- * 直接以**真实传感器 handle** 调用 native：JNI 桥不校验 handle 是否 runtime sensor，
- * 反汇编确认最终调用 `SensorService::sendRuntimeSensorEvent(sensors_event_t&)`，
- * 该函数仅加锁 → 事件入队 → notify_all → SensorThread 全局分发（共享内存 →
- * 所有注册该 handle 的 App），无需任何 App 作用域。
- * type 白名单掩码 0x4efc631e0 / 0x61e 之外（如 STEP_COUNTER=19）传 values.length>=17
- * 走 memcpy(80B) 分支后同样进入分发；STEP_DETECTOR(18) 走单值分支；
- * ACCELEROMETER(1) 走三值分支。
+ * 通道 2（回退）：`SensorService.sendRuntimeSensorEventNative`
+ * （实证：仅更新 last-event 缓存，不进入 App 分发；保留 fail-open 探测）。
  *
  * 失败保护（fail-open）：所有反射/注入 try/catch，异常仅记日志；
  * stop() 仅停止调度（通道 2 无状态，无需恢复原生）。
  */
 class SystemSensorBackend(
     private val sensorManagerProvider: () -> SensorManager?,
-    private val engine: VirtualSensorEngine,
+    private val engine: VirtualMotionEngine,
     private val systemServerClassLoader: ClassLoader? = null,
 ) : SensorBackend {
 
@@ -172,10 +167,13 @@ class SystemSensorBackend(
     override fun updateConfig(config: VirtualSensorConfig?) {
         val old = lastConfig
         lastConfig = config
-        if (old?.enabled != config?.enabled || old?.stepFrequency != config?.stepFrequency) {
+        engine.updateProfile(config?.toMotionProfile() ?: MotionProfile.STATIONARY)
+        if (old?.enabled != config?.enabled || old?.stepFrequency != config?.stepFrequency ||
+            old?.mode != config?.mode || old?.amplitude != config?.amplitude
+        ) {
             synchronized(lock) {
                 if (!started) return
-                // 频率变化：重建步频类型调度
+                // 频率/模式变化：重建注入调度
                 entries.values.forEach { it.future.cancel(false) }
                 entries.clear()
                 scheduler?.let { startSchedules(it) }
@@ -222,8 +220,9 @@ class SystemSensorBackend(
         for (type in types) {
             val sensor = findSensor(sm, type) ?: continue
             val period = when (type) {
-                VirtualSensorConfig.TYPE_ACCELEROMETER -> ACCEL_PERIOD_MS
-                else -> VirtualSensorEngine.stepInjectPeriodMs(cfg?.stepFrequency ?: 120)
+                VirtualSensorConfig.TYPE_STEP_COUNTER, VirtualSensorConfig.TYPE_STEP_DETECTOR ->
+                    VirtualSensorEngine.stepInjectPeriodMs(cfg?.stepFrequency ?: 120)
+                else -> ACCEL_PERIOD_MS
             }
             val future = exec.scheduleWithFixedDelay(
                 { tick(sensor, type) },
@@ -252,7 +251,7 @@ class SystemSensorBackend(
     private fun tick(sensor: Sensor, type: Int) {
         if (!started) return
         try {
-            val values = engine.tick(type) ?: return
+            val values = engine.sample(type) ?: return
             val ok = when (activeMode) {
                 MODE_RUNTIME_EVENT_NATIVE -> invokeSendRuntimeSensorEventNative(sensor, type, values)
                 else -> {
@@ -394,7 +393,13 @@ class SystemSensorBackend(
                 sensor.javaClass.getMethod("getHandle").invoke(sensor) as Int
             }.getOrNull() ?: return false
             val payload = when (type) {
-                VirtualSensorConfig.TYPE_ACCELEROMETER -> FloatArray(3).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 3)) }
+                VirtualSensorConfig.TYPE_ACCELEROMETER,
+                VirtualSensorConfig.TYPE_LINEAR_ACCELERATION,
+                VirtualSensorConfig.TYPE_GRAVITY,
+                VirtualSensorConfig.TYPE_GYROSCOPE,
+                VirtualSensorConfig.TYPE_MAGNETIC_FIELD -> FloatArray(3).also {
+                    System.arraycopy(values, 0, it, 0, minOf(values.size, 3))
+                }
                 VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(values.firstOrNull() ?: 1f)
                 else -> floatArrayOf(values.firstOrNull() ?: 0f)
             }

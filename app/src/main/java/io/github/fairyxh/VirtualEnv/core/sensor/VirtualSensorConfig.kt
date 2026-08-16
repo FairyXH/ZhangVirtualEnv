@@ -98,4 +98,20 @@ data class VirtualSensorConfig(
             return out
         }
     }
+
+    /** 转换为统一运动配置（供 VirtualMotionEngine）。 */
+    fun toMotionProfile(): io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile {
+        val mode = io.github.fairyxh.VirtualEnv.core.sensor.motion.ActivityMode.fromString(
+            mode.takeIf { it.isNotBlank() && it != "custom" }
+        )
+        val steps = if (mode == io.github.fairyxh.VirtualEnv.core.sensor.motion.ActivityMode.STATIONARY) 0
+        else stepFrequency
+        return io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile(
+            activity = mode,
+            stepFrequency = steps,
+            speedKmh = speedKmh,
+            amplitudeOverride = amplitude,
+            randomNoise = randomNoise,
+        )
+    }
 }
