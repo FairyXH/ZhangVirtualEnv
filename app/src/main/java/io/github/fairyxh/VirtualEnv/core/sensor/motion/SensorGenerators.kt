@@ -17,12 +17,12 @@ class SensorGenerators(private val state: VirtualMovementState) {
         val g = phone.gravityVector()
         val dir = phone.gaitDirection()
         val noiseScale = if (profile.randomNoise) 0.05f else 0f
-        val vertical = GaitWaveform.verticalAccel(state.stepPhase, amp.toDouble())
-        val horiz = GaitWaveform.horizontalAccel(state.stepPhase, amp.toDouble())
+        val vertical = GaitWaveform.verticalAccel(state.stepPhase, amp.toDouble()).toFloat()
+        val horiz = GaitWaveform.horizontalAccel(state.stepPhase, amp.toDouble()).toFloat()
         return floatArrayOf(
-            g[0] + (dir[0] * vertical).toFloat() + horiz + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
-            g[1] + (dir[1] * vertical).toFloat() + horiz * 0.5f + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
-            g[2] + (dir[2] * vertical).toFloat() + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
+            g[0] + dir[0] * vertical + horiz + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
+            g[1] + dir[1] * vertical + horiz * 0.5f + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
+            g[2] + dir[2] * vertical + GaitWaveform.noise(noiseScale.toDouble()).toFloat(),
         )
     }
 

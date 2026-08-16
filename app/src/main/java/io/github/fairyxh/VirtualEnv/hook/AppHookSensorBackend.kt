@@ -5,6 +5,8 @@ import io.github.fairyxh.VirtualEnv.core.sensor.SensorBackend
 import io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus
 import io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendType
 import io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
+import io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile
+import io.github.fairyxh.VirtualEnv.core.sensor.motion.VirtualMotionEngine
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -12,16 +14,9 @@ import java.util.concurrent.TimeUnit
 /**
  * 应用兼容传感器后端（Legacy App Hook）。
  *
- * 包装现有 [StepSensorInjector]，**不修改其核心逻辑**：仍通过
- * `SensorManager.registerListener` Hook 在 **scope 内 App 进程**注入事件。
- *
- * 新增统一接口：
- * - [start]/[stop]/[updateConfig]/[getStatus] 与 SystemSensorBackend 一致；
- * - 由 [io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager] 统一调度，
- *   业务层不直接触碰本类。
- *
- * 双重注入防护：当 system_server 的全局后端（SYSTEM）已生效时，
- * 本后端保持 inactive（不注入），避免同一 App 收到两份虚拟事件。
+ * 包装 [StepSensorInjector]，运动数据统一来自 [VirtualMotionEngine]：
+ * - [refresh] 周期从 EnvStateCache 解析 MotionProfile 并更新引擎；
+ * - [onListenerRegistered] 返回是否接管（true=Hook 层屏蔽真实注册）。
  */
 class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
 
@@ -29,7 +24,8 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
         private const val TAG_SCOPE = "SensorBackend"
     }
 
-    private val injector = StepSensorInjector(cache)
+    private val motionEngine = VirtualMotionEngine()
+    private val injector = StepSensorInjector(cache, motionEngine)
 
     @Volatile
     private var active = false
@@ -63,14 +59,11 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
         active = false
         refreshExecutor?.shutdownNow()
         refreshExecutor = null
-        // 不 shutdown StepSensorInjector 内部 scheduler：unsuppress 后仍可复用
         injector.stopAll()
         ZLog.i(TAG_SCOPE, "AppHookSensorBackend stopped")
     }
 
     override fun updateConfig(config: VirtualSensorConfig?) {
-        // Legacy 后端状态源为 EnvStateCache，无需直接应用 config；
-        // 仅用于刷新判定（系统全局后端是否接管）。
         refresh()
     }
 
@@ -84,7 +77,6 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
 
     // ---------- Hook 层转发（FrameworkEnvHookAdapter 调用） ----------
 
-    /** 系统全局后端已接管：暂停本地注入（避免双重注入）。 */
     fun suppress() {
         if (suppressed) return
         suppressed = true
@@ -92,16 +84,19 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
         ZLog.i(TAG_SCOPE, "AppHookSensorBackend suppressed (system backend active)")
     }
 
-    /** 恢复本地注入。 */
     fun unsuppress() {
         suppressed = false
         refresh()
         ZLog.i(TAG_SCOPE, "AppHookSensorBackend unsuppressed (legacy hook active)")
     }
 
-    fun onListenerRegistered(listener: Any, sensor: Any, type: Int) {
-        if (!active || suppressed) return
-        injector.onListenerRegistered(listener, sensor, type)
+    /**
+     * 注册监听。返回 true 表示由注入器接管（Hook 层不 proceed 原注册，
+     * 屏蔽真实传感器）；false 表示放行真实注册。
+     */
+    fun onListenerRegistered(listener: Any, sensor: Any, type: Int): Boolean {
+        if (!active || suppressed) return false
+        return injector.onListenerRegistered(listener, sensor, type)
     }
 
     fun onListenerUnregistered(listener: Any) {
@@ -110,7 +105,12 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
 
     fun refresh() {
         if (!active || suppressed) return
-        // 系统全局后端生效 → 本地不注入（suppress 已 stopAll，这里直接跳过）
+        try {
+            val profile = MotionProfile.fromJson(cache.currentSensor())
+            motionEngine.updateProfile(profile)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "update motion profile failed", t)
+        }
         injector.refresh()
     }
 

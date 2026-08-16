@@ -122,9 +122,9 @@ object SensorBackendManager {
 
     // ---------- App 进程 Hook 层转发 ----------
 
-    /** registerListener Hook 回调（仅 App 进程调用）。 */
-    fun onListenerRegistered(listener: Any, sensor: Any, type: Int) {
-        appBackend?.onListenerRegistered(listener, sensor, type)
+    /** registerListener Hook 回调（仅 App 进程调用）；返回 true 表示接管（屏蔽真实注册）。 */
+    fun onListenerRegistered(listener: Any, sensor: Any, type: Int): Boolean {
+        return appBackend?.onListenerRegistered(listener, sensor, type) ?: false
     }
 
     /** unregisterListener Hook 回调（仅 App 进程调用）。 */

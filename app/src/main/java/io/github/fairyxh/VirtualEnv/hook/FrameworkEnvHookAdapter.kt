@@ -96,16 +96,24 @@ class FrameworkEnvHookAdapter(
             .forEach { method ->
                 if (method.parameterTypes[1].simpleName != "Sensor") return@forEach
                 val ok = registrar.register(method) { chain ->
-                    val original = chain.proceed()
                     try {
                         val listener = chain.getArg(0)
                         val sensor = chain.getArg(1)
                         val type = sensor.javaClass.getMethod("getType").invoke(sensor) as? Int ?: -1
-                        sensorManager.onListenerRegistered(listener, sensor, type)
+                        val taken = sensorManager.onListenerRegistered(listener, sensor, type)
+                        if (taken) {
+                            // 注入器接管：屏蔽真实传感器（不 proceed 原注册，真实事件不再到达）
+                            ZLog.d(TAG_SCOPE, "registerListener type=$type intercepted (virtual active)")
+                            return@register when (method.returnType) {
+                                java.lang.Boolean.TYPE -> true
+                                else -> null
+                            }
+                        }
                     } catch (t: Throwable) {
                         ZLog.w(TAG_SCOPE, "step register hook failed", t)
                     }
-                    original
+                    chain.proceed()
+                    null
                 }
                 if (ok) {
                     hooked++
@@ -126,12 +134,12 @@ class FrameworkEnvHookAdapter(
                     null
                 }
                 if (ok) {
+                    hooked++
                     ZLog.i(TAG_SCOPE, "hooked SensorManager.unregisterListener(${method.parameterCount} params)")
                 }
             }
         if (hooked == 0) ZLog.w(TAG_SCOPE, "SensorManager.registerListener candidates not found")
     }
-
     // ---------- 基站：TelephonyManager.getAllCellInfo ----------
 
     private fun hookTelephonyGetAllCellInfo(classLoader: ClassLoader) {

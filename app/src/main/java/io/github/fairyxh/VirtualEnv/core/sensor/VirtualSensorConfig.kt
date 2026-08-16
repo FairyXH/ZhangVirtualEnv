@@ -22,7 +22,7 @@ data class VirtualSensorConfig(
     val enabled: Boolean = false,
     /** 后端选择偏好：auto / system / legacy。 */
     val backend: String = "auto",
-    /** 运动模式（walking / running / custom，预留）。 */
+    /** 运动模式（walking / running / stationary / custom，预留）。 */
     val mode: String = "walking",
     /** 步频（steps/min）。 */
     val stepFrequency: Int = 120,
@@ -30,7 +30,11 @@ data class VirtualSensorConfig(
     val stepCount: Long = 0L,
     /** 是否叠加随机噪声（模拟真实传感器波动）。 */
     val randomNoise: Boolean = true,
-    /** 目标传感器类型集合（默认 STEP_COUNTER / STEP_DETECTOR / ACCELEROMETER）。 */
+    /** 运动速度（km/h）；<=0 由步频推导。 */
+    val speedKmh: Double = -1.0,
+    /** 加速度幅度覆盖（m/s²）；null 用模式默认。 */
+    val amplitude: Float? = null,
+    /** 目标传感器类型集合（默认 STEP_COUNTER / STEP_DETECTOR / ACCELEROMETER / GRAVITY / MAGNETIC / LINEAR_ACCEL / GYRO）。 */
     val sensorTypes: List<Int> = DEFAULT_SENSOR_TYPES,
 ) {
     companion object {
@@ -38,6 +42,7 @@ data class VirtualSensorConfig(
         const val TYPE_MAGNETIC_FIELD = 2
         const val TYPE_GYROSCOPE = 4
         const val TYPE_GRAVITY = 9
+        const val TYPE_LINEAR_ACCELERATION = 10
         const val TYPE_STEP_DETECTOR = 18
         const val TYPE_STEP_COUNTER = 19
 
@@ -45,7 +50,8 @@ data class VirtualSensorConfig(
 
         val DEFAULT_SENSOR_TYPES = listOf(
             TYPE_STEP_COUNTER, TYPE_STEP_DETECTOR, TYPE_ACCELEROMETER,
-            TYPE_GRAVITY, TYPE_MAGNETIC_FIELD
+            TYPE_GRAVITY, TYPE_MAGNETIC_FIELD, TYPE_LINEAR_ACCELERATION,
+            TYPE_GYROSCOPE
         )
 
         /** 从 EnvStateEngine 状态 JSON（{enabled, data}）解析配置；数据为空时返回默认。 */
@@ -64,6 +70,7 @@ data class VirtualSensorConfig(
                     arr.optInt(i).takeIf { it > 0 }?.let { types.add(it) }
                 }
             }
+            val amp = if (data.has("amplitude")) data.optDouble("amplitude", -1.0) else -1.0
             return VirtualSensorConfig(
                 enabled = enabled,
                 backend = data.optString("backend", BACKEND_AUTO).ifBlank { BACKEND_AUTO },
@@ -71,6 +78,8 @@ data class VirtualSensorConfig(
                 stepFrequency = data.optInt("stepFrequency", 120).coerceAtLeast(0),
                 stepCount = data.optLong("stepCount", 0L).coerceAtLeast(0L),
                 randomNoise = data.optBoolean("randomNoise", true),
+                speedKmh = data.optDouble("speed", -1.0),
+                amplitude = if (amp > 0) amp.toFloat() else null,
                 sensorTypes = types.ifEmpty { DEFAULT_SENSOR_TYPES },
             )
         }
@@ -83,6 +92,8 @@ data class VirtualSensorConfig(
             out.put("stepFrequency", config.stepFrequency)
             out.put("stepCount", config.stepCount)
             out.put("randomNoise", config.randomNoise)
+            out.put("speed", config.speedKmh)
+            config.amplitude?.let { out.put("amplitude", it.toDouble()) }
             out.put("sensorTypes", org.json.JSONArray(config.sensorTypes))
             return out
         }
