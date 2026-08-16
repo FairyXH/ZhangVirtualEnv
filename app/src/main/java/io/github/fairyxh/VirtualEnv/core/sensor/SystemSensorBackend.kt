@@ -268,17 +268,16 @@ class SystemSensorBackend(
                 return false
             }
 
-            // 2) 定位 native 方法（R8 可能改名）：签名 (long, int, float[], int, long) -> boolean
+            // 2) 定位绕过门禁的实例方法：injectSensorDataImpl(Sensor, float[], int, long) -> boolean
+            //    （R8 可能改名，按签名匹配）
             val sig = arrayOf(
-                Long::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
+                Sensor::class.java,
                 FloatArray::class.java,
                 Int::class.javaPrimitiveType,
                 Long::class.javaPrimitiveType
             )
             val method = ssmClass.declaredMethods.firstOrNull { m ->
-                (m.name.contains("injectSensorData", ignoreCase = true) ||
-                    m.name.contains("InjectSensor", ignoreCase = true)) &&
+                (m.name.contains("injectSensorData", ignoreCase = true)) &&
                     m.parameterTypes.contentEquals(sig) &&
                     m.returnType == Boolean::class.javaPrimitiveType
             } ?: run {
@@ -289,7 +288,7 @@ class SystemSensorBackend(
                 return false
             }
             method.isAccessible = true
-            val ret = method.invoke(sm, instance, handle, values, accuracy, timestampNanos) as? Boolean
+            val ret = method.invoke(sm, sensor, values, accuracy, timestampNanos) as? Boolean
             ZLog.i(TAG_SCOPE, "invokeNativeInject: method=${method.name} handle=$handle -> $ret")
             ret == true
         } catch (t: Throwable) {
