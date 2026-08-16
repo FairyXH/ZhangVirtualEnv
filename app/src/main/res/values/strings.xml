@@ -48,6 +48,7 @@
     <string name="home_collect_saved">采集已保存</string>
     <string name="home_collect_applied">已加载采集：%1$s</string>
     <string name="home_saved_title">已保存采集</string>
+    <string name="home_saved_select_hint">点击来选择采集</string>
     <string name="home_saved_empty">暂无已保存采集</string>
 
     <!-- 配置状态预设 -->

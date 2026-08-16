@@ -924,6 +924,11 @@ class HomeFragment : Fragment() {
                                 )
                             }
                         }
+                        BasicText(
+                            getString(R.string.home_saved_select_hint),
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+                        )
                         if (savedTransferMode) {
                             Row(
                                 Modifier
