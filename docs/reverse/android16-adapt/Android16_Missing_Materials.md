@@ -56,3 +56,4 @@
 - **不影响**：Location / GNSS / 经典蓝牙 / BT 身份 / BLE 新落点 / 基站（PhoneInterfaceManager）/ TelephonyRegistry / 框架层 —— 全部 VERIFIED_STATIC。
 - **可能受影响（fail-open）**：SIM PhoneSubInfo / Phone 对象层、Subscription 层、RIL 防御 —— 类体缺失，Hook 候选找不到即跳过，不影响其它 Hook；拿到 telephony-common.jar 后即可静态补全。
 - **当前代码已适配**：`android.sysprop.TelephonyProperties` 新路径（第二阶段修正）、`IActiveServicesExt` 候选、`ScanController.startScan` 候选。
+- **最终封版审计（2026-08-16）**：`VirtualEnvEntry.readSimProfileConfig` 的 SDK 选择从 `sdk>=36` 改为精确 `==36/==35/==34`，API 37+ 回退 default.json（P0 修复，与 ProfileManager 行为一致，杜绝 API 37 误用 android16 profile）。
