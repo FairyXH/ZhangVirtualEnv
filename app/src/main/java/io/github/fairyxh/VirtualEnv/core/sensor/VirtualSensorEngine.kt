@@ -37,11 +37,14 @@ class VirtualSensorEngine(private val configProvider: () -> VirtualSensorConfig?
     @Volatile
     private var stepCounter: Long = 0L
     @Volatile
+    private var stepAccumulator: Double = 0.0
+    @Volatile
     private var lastTickElapsed: Long = 0L
 
     /** 重置状态（配置切换/启动时调用）。 */
     fun reset() {
         stepCounter = 0L
+        stepAccumulator = 0.0
         lastTickElapsed = 0L
     }
 
@@ -66,9 +69,10 @@ class VirtualSensorEngine(private val configProvider: () -> VirtualSensorConfig?
         val dtSec = (now - lastTickElapsed) / 1000.0
         lastTickElapsed = now
 
-        // 步数累计：全局共享单调递增
+        // 步数累计：全局共享单调递增（浮点累加避免小 dt 被 toLong 截断为 0）
         if (cfg.stepFrequency > 0) {
-            stepCounter += (cfg.stepFrequency * dtSec / 60.0).toLong()
+            stepAccumulator += cfg.stepFrequency * dtSec / 60.0
+            stepCounter = stepAccumulator.toLong()
         } else {
             // 未配置步频时保持起始步数
             if (stepCounter <= 0) stepCounter = cfg.stepCount

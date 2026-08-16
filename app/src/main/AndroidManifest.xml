@@ -23,6 +23,9 @@
     <!-- 基站采集 -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
+    <!-- 传感器模拟/内置检测：计步器与步态传感器注册需要（Android 10+ 强制） -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <!-- 蓝牙 / BLE 采集 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
