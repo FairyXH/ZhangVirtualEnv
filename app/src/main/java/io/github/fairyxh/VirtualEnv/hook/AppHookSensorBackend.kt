@@ -63,7 +63,8 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
         active = false
         refreshExecutor?.shutdownNow()
         refreshExecutor = null
-        injector.shutdown()
+        // 不 shutdown StepSensorInjector 内部 scheduler：unsuppress 后仍可复用
+        injector.stopAll()
         ZLog.i(TAG_SCOPE, "AppHookSensorBackend stopped")
     }
 
