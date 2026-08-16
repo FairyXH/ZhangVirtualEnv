@@ -179,6 +179,42 @@ class VirtualEnvEntry : XposedModule() {
         return Triple(phoneInterface, phoneSubInfo, phoneObj)
     }
 
+    /**
+     * 延迟启动传感器后端：等待 sys.boot_completed=1 后探测（sensorservice 此时已注册）。
+     *
+     * 早期直接调用 SensorManager 会阻塞 system_server（2026-08-16 实测卡开机页），
+     * 因此改为后台线程轮询 boot 属性；超时（180s）仍失败时记录并放弃（fail-open）。
+     */
+    private fun scheduleSensorBackendStart() {
+        Thread {
+            try {
+                var waited = 0
+                while (waited < 180) {
+                    val booted = try {
+                        val clazz = Class.forName("android.os.SystemProperties")
+                        val get = clazz.getMethod("get", String::class.java, String::class.java)
+                        get.invoke(null, "sys.boot_completed", "") == "1"
+                    } catch (t: Throwable) {
+                        false
+                    }
+                    if (booted) {
+                        ZLog.i(TAG_SCOPE, "boot completed, starting sensor backend probe")
+                        io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.start()
+                        return@Thread
+                    }
+                    Thread.sleep(2000)
+                    waited += 2
+                }
+                ZLog.w(TAG_SCOPE, "sensor backend probe timeout (boot_completed not set in 180s)")
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "sensor backend delayed start failed", t)
+            }
+        }.apply {
+            name = "ZVE-SensorBackendProbe"
+            isDaemon = true
+        }.start()
+    }
+
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onSystemServerStarting")
         try {
@@ -207,13 +243,16 @@ class VirtualEnvEntry : XposedModule() {
                 log(Log.WARN, TAG, "[$TAG_SCOPE] api token missing/blank, ApiServer will reject all requests")
             }
 
-            // 传感器多级后端：system_server 侧初始化全局模式（SensorService Data Injection）
+            // 传感器多级后端：system_server 侧初始化全局模式（SensorService Data Injection）。
+            // 注意：不能在 onSystemServerStarting 早期立即 start()——sensorservice native
+            // 此时可能尚未注册，SensorManager 调用会阻塞 system_server 导致 boot 卡死。
+            // 只在配置源就绪后延迟到 boot_completed 再探测（2026-08-16 实测卡开机页根因）。
             try {
                 io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.initSystemServer {
                     io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
                         .fromStatus(backend.sensorEngine.statusJson())
                 }
-                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.start()
+                scheduleSensorBackendStart()
             } catch (t: Throwable) {
                 log(Log.ERROR, TAG, "[$TAG_SCOPE] sensor backend init failed", t)
             }
