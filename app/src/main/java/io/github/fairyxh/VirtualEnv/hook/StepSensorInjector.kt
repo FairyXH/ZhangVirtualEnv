@@ -150,7 +150,9 @@ class StepSensorInjector(
         if (!cache.isSensorStreamActive()) return null
         return when (type) {
             TYPE_STEP_COUNTER, TYPE_STEP_DETECTOR -> {
-                if (cache.isStepEnabled() && cache.stepFrequency() > 0) {
+                // 静止模式（stepFrequency=0）不注入计步事件
+                if (cache.stepFrequency() <= 0) null
+                else if (cache.isStepEnabled()) {
                     (60000L / cache.stepFrequency()).coerceAtLeast(MIN_PERIOD_MS)
                 } else DEFAULT_SAMPLE_RATE_MS
             }

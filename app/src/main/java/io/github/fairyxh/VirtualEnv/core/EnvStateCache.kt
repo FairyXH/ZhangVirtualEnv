@@ -185,6 +185,9 @@ class EnvStateCache(
 
     /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
     fun isSensorStreamActive(): Boolean = synchronized(lock) {
+        // sensor 非空即模拟已开启（refresh 仅在 enabled=true 时写入），
+        // 静止模式（stepFrequency=0）也应拦截并注入稳定值
+        if (sensor != null) return true
         if (stepEnabled) return true
         val d = sensor ?: return false
         d.has("stepCounter") || d.has("accelerometer") || d.has("gyroscope") ||
