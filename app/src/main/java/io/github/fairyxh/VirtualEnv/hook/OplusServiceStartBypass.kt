@@ -22,7 +22,12 @@ class OplusServiceStartBypass(
         private const val TAG_SCOPE = "Hook"
         private const val SERVICE_RECORD = "com.android.server.am.ServiceRecord"
         private const val ACTIVE_SERVICES = "com.android.server.am.ActiveServices"
-        private const val ACTIVE_SERVICES_EXT = "com.android.server.am.ActiveServicesExtImpl"
+        // Android 15：ActiveServicesExtImpl（oplus-framework.jar）；Android 16：改为接口
+        // IActiveServicesExt（services.jar JADX 确认，interceptBringUpServices 4 参签名一致）。
+        private val ACTIVE_SERVICES_EXT_CANDIDATES = listOf(
+            "com.android.server.am.IActiveServicesExt",
+            "com.android.server.am.ActiveServicesExtImpl",
+        )
 
         /** 志愿汇等应用会内置该服务，不能按宿主包名限定。 */
         private const val TARGET_SERVICE = "com.baidu.location.f"
@@ -144,20 +149,35 @@ class OplusServiceStartBypass(
      * 这里对百度定位服务直接返回 false（放行），其余服务维持原始行为（fail-open）。
      */
     private fun hookInterceptBringUpServices(classLoader: ClassLoader): Int {
-        val ext = HookSupport.findClass(classLoader, ACTIVE_SERVICES_EXT) ?: return 0
         var hooked = 0
-        HookSupport.findMethods(ext, "interceptBringUpServices").forEach { method ->
-            if (method.parameterCount != 4) return@forEach
-            val ok = registrar.register(method) { chain ->
-                val sr = chain.getArg(0)
-                if (isBaiduLocService(sr)) {
-                    ZLog.i(TAG_SCOPE, "interceptBringUpServices -> false (baidu loc service bypass)")
-                    false
-                } else {
-                    chain.proceed()
+        var foundTarget = false
+        for (className in ACTIVE_SERVICES_EXT_CANDIDATES) {
+            val ext = HookSupport.findClass(classLoader, className) ?: continue
+            foundTarget = true
+            val methods = HookSupport.findMethods(ext, "interceptBringUpServices")
+            if (methods.isEmpty()) {
+                ZLog.i(TAG_SCOPE, "$className found but interceptBringUpServices not present")
+                continue
+            }
+            for (method in methods) {
+                if (method.parameterCount != 4) continue
+                val ok = registrar.register(method) { chain ->
+                    val sr = chain.getArg(0)
+                    if (isBaiduLocService(sr)) {
+                        ZLog.i(TAG_SCOPE, "interceptBringUpServices -> false (baidu loc service bypass) [$className]")
+                        false
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked $className.interceptBringUpServices [Android16-compatible]")
                 }
             }
-            if (ok) hooked++
+        }
+        if (!foundTarget) {
+            ZLog.w(TAG_SCOPE, "no ActiveServices ext class found (candidates=${ACTIVE_SERVICES_EXT_CANDIDATES})")
         }
         return hooked
     }

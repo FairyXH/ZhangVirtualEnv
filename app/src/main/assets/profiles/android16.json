@@ -1,8 +1,8 @@
 {
-  "name": "android15",
-  "android": 15,
-  "minSdk": 35,
-  "maxSdk": 35,
+  "name": "android16",
+  "android": 16,
+  "minSdk": 36,
+  "maxSdk": 99,
   "device": "*",
   "hooks": {
     "location": {

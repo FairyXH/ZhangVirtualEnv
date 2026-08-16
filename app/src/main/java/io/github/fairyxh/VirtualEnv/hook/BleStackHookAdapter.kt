@@ -89,6 +89,9 @@ class BleStackHookAdapter(
         var hooked = hookBinderStartScan(classLoader)
         hooked += hookGattBinderStartScan(classLoader)
         hooked += hookTransitionalStartScan(classLoader)
+        // Android 16：TransitionalScanHelper / BluetoothGattBinder / BluetoothScanBinder 全部消失，
+        // BLE 扫描统一落点迁移到 ScanController.startScan(int, ScanSettings, List, AttributionSource)。
+        hooked += hookScanControllerStartScan(classLoader)
         // 经典 BR/EDR 与双模设备发现（startDiscovery / 发现结果广播）
         hooked += hookClassicDiscovery(classLoader)
         // 虚拟设备配对（createBond → BONDED；getBondState/removeBond 同步）
@@ -192,6 +195,48 @@ class BleStackHookAdapter(
                 }
             }
         if (hooked == 0) ZLog.w(TAG_SCOPE, "TransitionalScanHelper.startScan candidates not found")
+        return hooked
+    }
+
+    /**
+     * Android 16 蓝牙栈 BLE 扫描统一落点。
+     *
+     * Android 16 的蓝牙栈移除 TransitionalScanHelper / BluetoothGattBinder /
+     * BluetoothScanBinder，扫描入口收敛到 ScanController：
+     * `ScanController.startScan(int scannerId, ScanSettings, List, AttributionSource)`
+     * （services.jar/Bluetooth.apk JADX 确认，签名与旧 TransitionalScanHelper 等价）。
+     * ScannerMap 仍提供 getById(int)/getAllAppsIds()，ScannerApp 回调字段由
+     * Android 15 的 `callback` 变为 Android 16 的 `mCallback`（resolveCallback 兼容）。
+     */
+    private fun hookScanControllerStartScan(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, CLASS_SCAN_CONTROLLER) ?: return 0
+        var hooked = 0
+        HookSupport.findMethods(clazz, "startScan")
+            .filter {
+                it.parameterCount == 4 && it.parameterTypes[3].simpleName == "AttributionSource"
+            }
+            .forEach { method ->
+                val ok = registrar.register(method) { chain ->
+                    val controller = chain.getThisObject()
+                    val scannerId = (chain.getArg(0) as? Int) ?: -1
+                    logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
+                    deliverVirtual(controller, scannerId) ?: chain.proceed()
+                    null
+                }
+                if (ok) {
+                    hooked++
+                    ZLog.i(TAG_SCOPE, "hooked ScanController.startScan(${method.parameterTypes.joinToString { it.simpleName }}) [Android16]")
+                    logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: OK ScanController.startScan")
+                } else {
+                    logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: FAIL ScanController.startScan")
+                }
+            }
+        if (hooked == 0) {
+            ZLog.w(TAG_SCOPE, "ScanController.startScan candidates not found [Android16]")
+            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find method ScanController.startScan(4): FAIL")
+        } else {
+            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find class ScanController: OK")
+        }
         return hooked
     }
 
@@ -626,9 +671,14 @@ class BleStackHookAdapter(
     }
 
     /**
-     * 从 ContextMap 中解析 scannerId 对应的 IScannerCallback。
-     * Oplus 的 ScannerMap 继承 ContextMap：`getById(int)` 返回 `ContextMap.App`，
-     * `App.callback` 是 public 字段。部分 ROM 用 UUID 注册而非 id，做遍历兜底。
+     * 从 ScannerMap 中解析 scannerId 对应的 IScannerCallback。
+     *
+     * - Android 15：Oplus ScannerMap 继承 ContextMap，`getById(int)` 返回
+     *   `ContextMap.App`，回调字段为 public `callback`。
+     * - Android 16：ScannerMap 独立实现，`getById(int)` 返回 `ScannerMap$ScannerApp`，
+     *   回调字段为 `mCallback`（JADX Bluetooth.apk 确认）。
+     *
+     * 字段候选按 callback → mCallback 顺序尝试；部分 ROM 用 UUID 注册而非 id，遍历兜底。
      */
     private fun resolveCallback(helper: Any, scannerId: Int): Any? {
         try {
@@ -636,7 +686,7 @@ class BleStackHookAdapter(
             val getById = scannerMap.javaClass.getMethod("getById", Int::class.java)
             val app = getById.invoke(scannerMap, scannerId)
             if (app != null) {
-                val cb = app.javaClass.getField("callback").get(app)
+                val cb = callbackField(app)
                 if (cb != null) return cb
             }
             // 兜底：遍历全部已注册 app（UUID 注册时 id 可能未回填）
@@ -645,11 +695,32 @@ class BleStackHookAdapter(
             for (id in ids) {
                 val idInt = id as? Int ?: continue
                 val app2 = getById.invoke(scannerMap, idInt) ?: continue
-                val cb = app2.javaClass.getField("callback").get(app2)
+                val cb = callbackField(app2)
                 if (cb != null) return cb
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "resolve ble callback failed", t)
+        }
+        return null
+    }
+
+    /** Android 15 `callback` / Android 16 `mCallback` 字段兼容读取。 */
+    private fun callbackField(app: Any): Any? {
+        for (name in arrayOf("callback", "mCallback")) {
+            try {
+                val f = app.javaClass.getField(name)
+                val cb = f.get(app)
+                if (cb != null) {
+                    if (name == "mCallback") {
+                        logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] resolve callback via mCallback (ScannerMap\$ScannerApp)")
+                    }
+                    return cb
+                }
+            } catch (_: NoSuchFieldException) {
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "callback field $name read failed", t)
+                return null
+            }
         }
         return null
     }

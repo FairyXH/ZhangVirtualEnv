@@ -103,6 +103,15 @@ class SimTelephonyHookAdapter(
             "getVoiceMailNumber",
             "getVoiceMailNumberForSubscriber",
             "getVoiceMailNumberWithFeature",
+            // Android 16：PhoneInterfaceManager 恢复无后缀方法，并新增 ForPhone 变体
+            // （TeleService.apk dex 扫描确认 getSimOperatorNameForPhone /
+            // getNetworkOperatorForPhone / getNetworkCountryIsoForPhone /
+            // getSimOperatorNumericForPhone / getSimOperatorForPhone）
+            "getSimOperatorForPhone",
+            "getSimOperatorNameForPhone",
+            "getNetworkOperatorForPhone",
+            "getNetworkCountryIsoForPhone",
+            "getSimOperatorNumericForPhone",
         )
 
         /** 整型返回型方法（含 ForSubscriber/WithFeature 变体）。 */
@@ -377,10 +386,11 @@ class SimTelephonyHookAdapter(
     private fun resolveString(name: String, chain: Any, original: Any?): String? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            // Android 15 ForSubscriber/WithFeature 后缀与旧名统一映射到同一字段
-            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature")
+            // Android 15 ForSubscriber/WithFeature 后缀与旧名、Android 16 ForPhone 变体
+            // 统一映射到同一字段（TeleService.apk dex 确认 ForPhone 为 Binder 服务端最终路径）
+            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature").removeSuffix("ForPhone")
             val value = when (base) {
-                "getSimOperator" -> {
+                "getSimOperator", "getSimOperatorNumeric" -> {
                     val mcc = slot.optString("mcc", "")
                     val mnc = slot.optString("mnc", "")
                     if (mcc.isBlank()) null else mcc + mnc
@@ -414,7 +424,7 @@ class SimTelephonyHookAdapter(
     private fun resolveInt(name: String, chain: Any, original: Any?): Int? {
         return try {
             val slot = resolveSlot(chain) ?: return null
-            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature")
+            val base = name.removeSuffix("ForSubscriber").removeSuffix("WithFeature").removeSuffix("ForPhone")
             when (base) {
                 "getSimState" -> {
                     val v = slot.optInt("simState", -1)

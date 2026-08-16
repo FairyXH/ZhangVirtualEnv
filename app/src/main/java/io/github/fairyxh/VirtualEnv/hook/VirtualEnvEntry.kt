@@ -118,7 +118,7 @@ class VirtualEnvEntry : XposedModule() {
                     log(level, tag, msg)
                 }
                 val hooked = BleStackHookAdapter(cache, registrar, logSink).install(hostClassLoader)
-                log(Log.INFO, TAG, "[$TAG_SCOPE] ble stack hooks installed pkg=$pkg hooked=$hooked loader=${hostClassLoader}")
+                log(Log.INFO, TAG, "[$TAG_SCOPE] ble stack hooks installed pkg=$pkg hooked=$hooked sdk=${android.os.Build.VERSION.SDK_INT} loader=${hostClassLoader}")
             }
             // 通用 framework 层 Hook（Telephony/WiFi/BLE 框架 API + 传感器注入）
             if (appHooksInstalled.compareAndSet(false, true)) {
