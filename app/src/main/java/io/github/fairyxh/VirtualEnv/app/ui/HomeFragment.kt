@@ -1223,6 +1223,12 @@ class HomeFragment : Fragment() {
             val reachable = ApiClient.ping()
             val info = if (reachable) ApiClient.getSystemInfo() else null
             val moduleResult = if (reachable) ApiClient.getModuleStatus() else null
+            // 网络调用必须留在工作线程，不能在 runOnUiThread 回调内同步执行
+            val locationEnabled = if (reachable) {
+                ApiClient.getLocationStatus().data?.optBoolean("enabled", false) == true
+            } else {
+                false
+            }
             requireActivity().runOnUiThread {
                 statusDotEnabled = reachable
                 if (reachable) {
@@ -1233,7 +1239,7 @@ class HomeFragment : Fragment() {
                     } else {
                         getString(R.string.home_module_switch_off)
                     }
-                    val enabledText = if (ApiClient.getLocationStatus().data?.optBoolean("enabled", false) == true) {
+                    val enabledText = if (locationEnabled) {
                         getString(R.string.location_enabled)
                     } else {
                         getString(R.string.location_disabled)
