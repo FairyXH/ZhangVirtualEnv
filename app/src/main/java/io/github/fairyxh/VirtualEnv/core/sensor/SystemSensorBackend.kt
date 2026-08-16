@@ -278,12 +278,13 @@ class SystemSensorBackend(
      */
     private fun resolveSensorServicePtr(): Long {
         return try {
-            val localServices = Class.forName("com.android.server.LocalServices")
-            val smiCls = Class.forName("com.android.server.sensors.SensorManagerInternal")
+            val sys = ClassLoader.getSystemClassLoader()
+            val localServices = Class.forName("com.android.server.LocalServices", false, sys)
+            val smiCls = Class.forName("com.android.server.sensors.SensorManagerInternal", false, sys)
             val localService = localServices.getMethod("getService", Class::class.java)
                 .invoke(null, smiCls)
                 ?: return 0L
-            val sensorService = extractOuterInstance(localService)
+            val sensorService = extractOuterInstance(localService, sys)
                 ?: return 0L
             val ptr = readLongField(sensorService, "mPtr")
                 ?: invokeNestGetter(sensorService)
@@ -296,7 +297,7 @@ class SystemSensorBackend(
     }
 
     /** 反射读取内部类对象的外类引用：优先 this$0，其次按字段类型匹配。 */
-    private fun extractOuterInstance(inner: Any): Any? {
+    private fun extractOuterInstance(inner: Any, sys: ClassLoader): Any? {
         var cls: Class<*>? = inner.javaClass
         while (cls != null) {
             runCatching {
@@ -305,7 +306,7 @@ class SystemSensorBackend(
                 return f.get(inner)
             }
             runCatching {
-                val target = Class.forName("com.android.server.sensors.SensorService")
+                val target = Class.forName("com.android.server.sensors.SensorService", false, sys)
                 for (f in cls.declaredFields) {
                     if (f.type == target) {
                         f.isAccessible = true
@@ -377,7 +378,11 @@ class SystemSensorBackend(
                 VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(values.firstOrNull() ?: 1f)
                 else -> FloatArray(20).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 20)) }
             }
-            val clazz = Class.forName("com.android.server.sensors.SensorService")
+            val clazz = Class.forName(
+                "com.android.server.sensors.SensorService",
+                false,
+                ClassLoader.getSystemClassLoader()
+            )
             val method = clazz.getMethod(
                 "sendRuntimeSensorEventNative",
                 Long::class.javaPrimitiveType,
