@@ -40,8 +40,14 @@ class SystemSensorBackend(
         private const val TAG_SCOPE = "SensorBackend"
 
         /** DATA_INJECTION / REPLAY / HAL_BYPASS_REPLAY（对应 SystemSensorManager switch 分支）。 */
+        /** DATA_INJECTION / REPLAY / HAL_BYPASS_REPLAY（对应 SystemSensorManager switch 分支）。 */
         private const val MODE_DATA_INJECTION = 1
+
+        /** HAL_BYPASS_REPLAY（绕过 sensor.isDataInjectionSupported()）。 */
         private const val MODE_HAL_BYPASS_REPLAY = 4
+
+        /** 直连 injectSensorData（不先 initDataInjection 门禁；AIDL ISensors 标准接口）。 */
+        private const val MODE_DIRECT_INJECT = 2
 
         /** 通道 2：SensorService.sendRuntimeSensorEventNative（native 事件注入）。 */
         private const val MODE_RUNTIME_EVENT_NATIVE = 10
@@ -95,6 +101,14 @@ class SystemSensorBackend(
                 return
             }
             var mode = detectInjectionMode(sm)
+            if (mode < 0) {
+                // 直连 injectSensorData 探测：不依赖 initDataInjection 门禁
+                // （AIDL ISensors.injectSensorData 是标准接口，Oplus15 可能支持但 framework 门禁拒绝）
+                if (probeDirectInject(sm)) {
+                    mode = MODE_DIRECT_INJECT
+                    ZLog.i(TAG_SCOPE, "Data Injection mode probe failed, direct injectSensorData probe OK (mode=2)")
+                }
+            }
             if (mode < 0) {
                 // 通道 1 不可用：尝试通道 2（SensorService.sendRuntimeSensorEventNative）
                 val ptr = resolveSensorServicePtr()
@@ -210,6 +224,21 @@ class SystemSensorBackend(
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "detect injection mode failed", t)
             -1
+        }
+    }
+
+    /** 直连 injectSensorData 探测：选 ACCEL（无权限门槛）注入一帧，返回是否成功。 */
+    private fun probeDirectInject(sm: SensorManager): Boolean {
+        return try {
+            val sensor = findSensor(sm, VirtualSensorConfig.TYPE_ACCELEROMETER) ?: return false
+            val ok = invokeInjectSensorData(
+                sm, sensor, floatArrayOf(0f, 0f, 9.81f), 3, SystemClock.elapsedRealtimeNanos()
+            )
+            ZLog.i(TAG_SCOPE, "probeDirectInject(accel) -> $ok")
+            ok
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "probeDirectInject failed", t)
+            false
         }
     }
 
