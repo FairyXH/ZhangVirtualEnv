@@ -209,35 +209,53 @@ class BleStackHookAdapter(
      * Android 15 的 `callback` 变为 Android 16 的 `mCallback`（resolveCallback 兼容）。
      */
     private fun hookScanControllerStartScan(classLoader: ClassLoader): Int {
-        val clazz = HookSupport.findClass(classLoader, CLASS_SCAN_CONTROLLER) ?: return 0
-        var hooked = 0
-        HookSupport.findMethods(clazz, "startScan")
-            .filter {
-                it.parameterCount == 4 && it.parameterTypes[3].simpleName == "AttributionSource"
-            }
-            .forEach { method ->
-                val ok = registrar.register(method) { chain ->
-                    val controller = chain.getThisObject()
-                    val scannerId = (chain.getArg(0) as? Int) ?: -1
-                    logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
-                    deliverVirtual(controller, scannerId) ?: chain.proceed()
-                    null
-                }
-                if (ok) {
-                    hooked++
-                    ZLog.i(TAG_SCOPE, "hooked ScanController.startScan(${method.parameterTypes.joinToString { it.simpleName }}) [Android16]")
-                    logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: OK ScanController.startScan")
-                } else {
-                    logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: FAIL ScanController.startScan")
-                }
-            }
-        if (hooked == 0) {
-            ZLog.w(TAG_SCOPE, "ScanController.startScan candidates not found [Android16]")
-            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find method ScanController.startScan(4): FAIL")
-        } else {
-            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find class ScanController: OK")
+        // 版本门控：该落点是 Android 16 蓝牙栈重构后的统一入口（Bluetooth.apk JADX 确认）。
+        // Android 15 的 ScanController 主类是否存在同名方法无法从材料确认，为保证
+        // Android 15 行为零变化，仅在 API 36+ 安装；旧 3 个落点在 Android 15 继续生效。
+        if (android.os.Build.VERSION.SDK_INT < 36) {
+            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] skip ScanController hook on sdk<36 (Android15 baseline unchanged)")
+            return 0
         }
-        return hooked
+        return try {
+            val clazz = HookSupport.findClass(classLoader, CLASS_SCAN_CONTROLLER) ?: run {
+                logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find class ScanController: NOT FOUND")
+                return 0
+            }
+            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find class ScanController: OK")
+            var hooked = 0
+            HookSupport.findMethods(clazz, "startScan")
+                .filter {
+                    it.parameterCount == 4 && it.parameterTypes[3].simpleName == "AttributionSource"
+                }
+                .forEach { method ->
+                    val ok = registrar.register(method) { chain ->
+                        val controller = chain.getThisObject()
+                        val scannerId = (chain.getArg(0) as? Int) ?: -1
+                        logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
+                        deliverVirtual(controller, scannerId) ?: chain.proceed()
+                        null
+                    }
+                    if (ok) {
+                        hooked++
+                        ZLog.i(TAG_SCOPE, "hooked ScanController.startScan(${method.parameterTypes.joinToString { it.simpleName }}) [Android16]")
+                        logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: OK ScanController.startScan")
+                    } else {
+                        logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook installed: FAIL ScanController.startScan")
+                    }
+                }
+            if (hooked == 0) {
+                ZLog.w(TAG_SCOPE, "ScanController.startScan candidates not found [Android16]")
+                logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find method ScanController.startScan(4): FAIL")
+            } else {
+                logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Find method ScanController.startScan(4): OK")
+            }
+            hooked
+        } catch (t: Throwable) {
+            // 异常隔离：Android 16 新 Hook 失败不影响其余 Hook 安装（fail-open）
+            ZLog.w(TAG_SCOPE, "ScanController.startScan hook failed [Android16], skip", t)
+            logSink?.invoke(4, "ZVirtualEnv", "[Android16][Ble] Hook failed: ${t.message}")
+            0
+        }
     }
 
     /**

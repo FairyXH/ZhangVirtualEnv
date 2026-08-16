@@ -35,10 +35,12 @@ class SimSystemPropertyHookAdapter(
     companion object {
         private const val TAG_SCOPE = "Hook"
 
-        /** Android 15 / Android 16 的 TelephonyProperties 候选类（先命中先安装）。 */
+        /** Android 15 / Android 16 的 TelephonyProperties 候选类（先命中先安装）。
+         *  旧路径优先：Android 15 行为与之前完全一致；Android 16 旧路径不存在时命中
+         *  新路径 android.sysprop.TelephonyProperties（framework_classes2.dex 确认）。 */
         private val TELEPHONY_PROPERTIES_CLASSES = listOf(
-            "android.sysprop.TelephonyProperties",
             "android.internal.telephony.sysprop.TelephonyProperties",
+            "android.sysprop.TelephonyProperties",
         )
 
         /** sysprop setter 方法名 → 系统属性 key。 */
