@@ -48,7 +48,11 @@ class RilDefensiveHookAdapter(
     }
 
     /**
-     * 动态匹配 RIL 请求方法：方法名包含 [namePart] 且唯一参数为 Message。
+     * 动态匹配 RIL 请求方法：方法名包含 [namePart] 且第 1 参为 Message。
+     *
+     * 参数数量兼容：Android 15 为 1 参（Message）；Android 16 的
+     * `RIL.getCellInfoList(Message, WorkSource)` 为 2 参（telephony-common.jar JADX 确认），
+     * 仅要求第 1 参为 Message，避免 Android 16 漏命中。
      *
      * @param source 虚拟数据源（cell/sim）；null 时放行
      * @param builder 由虚拟数据构造 RIL 响应对象
@@ -62,7 +66,7 @@ class RilDefensiveHookAdapter(
         var hooked = 0
         clazz.declaredMethods.forEach { method ->
             if (!method.name.contains(namePart)) return@forEach
-            if (method.parameterCount != 1 || method.parameterTypes[0] != android.os.Message::class.java) {
+            if (method.parameterCount < 1 || method.parameterTypes[0] != android.os.Message::class.java) {
                 return@forEach
             }
             val ok = registrar.register(method) { chain ->
