@@ -191,22 +191,22 @@ object SensorBackendManager {
     private fun startAppSide() {
         val backend = appBackend ?: return
         synchronized(this) {
-            // 全局后端状态由 EnvStateCache 同步（getStatus 来源为 system_server 附加字段）
-            val sysStatus = statusRef.get()
-            if (sysStatus.type == SensorBackendType.SYSTEM && sysStatus.started) {
-                backend.suppress()
-                ZLog.i(TAG_SCOPE, "App process: system backend active, local hook suppressed")
-            } else {
-                backend.unsuppress()
-                backend.start()
-                ZLog.i(TAG_SCOPE, "App process: legacy app hook backend enabled")
-            }
+            // SYSTEM 状态仅记录，不作为抑制依据：通道 2 在 Oplus 15 实测不进入
+            // App 分发（见 docs/reverse §8.3），LEGACY 本地注入始终启用以确保可达。
+            backend.unsuppress()
+            backend.start()
+            val sys = statusRef.get()
+            ZLog.i(TAG_SCOPE, "App process: legacy app hook backend enabled (systemStatus=${sys.type}/${sys.started})")
         }
     }
 
     /** App 进程侧更新跨进程 system 状态（EnvStateCache 轮询写入）。 */
     fun updateSystemStatusFromCache(systemStatus: SensorBackendStatus) {
         statusRef.set(systemStatus)
-        onSystemBackendStatus(systemStatus)
+        // 注意：通道 2（SensorService sendRuntimeSensorEvent）在 Oplus 15 实测只更新
+        // last-event 缓存、不进入 App 分发（见 docs/reverse §8.3），因此 SYSTEM 状态
+        // 不可作为 suppress 依据——LEGACY 本地注入保持启用，确保实际可送达。
+        // 若未来系统级通道验证可送达，再恢复按 SYSTEM 状态抑制避免双重注入。
+        // onSystemBackendStatus(systemStatus)
     }
 }

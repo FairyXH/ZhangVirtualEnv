@@ -35,12 +35,18 @@ data class VirtualSensorConfig(
 ) {
     companion object {
         const val TYPE_ACCELEROMETER = 1
+        const val TYPE_MAGNETIC_FIELD = 2
+        const val TYPE_GYROSCOPE = 4
+        const val TYPE_GRAVITY = 9
         const val TYPE_STEP_DETECTOR = 18
         const val TYPE_STEP_COUNTER = 19
 
         const val BACKEND_AUTO = "auto"
 
-        val DEFAULT_SENSOR_TYPES = listOf(TYPE_STEP_COUNTER, TYPE_STEP_DETECTOR, TYPE_ACCELEROMETER)
+        val DEFAULT_SENSOR_TYPES = listOf(
+            TYPE_STEP_COUNTER, TYPE_STEP_DETECTOR, TYPE_ACCELEROMETER,
+            TYPE_GRAVITY, TYPE_MAGNETIC_FIELD
+        )
 
         /** 从 EnvStateEngine 状态 JSON（{enabled, data}）解析配置；数据为空时返回默认。 */
         fun fromStatus(status: JSONObject?): VirtualSensorConfig {

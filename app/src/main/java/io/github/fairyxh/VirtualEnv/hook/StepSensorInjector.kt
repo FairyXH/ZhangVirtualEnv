@@ -31,7 +31,9 @@ class StepSensorInjector(private val cache: EnvStateCache) {
     companion object {
         private const val TAG_SCOPE = "StepHook"
         const val TYPE_ACCELEROMETER = 1
+        const val TYPE_MAGNETIC_FIELD = 2
         const val TYPE_GYROSCOPE = 4
+        const val TYPE_GRAVITY = 9
         const val TYPE_STEP_DETECTOR = 18
         const val TYPE_STEP_COUNTER = 19
 
@@ -164,6 +166,23 @@ class StepSensorInjector(private val cache: EnvStateCache) {
             TYPE_ACCELEROMETER -> {
                 if (sensorData?.optJSONArray("accelerometer") != null) {
                     sensorData.optLong("sampleRateMs", DEFAULT_SAMPLE_RATE_MS).coerceIn(MIN_PERIOD_MS, 2000L)
+                } else if (cache.isStepEnabled()) {
+                    // 步频模拟模式：附加连续加速度流（步行波形），非仅录像
+                    DEFAULT_SAMPLE_RATE_MS
+                } else null
+            }
+            TYPE_GRAVITY -> {
+                if (sensorData?.optJSONArray("gravity") != null) {
+                    sensorData.optLong("sampleRateMs", DEFAULT_SAMPLE_RATE_MS).coerceIn(MIN_PERIOD_MS, 2000L)
+                } else if (cache.isStepEnabled()) {
+                    DEFAULT_SAMPLE_RATE_MS
+                } else null
+            }
+            TYPE_MAGNETIC_FIELD -> {
+                if (sensorData?.optJSONArray("magnetic") != null) {
+                    sensorData.optLong("sampleRateMs", DEFAULT_SAMPLE_RATE_MS).coerceIn(MIN_PERIOD_MS, 2000L)
+                } else if (cache.isStepEnabled()) {
+                    DEFAULT_SAMPLE_RATE_MS
                 } else null
             }
             TYPE_GYROSCOPE -> {
@@ -229,6 +248,16 @@ class StepSensorInjector(private val cache: EnvStateCache) {
                     arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
                 ) else null
             } ?: floatArrayOf(0f, 0f, 0f)
+            TYPE_GRAVITY -> ev.optJSONArray("gravity")?.let { arr ->
+                if (arr.length() >= 3) floatArrayOf(
+                    arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
+                ) else null
+            } ?: floatArrayOf(0f, 0f, 9.81f)
+            TYPE_MAGNETIC_FIELD -> ev.optJSONArray("magnetic")?.let { arr ->
+                if (arr.length() >= 3) floatArrayOf(
+                    arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
+                ) else null
+            } ?: floatArrayOf(35f, -12f, 48f)
             TYPE_GYROSCOPE -> ev.optJSONArray("gyroscope")?.let { arr ->
                 if (arr.length() >= 3) floatArrayOf(
                     arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
@@ -262,7 +291,17 @@ class StepSensorInjector(private val cache: EnvStateCache) {
                 if (arr.length() >= 3) floatArrayOf(
                     arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
                 ) else null
-            } ?: floatArrayOf(0f, 0f, 0f)
+            } ?: syntheticAccel()
+            TYPE_GRAVITY -> sensorData?.optJSONArray("gravity")?.let { arr ->
+                if (arr.length() >= 3) floatArrayOf(
+                    arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
+                ) else null
+            } ?: floatArrayOf(0f, 0f, 9.81f)
+            TYPE_MAGNETIC_FIELD -> sensorData?.optJSONArray("magnetic")?.let { arr ->
+                if (arr.length() >= 3) floatArrayOf(
+                    arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
+                ) else null
+            } ?: floatArrayOf(35f, -12f, 48f)
             TYPE_GYROSCOPE -> sensorData?.optJSONArray("gyroscope")?.let { arr ->
                 if (arr.length() >= 3) floatArrayOf(
                     arr.optDouble(0).toFloat(), arr.optDouble(1).toFloat(), arr.optDouble(2).toFloat()
@@ -270,6 +309,18 @@ class StepSensorInjector(private val cache: EnvStateCache) {
             } ?: floatArrayOf(0f, 0f, 0f)
             else -> floatArrayOf(0f)
         }
+    }
+
+    /** 步频模式下生成步行/跑步垂直轴波形（与 VirtualSensorEngine 一致）。 */
+    private fun syntheticAccel(): FloatArray {
+        val steps = cache.stepCounter()
+        val phase = (steps % 64) * 2 * Math.PI / 64.0
+        val stepHz = cache.stepFrequency() / 60.0
+        val amp = 1.4f
+        val vertical = 9.81f + amp * Math.sin(phase + stepHz * steps).toFloat()
+        val x = amp * 0.25f * Math.cos(phase).toFloat()
+        val y = amp * 0.2f * Math.sin(phase * 1.3).toFloat()
+        return floatArrayOf(x, y, vertical)
     }
 
     private fun buildEvent(sensor: Any, type: Int, values: FloatArray): Any {

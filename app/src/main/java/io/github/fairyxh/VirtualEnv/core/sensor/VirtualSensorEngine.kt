@@ -86,6 +86,8 @@ class VirtualSensorEngine(private val configProvider: () -> VirtualSensorConfig?
             VirtualSensorConfig.TYPE_STEP_COUNTER -> floatArrayOf(stepCounter.toFloat())
             VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(1f)
             VirtualSensorConfig.TYPE_ACCELEROMETER -> accelValues(cfg, noise)
+            VirtualSensorConfig.TYPE_GRAVITY -> floatArrayOf(0f, 0f, 9.81f + noise)
+            VirtualSensorConfig.TYPE_MAGNETIC_FIELD -> floatArrayOf(35f + noise * 5, -12f, 48f + noise * 5)
             else -> null
         }
     }
