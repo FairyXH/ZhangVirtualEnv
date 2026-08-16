@@ -57,10 +57,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import com.amap.api.location.AMapLocation
-import com.amap.api.location.AMapLocationClient
-import com.amap.api.location.AMapLocationClientOption
-import com.amap.api.location.AMapLocationListener
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapsInitializer
@@ -74,6 +70,7 @@ import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.MainActivity
+import io.github.fairyxh.VirtualEnv.app.location.AmapLocationHelper
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -95,7 +92,7 @@ import java.util.concurrent.Executors
  * 视图层已迁移到 Compose Liquid Glass，高德 MapView 通过 AndroidView 保留，
  * 全部业务逻辑（绘制/保存/启动/搜索/定位）不变。
  */
-class RouteSimFragment : Fragment(), AMapLocationListener {
+class RouteSimFragment : Fragment() {
 
     companion object {
         private const val TAG_SCOPE = "UI"
@@ -144,7 +141,6 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     private var mapView: TextureMapView? = null
     private var amap: AMap? = null
-    private var locationClient: AMapLocationClient? = null
 
     private val points = mutableListOf<LatLng>()
     private val markers = mutableListOf<Marker>()
@@ -225,11 +221,9 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             MainActivity.swipeLocked = false
         }
         try {
-            locationClient?.stopLocation()
-            locationClient?.onDestroy()
+            mapView?.onDestroy()
         } catch (_: Throwable) {
         }
-        mapView?.onDestroy()
         mapView = null
         executor.shutdown()
     }
@@ -1224,7 +1218,12 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
 
     // ---------- 定位 ----------
 
-    /** 定位到当前位置（优先读模块当前生效位置，避免依赖高德 SDK 一次定位竞态/闪退）。 */
+    /**
+     * 定位到当前位置并在地图上显示。
+     *
+     * 以普通 App 视角优先走高德 SDK 一次性定位（独立网络定位链路，不读测试适配层
+     * 数据）；SDK 失败时回退系统定位，最后回退最近已知位置。
+     */
     private fun locateCurrentPosition() {
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -1237,49 +1236,23 @@ class RouteSimFragment : Fragment(), AMapLocationListener {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
-        // 直接走系统定位（真实 Hook 层数据链路）：模块虚拟定位开启时返回虚拟点，
-        // 未开启时返回真实 GPS/网络位置；不经过高德 SDK，避免定位失败/闪退。
         Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
-        io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(context) { loc ->
+        AmapLocationHelper.locateOnce(context) { amapLoc ->
             requireActivity().runOnUiThread {
-                if (loc != null) {
-                    ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
-                    val gcj = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.wgs84ToGcj02(loc.latitude, loc.longitude)
+                if (amapLoc != null) {
+                    ZLog.i(TAG_SCOPE, "amap locate ok ${amapLoc.latitude},${amapLoc.longitude}")
                     amap?.moveCamera(
-                        CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
+                        CameraUpdateFactory.newLatLngZoom(LatLng(amapLoc.latitude, amapLoc.longitude), 16f)
                     )
                     Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
                 } else {
-                    useLastKnownFallback()
+                    fallbackLastKnown()
                 }
             }
         }
     }
 
-    override fun onLocationChanged(location: AMapLocation?) {
-        if (location == null || location.errorCode != 0) {
-            val code = location?.errorCode ?: -1
-            ZLog.w(TAG_SCOPE, "amap locate error=$code ${location?.errorInfo}")
-            if (code == 7) {
-                requireActivity().runOnUiThread {
-                    Toast.makeText(
-                        requireContext(),
-                        R.string.location_amap_key_error,
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-            fallbackLastKnown()
-            return
-        }
-        val latLng = LatLng(location.latitude, location.longitude)
-        ZLog.i(TAG_SCOPE, "located at ${location.latitude},${location.longitude}")
-        requireActivity().runOnUiThread {
-            amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
-        }
-    }
-
-    /** 高德定位失败时：先请求一次真实定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
+    /** 高德 SDK 定位失败时：先请求一次系统定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
     private fun fallbackLastKnown() {
         try {
             io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->

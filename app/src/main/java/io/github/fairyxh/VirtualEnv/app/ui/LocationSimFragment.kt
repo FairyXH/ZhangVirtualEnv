@@ -72,6 +72,7 @@ import io.github.fairyxh.VirtualEnv.app.MainActivity
 import io.github.fairyxh.VirtualEnv.app.cell.CellInfo
 import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.cell.CellSignalCalculator
+import io.github.fairyxh.VirtualEnv.app.location.AmapLocationHelper
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -156,7 +157,6 @@ class LocationSimFragment : Fragment() {
     private var mapView: TextureMapView? = null
     private var amap: AMap? = null
     private var selectedMarker: Marker? = null
-    private var amapLocationClient: com.amap.api.location.AMapLocationClient? = null
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -228,12 +228,9 @@ class LocationSimFragment : Fragment() {
             MainActivity.swipeLocked = false
         }
         try {
-            amapLocationClient?.stopLocation()
-            amapLocationClient?.onDestroy()
+            mapView?.onDestroy()
         } catch (_: Throwable) {
         }
-        amapLocationClient = null
-        mapView?.onDestroy()
         mapView = null
         executor.shutdown()
     }
@@ -1349,6 +1346,26 @@ class LocationSimFragment : Fragment() {
         return LatLng(gcj.first, gcj.second)
     }
 
+    /**
+     * 高德 SDK 定位结果（GCJ-02）回填：marker 直接用 GCJ-02 显示；
+     * 输入框换算为 WGS-84（注入系统/保存地点统一用 WGS-84）。
+     * @return 地图显示坐标（GCJ-02），供 moveCamera 使用。
+     */
+    private fun selectOnMapFromGcj(gcjLat: Double, gcjLon: Double): LatLng? {
+        val map = amap ?: return null
+        selectedMarker?.remove()
+        selectedMarker = map.addMarker(
+            MarkerOptions()
+                .position(LatLng(gcjLat, gcjLon))
+                .title(getString(R.string.location_map_hint))
+        )
+        val wgs = io.github.fairyxh.VirtualEnv.util.GeoCoordConverter.gcj02ToWgs84(LatLng(gcjLat, gcjLon))
+        latitudeText = formatCoord(wgs.latitude)
+        longitudeText = formatCoord(wgs.longitude)
+        ZLog.d(TAG_SCOPE, "amap locate gcj=$gcjLat,$gcjLon wgs=${wgs.latitude},${wgs.longitude}")
+        return LatLng(gcjLat, gcjLon)
+    }
+
     private fun formatCoord(value: Double): String {
         return if (value == 0.0) "0.0" else String.format("%.6f", value)
     }
@@ -1549,7 +1566,12 @@ class LocationSimFragment : Fragment() {
         }
     }
 
-    /** 定位到当前位置并在地图上显示（优先读模块当前生效位置，失败时回退高德/系统最近已知位置）。 */
+    /**
+     * 定位到当前位置并在地图上显示。
+     *
+     * 以普通 App 视角优先走高德 SDK 一次性定位（独立网络定位链路，不读测试适配层
+     * 数据）；SDK 失败时回退系统定位，最后回退最近已知位置。
+     */
     private fun locateCurrentPosition() {
         val context = requireContext()
         if (!AmapPrivacyManager.isAgreed(context)) {
@@ -1562,26 +1584,24 @@ class LocationSimFragment : Fragment() {
             Toast.makeText(context, R.string.route_location_permission, Toast.LENGTH_SHORT).show()
             return
         }
-        // 直接走系统定位（真实 Hook 层数据链路）：模块虚拟定位开启时返回虚拟点，
-        // 未开启时返回真实 GPS/网络位置；不经过高德 SDK，避免定位失败/闪退。
         Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
-        io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(context) { loc ->
+        AmapLocationHelper.locateOnce(context) { amapLoc ->
             requireActivity().runOnUiThread {
-                if (loc != null) {
-                    ZLog.i(TAG_SCOPE, "system locate ${loc.latitude},${loc.longitude}")
-                    val display = selectOnMapFromWgs(loc.latitude, loc.longitude)
+                if (amapLoc != null) {
+                    ZLog.i(TAG_SCOPE, "amap locate ok ${amapLoc.latitude},${amapLoc.longitude}")
+                    val display = selectOnMapFromGcj(amapLoc.latitude, amapLoc.longitude)
                     if (display != null) {
                         amap?.moveCamera(CameraUpdateFactory.newLatLngZoom(display, 16f))
                     }
                     Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
                 } else {
-                    useLastKnownFallback()
+                    fallbackLastKnown()
                 }
             }
         }
     }
 
-    /** 高德定位失败时：先请求一次真实定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
+    /** 高德 SDK 定位失败时：先请求一次系统定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
     private fun fallbackLastKnown() {
         try {
             io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->

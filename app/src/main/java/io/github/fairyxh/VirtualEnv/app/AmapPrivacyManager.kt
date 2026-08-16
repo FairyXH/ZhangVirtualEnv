@@ -44,6 +44,13 @@ object AmapPrivacyManager {
         }
         MapsInitializer.updatePrivacyShow(context, true, true)
         MapsInitializer.updatePrivacyAgree(context, true)
+        // 定位 SDK 独立于地图 SDK，同样需要隐私合规接口（旧版本无此静态方法时忽略）
+        try {
+            com.amap.api.location.AMapLocationClient.updatePrivacyShow(context, true, true)
+            com.amap.api.location.AMapLocationClient.updatePrivacyAgree(context, true)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "AMapLocationClient privacy update failed", t)
+        }
         ZLog.i(TAG_SCOPE, "updatePrivacyShow/Agree called")
     }
 
