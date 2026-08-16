@@ -1237,23 +1237,29 @@ class RouteSimFragment : Fragment() {
             return
         }
         Toast.makeText(context, R.string.route_locating, Toast.LENGTH_SHORT).show()
-        AmapLocationHelper.locateOnce(context) { amapLoc ->
+        AmapLocationHelper.locateOnce(context) { result ->
             requireActivity().runOnUiThread {
-                if (amapLoc != null) {
-                    ZLog.i(TAG_SCOPE, "amap locate ok ${amapLoc.latitude},${amapLoc.longitude}")
+                if (result.ok) {
+                    val loc = result.location ?: return@runOnUiThread
+                    ZLog.i(TAG_SCOPE, "amap locate ok ${loc.latitude},${loc.longitude}")
                     amap?.moveCamera(
-                        CameraUpdateFactory.newLatLngZoom(LatLng(amapLoc.latitude, amapLoc.longitude), 16f)
+                        CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16f)
                     )
                     Toast.makeText(requireContext(), R.string.route_located, Toast.LENGTH_SHORT).show()
                 } else {
-                    fallbackLastKnown()
+                    // 错误码 7/8 为 Key 鉴权失败（INVALID_USER_SCODE），明确提示而非笼统“不可用”
+                    val keyFail = result.errorCode == 7 || result.errorCode == 8
+                    fallbackLastKnown(if (keyFail) R.string.location_amap_key_error else null)
                 }
             }
         }
     }
 
-    /** 高德 SDK 定位失败时：先请求一次系统定位（不读被虚拟注入污染的 lastKnown），再退最近已知。 */
-    private fun fallbackLastKnown() {
+    /**
+     * 高德 SDK 定位失败时：先请求一次系统定位（不读被虚拟注入污染的 lastKnown），
+     * 再退最近已知。[amapErrorHint] 用于在回退成功时仍告知高德定位失败原因。
+     */
+    private fun fallbackLastKnown(amapErrorHint: Int? = null) {
         try {
             io.github.fairyxh.VirtualEnv.app.location.SystemLocationHelper.requestOnce(requireContext()) { loc ->
                 requireActivity().runOnUiThread {
@@ -1263,21 +1269,25 @@ class RouteSimFragment : Fragment() {
                         amap?.moveCamera(
                             CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
                         )
-                        Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            amapErrorHint ?: R.string.route_locate_fallback,
+                            Toast.LENGTH_SHORT
+                        ).show()
                     } else {
-                        useLastKnownFallback()
+                        useLastKnownFallback(amapErrorHint)
                     }
                 }
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "system locate failed", t)
-            useLastKnownFallback()
+            useLastKnownFallback(amapErrorHint)
         }
     }
 
     /** 最后的兜底：系统最近已知位置（仅作最后手段）。 */
     @android.annotation.SuppressLint("MissingPermission")
-    private fun useLastKnownFallback() {
+    private fun useLastKnownFallback(amapErrorHint: Int? = null) {
         try {
             val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
             val loc = lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
@@ -1289,7 +1299,11 @@ class RouteSimFragment : Fragment() {
                     amap?.moveCamera(
                         CameraUpdateFactory.newLatLngZoom(LatLng(gcj.first, gcj.second), 16f)
                     )
-                    Toast.makeText(requireContext(), R.string.route_locate_fallback, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        amapErrorHint ?: R.string.route_locate_fallback,
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             } else {
                 requireActivity().runOnUiThread {

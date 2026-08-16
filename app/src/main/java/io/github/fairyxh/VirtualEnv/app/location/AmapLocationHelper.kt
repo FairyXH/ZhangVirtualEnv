@@ -29,16 +29,25 @@ object AmapLocationHelper {
     private const val KEY_AMAP_KEY = "amap_key"
     private const val TIMEOUT_MS = 12_000L
 
+    /** 高德定位失败时把错误码一并带回，便于 UI 区分鉴权失败（7/8）与其他失败。 */
+    data class Result(
+        val location: AMapLocation? = null,
+        val errorCode: Int = 0,
+        val errorInfo: String = ""
+    ) {
+        val ok: Boolean get() = errorCode == 0 && location != null
+    }
+
     /**
      * 发起一次定位，[onResult] 在主线程回调：
-     * - 成功返回 [AMapLocation]（errorCode == 0，坐标为 GCJ-02）
-     * - 失败 / 超时返回 null，调用方自行走系统定位 / 最近已知位置兜底
+     * - 成功返回 [Result.ok] == true，[Result.location] 坐标为 GCJ-02
+     * - 失败 / 超时返回 [Result.ok] == false，携带 SDK 错误码（见高德定位错误码说明）
      */
     @SuppressLint("MissingPermission")
     fun locateOnce(
         context: Context,
         timeoutMs: Long = TIMEOUT_MS,
-        onResult: (AMapLocation?) -> Unit
+        onResult: (Result) -> Unit
     ) {
         val main = Handler(Looper.getMainLooper())
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -51,21 +60,21 @@ object AmapLocationHelper {
     private fun locateOnceInternal(
         context: Context,
         timeoutMs: Long,
-        onResult: (AMapLocation?) -> Unit
+        onResult: (Result) -> Unit
     ) {
         if (!AmapPrivacyManager.isAgreed(context)) {
             ZLog.w(TAG_SCOPE, "privacy not agreed, skip")
-            onResult(null)
+            onResult(Result(errorCode = -2, errorInfo = "privacy not agreed"))
             return
         }
 
         val main = Handler(Looper.getMainLooper())
         val done = AtomicBoolean(false)
 
-        fun finish(loc: AMapLocation?) {
+        fun finish(result: Result) {
             if (!done.compareAndSet(false, true)) return
             main.removeCallbacksAndMessages(null)
-            onResult(loc)
+            onResult(result)
         }
 
         val client = AMapLocationClient(context)
@@ -77,7 +86,7 @@ object AmapLocationHelper {
                     client.onDestroy()
                 } catch (_: Throwable) {
                 }
-                onResult(null)
+                onResult(Result(errorCode = -1, errorInfo = "timeout"))
             }
         }
 
@@ -108,11 +117,12 @@ object AmapLocationHelper {
                             TAG_SCOPE,
                             "ok ${location.latitude},${location.longitude} type=${location.locationType}"
                         )
-                        main.post { finish(location) }
+                        main.post { finish(Result(location = location)) }
                     } else {
                         val code = location?.errorCode ?: -1
-                        ZLog.w(TAG_SCOPE, "error code=$code ${location?.errorInfo ?: "null"}")
-                        main.post { finish(null) }
+                        val info = location?.errorInfo ?: "null"
+                        ZLog.w(TAG_SCOPE, "error code=$code $info")
+                        main.post { finish(Result(errorCode = code, errorInfo = info)) }
                     }
                 }
             })
@@ -126,7 +136,7 @@ object AmapLocationHelper {
                 client.onDestroy()
             } catch (_: Throwable) {
             }
-            onResult(null)
+            onResult(Result(errorCode = -3, errorInfo = t.message ?: "start failed"))
         }
     }
 }

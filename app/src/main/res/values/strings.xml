@@ -181,7 +181,7 @@
     <string name="location_search_empty">未找到相关地址</string>
     <string name="location_search_failed">搜索失败，请检查网络与高德 Key</string>
     <string name="location_locate_fallback">定位服务暂不可用，已使用最近一次已知位置</string>
-    <string name="location_amap_key_error">高德定位 Key 认证失败（错误码 7），请检查设置中的 API Key 与 SHA1/包名配置</string>
+    <string name="location_amap_key_error">高德定位 Key 认证失败（SHA1/包名不匹配），已使用系统定位结果；请在「设置-应用标识」核对 SHA1 与包名，并检查高德开放平台 Key 配置</string>
     <string name="location_map_init_failed">地图初始化失败，请检查高德 Key 与隐私同意</string>
     <string name="location_point_name_hint">地点名称，如：公司</string>
     <string name="location_point_remark_hint">备注（可选），如：工位 3 楼</string>
