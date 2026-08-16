@@ -266,7 +266,10 @@ class SystemSensorBackend(
             val handle = sensor.javaClass.getMethod("getHandle").invoke(sensor) as Int
 
             // 1) mInstance
-            val instance = readLongField(ssm, "mInstance", "mNativeInstance") ?: return false
+            val instance = readLongField(ssm, "mInstance", "mNativeInstance") ?: run {
+                ZLog.w(TAG_SCOPE, "invokeNativeInject: mInstance not found; fields=${ssmClass.declaredFields.map { it.name }}")
+                return false
+            }
 
             // 2) 定位 native 方法（R8 可能改名）：签名 (long, int, float[], int, long) -> boolean
             val sig = arrayOf(
@@ -281,9 +284,17 @@ class SystemSensorBackend(
                     m.name.contains("InjectSensor", ignoreCase = true)) &&
                     m.parameterTypes.contentEquals(sig) &&
                     m.returnType == Boolean::class.javaPrimitiveType
-            } ?: return false
+            } ?: run {
+                val names = ssmClass.declaredMethods
+                    .filter { it.name.contains("inject", ignoreCase = true) }
+                    .map { it.name + "(" + it.parameterTypes.joinToString { p -> p.simpleName } + ")" }
+                ZLog.w(TAG_SCOPE, "invokeNativeInject: method not found; methods=$names")
+                return false
+            }
             method.isAccessible = true
-            (method.invoke(ssm, instance, handle, values, accuracy, timestampNanos) as? Boolean) == true
+            val ret = method.invoke(ssm, instance, handle, values, accuracy, timestampNanos) as? Boolean
+            ZLog.i(TAG_SCOPE, "invokeNativeInject: method=${method.name} handle=$handle -> $ret")
+            ret == true
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "invokeNativeInjectSensorData failed", t)
             false
