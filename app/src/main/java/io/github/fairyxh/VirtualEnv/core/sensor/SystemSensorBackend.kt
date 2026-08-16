@@ -231,13 +231,61 @@ class SystemSensorBackend(
     private fun probeDirectInject(sm: SensorManager): Boolean {
         return try {
             val sensor = findSensor(sm, VirtualSensorConfig.TYPE_ACCELEROMETER) ?: return false
-            val ok = invokeInjectSensorData(
+            // 1) Java 包装层（会过 isDataInjectionSupported 门禁）
+            val javaOk = invokeInjectSensorData(
                 sm, sensor, floatArrayOf(0f, 0f, 9.81f), 3, SystemClock.elapsedRealtimeNanos()
             )
-            ZLog.i(TAG_SCOPE, "probeDirectInject(accel) -> $ok")
-            ok
+            ZLog.i(TAG_SCOPE, "probeDirectInject(accel java) -> $javaOk")
+            if (javaOk) return true
+            // 2) 绕过 Java 门禁：直接调 SystemSensorManager.nativeInjectSensorData
+            val nativeOk = invokeNativeInjectSensorData(
+                sm, sensor, floatArrayOf(0f, 0f, 9.81f), 3, SystemClock.elapsedRealtimeNanos()
+            )
+            ZLog.i(TAG_SCOPE, "probeDirectInject(accel native) -> $nativeOk")
+            nativeOk
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "probeDirectInject failed", t)
+            false
+        }
+    }
+
+    /** 绕过 Java 门禁：反射调用 SystemSensorManager.nativeInjectSensorData(instance, handle, values, accuracy, ts)。 */
+    private fun invokeNativeInjectSensorData(
+        sm: SensorManager,
+        sensor: Sensor,
+        values: FloatArray,
+        accuracy: Int,
+        timestampNanos: Long
+    ): Boolean {
+        return try {
+            // SensorManager.mSensorManager -> SystemSensorManager（含 mInstance long native 指针）
+            val ssmField = SensorManager::class.java.getDeclaredField("mSensorManager")
+            ssmField.isAccessible = true
+            val ssm = ssmField.get(sm) ?: return false
+            val ssmClass = ssm.javaClass
+            val handle = sensor.javaClass.getMethod("getHandle").invoke(sensor) as Int
+
+            // 1) mInstance
+            val instance = readLongField(ssm, "mInstance", "mNativeInstance") ?: return false
+
+            // 2) 定位 native 方法（R8 可能改名）：签名 (long, int, float[], int, long) -> boolean
+            val sig = arrayOf(
+                Long::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                FloatArray::class.java,
+                Int::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType
+            )
+            val method = ssmClass.declaredMethods.firstOrNull { m ->
+                (m.name.contains("injectSensorData", ignoreCase = true) ||
+                    m.name.contains("InjectSensor", ignoreCase = true)) &&
+                    m.parameterTypes.contentEquals(sig) &&
+                    m.returnType == Boolean::class.javaPrimitiveType
+            } ?: return false
+            method.isAccessible = true
+            (method.invoke(ssm, instance, handle, values, accuracy, timestampNanos) as? Boolean) == true
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "invokeNativeInjectSensorData failed", t)
             false
         }
     }
