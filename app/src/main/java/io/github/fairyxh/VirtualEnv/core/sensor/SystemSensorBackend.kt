@@ -396,8 +396,9 @@ class SystemSensorBackend(
             val payload = when (type) {
                 VirtualSensorConfig.TYPE_ACCELEROMETER -> FloatArray(3).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 3)) }
                 VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(values.firstOrNull() ?: 1f)
-                // STEP_COUNTER：JNI 桥要求 len<17（>=17 报 "exceeds the maximum"），memcpy(len*4, 上限80B)
-                else -> FloatArray(16).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 16)) }
+                // STEP_COUNTER：JNI 桥 memcpy 分支（len*4 字节）；实测 16 槽 data[0] 丢失，
+                // 单槽（len=1 → 4B）可避免布局偏移问题
+                else -> floatArrayOf(values.firstOrNull() ?: 0f)
             }
             // 临时诊断：确认注入的 payload 首值（验证引擎步数是否真正递增）
             ZLog.d(TAG_SCOPE, "inject payload type=$type v0=${payload[0]}")
