@@ -2,11 +2,13 @@ package io.github.fairyxh.VirtualEnv.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
 import io.github.fairyxh.VirtualEnv.app.collect.StreamEnvironmentSampler
+import io.github.fairyxh.VirtualEnv.app.collect.VrenvTransfer
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -59,6 +62,7 @@ import io.github.fairyxh.VirtualEnv.core.model.ApiResult
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONArray
 import org.json.JSONObject
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -154,6 +158,22 @@ class HomeFragment : Fragment() {
 
     private val savedItems = mutableStateListOf<SavedItem>()
     private var selectedItem: SavedItem? = null
+
+    /** 已保存采集卡导入导出选择模式（复选框单选，一次只处理一份）。 */
+    private var savedTransferMode by mutableStateOf(false)
+    private var transferSelected: SavedItem? = null
+
+    private val importVrenvLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) importVrenv(uri)
+    }
+
+    private val exportVrenvLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) exportVrenv(uri)
+    }
 
     private val presetItems = mutableStateListOf<PresetItem>()
     private var presetDialog by mutableStateOf<PresetDialogState?>(null)
@@ -878,10 +898,73 @@ class HomeFragment : Fragment() {
                     containerColor = colors.bgSecondary.copy(alpha = 0.45f)
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        BasicText(
-                            getString(R.string.home_saved_title),
-                            style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText(
+                                getString(R.string.home_saved_title),
+                                Modifier.weight(1f),
+                                style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            )
+                            GlassButton(
+                                onClick = { fragment.toggleSavedTransferMode() },
+                                backdrop = backdrop,
+                                modifier = Modifier.width(100.dp),
+                                isInteractive = false,
+                                surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                            ) {
+                                BasicText(
+                                    getString(R.string.home_saved_transfer),
+                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                )
+                            }
+                        }
+                        if (savedTransferMode) {
+                            Row(
+                                Modifier
+                                    .padding(top = 8.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassButton(
+                                    onClick = { fragment.startVrenvImport() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = false,
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_saved_import),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = { fragment.exportSelectedVrenv() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = false,
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_saved_export),
+                                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = { fragment.toggleSavedTransferMode() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    isInteractive = false,
+                                    surfaceColor = colors.danger.copy(alpha = 0.25f)
+                                ) {
+                                    BasicText(
+                                        getString(R.string.home_saved_cancel),
+                                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                                    )
+                                }
+                            }
+                        }
                         if (savedItems.isEmpty()) {
                             BasicText(
                                 getString(R.string.home_saved_empty),
@@ -893,8 +976,11 @@ class HomeFragment : Fragment() {
                                 SavedItemRow(
                                     item = item,
                                     selected = selectedItem?.kind == item.kind && selectedItem?.id == item.id,
+                                    transferMode = savedTransferMode,
+                                    checked = transferSelected?.kind == item.kind && transferSelected?.id == item.id,
                                     backdrop = backdrop,
                                     onSelect = { fragment.selectItem(item) },
+                                    onCheck = { fragment.toggleTransferSelect(item) },
                                     onDetail = { fragment.showSavedDetail(item) },
                                     onDelete = { fragment.deleteItem(item) }
                                 )
@@ -941,21 +1027,24 @@ class HomeFragment : Fragment() {
     private fun SavedItemRow(
         item: SavedItem,
         selected: Boolean,
+        transferMode: Boolean,
+        checked: Boolean,
         backdrop: com.kyant.backdrop.Backdrop,
         onSelect: () -> Unit,
+        onCheck: () -> Unit,
         onDetail: () -> Unit,
         onDelete: () -> Unit
     ) {
         val colors = glassColors()
         // 选中态不显示蓝色：仅提高中性色亮度区分，保留玻璃质感且不干扰视觉
         GlassPill(
-            onClick = onSelect,
+            onClick = if (transferMode) onCheck else onSelect,
             backdrop = backdrop,
             modifier = Modifier
                 .padding(top = 8.dp)
                 .fillMaxWidth(),
-            selected = selected,
-            containerColor = if (selected) colors.bgTertiary.copy(alpha = 0.75f)
+            selected = if (transferMode) checked else selected,
+            containerColor = if (transferMode && checked) colors.bgTertiary.copy(alpha = 0.75f)
             else colors.bgTertiary.copy(alpha = 0.4f),
             height = 56.dp
         ) {
@@ -965,6 +1054,13 @@ class HomeFragment : Fragment() {
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (transferMode) {
+                    GlassCheckbox(
+                        checked = checked,
+                        onCheckedChange = { onCheck() },
+                        modifier = Modifier.padding(end = 10.dp)
+                    )
+                }
                 Column(Modifier.weight(1f)) {
                     val kindLabel = if (item.kind == "snapshot") {
                         getString(R.string.home_saved_kind_snapshot)
@@ -986,29 +1082,31 @@ class HomeFragment : Fragment() {
                         style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
                     )
                 }
-                GlassButton(
-                    onClick = onDetail,
-                    backdrop = backdrop,
-                    modifier = Modifier.width(64.dp),
-                    isInteractive = false,
-                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
-                ) {
-                    BasicText(
-                        getString(R.string.home_saved_detail),
-                        style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
-                    )
-                }
-                GlassButton(
-                    onClick = onDelete,
-                    backdrop = backdrop,
-                    modifier = Modifier.width(64.dp),
-                    isInteractive = false,
-                    surfaceColor = colors.danger.copy(alpha = 0.25f)
-                ) {
-                    BasicText(
-                        getString(R.string.home_recording_delete),
-                        style = TextStyle(color = colors.danger, fontSize = 12.sp)
-                    )
+                if (!transferMode) {
+                    GlassButton(
+                        onClick = onDetail,
+                        backdrop = backdrop,
+                        modifier = Modifier.width(64.dp),
+                        isInteractive = false,
+                        surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                    ) {
+                        BasicText(
+                            getString(R.string.home_saved_detail),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                        )
+                    }
+                    GlassButton(
+                        onClick = onDelete,
+                        backdrop = backdrop,
+                        modifier = Modifier.width(64.dp),
+                        isInteractive = false,
+                        surfaceColor = colors.danger.copy(alpha = 0.25f)
+                    ) {
+                        BasicText(
+                            getString(R.string.home_recording_delete),
+                            style = TextStyle(color = colors.danger, fontSize = 12.sp)
+                        )
+                    }
                 }
             }
         }
@@ -1899,7 +1997,136 @@ class HomeFragment : Fragment() {
                         playbackControlsVisible = false
                         playbackSpeedRowVisible = false
                     }
+                    if (transferSelected?.kind == item.kind && transferSelected?.id == item.id) {
+                        transferSelected = null
+                    }
                     refreshSavedItems()
+                }
+            }
+        }
+    }
+
+    // ---------- 已保存采集导入导出（.vrenv.json） ----------
+
+    /** 切换导入导出选择模式（复选框单选，一次只处理一份）。 */
+    private fun toggleSavedTransferMode() {
+        savedTransferMode = !savedTransferMode
+        transferSelected = null
+    }
+
+    /** 选择模式下勾选/取消一份采集（单选：选新取消旧）。 */
+    private fun toggleTransferSelect(item: SavedItem) {
+        transferSelected = if (transferSelected?.kind == item.kind && transferSelected?.id == item.id) {
+            null
+        } else {
+            item
+        }
+    }
+
+    /** 导入 .vrenv.json：打开系统文件选择器。 */
+    private fun startVrenvImport() {
+        importVrenvLauncher.launch(
+            arrayOf("application/json", "text/plain", "application/octet-stream")
+        )
+    }
+
+    /** 导出选中的采集：仅快照支持（录像帧数据无法映射为 vrenv 环境格式）。 */
+    private fun exportSelectedVrenv() {
+        val item = transferSelected
+        if (item == null) {
+            Toast.makeText(requireContext(), R.string.home_saved_export_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (item.kind != "snapshot") {
+            Toast.makeText(requireContext(), R.string.home_saved_export_recording_unsupported, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val safeName = item.name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        exportVrenvLauncher.launch("$safeName.vrenv.json")
+    }
+
+    /** 写入 SAF 选定的 .vrenv.json（IO 线程）。 */
+    private fun exportVrenv(uri: Uri) {
+        val item = transferSelected ?: return
+        executor.execute {
+            try {
+                val ctx = requireContext()
+                val snapshots = ApiClient.listEnvSnapshots().data?.optJSONArray("snapshots")
+                var snapshot: JSONObject? = null
+                snapshots?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val s = arr.optJSONObject(i) ?: continue
+                        if (s.optLong("id", -1L) == item.id && s.optString("type", "") == "collect") {
+                            snapshot = s
+                            break
+                        }
+                    }
+                }
+                val target = snapshot
+                    ?: throw IllegalStateException(getString(R.string.home_saved_export_missing))
+                val environment = VrenvTransfer.collectToVrenvEnvironment(target)
+                val text = VrenvTransfer.buildVrenvFile(environment).toString(2)
+                val out = ctx.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("open output stream failed")
+                out.use { it.write(text.toByteArray(StandardCharsets.UTF_8)) }
+                ZLog.i(TAG_SCOPE, "vrenv exported id=${item.id} chars=${text.length}")
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), R.string.home_saved_export_ok, Toast.LENGTH_SHORT).show()
+                    savedTransferMode = false
+                    transferSelected = null
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "vrenv export failed", t)
+                requireActivity().runOnUiThread {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.home_saved_export_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /** 读取 SAF 选定的 .vrenv.json 并导入为 collect 快照（IO 线程）。 */
+    private fun importVrenv(uri: Uri) {
+        executor.execute {
+            try {
+                val ctx = requireContext()
+                val text = ctx.contentResolver.openInputStream(uri)
+                    ?.bufferedReader(StandardCharsets.UTF_8)
+                    ?.use { it.readText() }
+                    ?: throw IllegalStateException("open input stream failed")
+                val environment = VrenvTransfer.parseEnvironment(text)
+                    ?: throw IllegalArgumentException(getString(R.string.home_saved_import_invalid))
+                val name = environment.optString("name", "").ifBlank {
+                    getString(R.string.home_saved_import_default_name)
+                }
+                val remark = getString(R.string.home_saved_import_remark)
+                val exportedAt = runCatching { org.json.JSONObject(text).optLong("exportedAt", System.currentTimeMillis()) }
+                    .getOrDefault(System.currentTimeMillis())
+                val data = VrenvTransfer.vrenvToCollectData(environment, exportedAt)
+                val result = ApiClient.createEnvSnapshot(name, remark, "collect", data)
+                if (result.code == ApiResult.CODE_OK) {
+                    // 与本地采集一致：拆分基站/WiFi/GNSS/蓝牙轨道，便于回放与子页面同步
+                    saveCollectTracks(name, remark, data)
+                }
+                requireActivity().runOnUiThread {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
+                    if (result.code == ApiResult.CODE_OK) {
+                        savedTransferMode = false
+                        transferSelected = null
+                        refreshSavedItems()
+                    }
+                }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "vrenv import failed", t)
+                requireActivity().runOnUiThread {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.home_saved_import_failed, t.message ?: ""),
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
