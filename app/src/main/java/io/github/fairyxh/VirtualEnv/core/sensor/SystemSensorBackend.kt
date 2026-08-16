@@ -396,7 +396,8 @@ class SystemSensorBackend(
             val payload = when (type) {
                 VirtualSensorConfig.TYPE_ACCELEROMETER -> FloatArray(3).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 3)) }
                 VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(values.firstOrNull() ?: 1f)
-                else -> FloatArray(20).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 20)) }
+                // STEP_COUNTER：JNI 桥要求 len<17（>=17 报 "exceeds the maximum"），memcpy 64B 复制 16 槽
+                else -> FloatArray(16).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 16)) }
             }
             val clazz = Class.forName(
                 "com.android.server.sensors.SensorService",
