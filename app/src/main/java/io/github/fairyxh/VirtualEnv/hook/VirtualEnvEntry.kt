@@ -248,10 +248,13 @@ class VirtualEnvEntry : XposedModule() {
             // 此时可能尚未注册，SensorManager 调用会阻塞 system_server 导致 boot 卡死。
             // 只在配置源就绪后延迟到 boot_completed 再探测（2026-08-16 实测卡开机页根因）。
             try {
-                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.initSystemServer {
-                    io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
-                        .fromStatus(backend.sensorEngine.statusJson())
-                }
+                io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.initSystemServer(
+                    configProvider = {
+                        io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
+                            .fromStatus(backend.sensorEngine.statusJson())
+                    },
+                    systemServerClassLoader = param.javaClass.getMethod("getClassLoader").invoke(param) as? ClassLoader
+                )
                 scheduleSensorBackendStart()
             } catch (t: Throwable) {
                 log(Log.ERROR, TAG, "[$TAG_SCOPE] sensor backend init failed", t)

@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong
 class SystemSensorBackend(
     private val sensorManagerProvider: () -> SensorManager?,
     private val engine: VirtualSensorEngine,
+    private val systemServerClassLoader: ClassLoader? = null,
 ) : SensorBackend {
 
     companion object {
@@ -298,8 +299,10 @@ class SystemSensorBackend(
 
     /** system_server 应用类加载器（含 services.jar；LSPosed 下 getSystemClassLoader 会被替换成模块 loader）。 */
     private fun systemServerClassLoader(): ClassLoader? {
+        // 优先使用 LSPosed SystemServerStartingParam 传入的 classLoader（即 system_server PathClassLoader）
+        if (systemServerClassLoader != null) return systemServerClassLoader
         return try {
-            // system_server 中 com.android.server.SystemServer 由 PathClassLoader 加载（含 services.jar）
+            // 兜底：system_server 中 com.android.server.SystemServer 由 PathClassLoader 加载（含 services.jar）
             Class.forName("com.android.server.SystemServer").classLoader
                 ?: runCatching {
                     val app = Class.forName("android.app.ActivityThread")

@@ -48,7 +48,10 @@ object SensorBackendManager {
     // ---------- 初始化 ----------
 
     /** system_server 初始化：创建引擎 + 全局后端。configProvider 返回当前 sensor 配置。 */
-    fun initSystemServer(configProvider: () -> VirtualSensorConfig?) {
+    fun initSystemServer(
+        configProvider: () -> VirtualSensorConfig?,
+        systemServerClassLoader: ClassLoader? = null
+    ) {
         synchronized(this) {
             if (role.get() == Role.SYSTEM_SERVER) return
             role.set(Role.SYSTEM_SERVER)
@@ -56,7 +59,8 @@ object SensorBackendManager {
             engine = VirtualSensorEngine(configProvider)
             systemBackend = SystemSensorBackend(
                 sensorManagerProvider = { SystemSensorBackend.systemServerSensorManager() },
-                engine = engine!!
+                engine = engine!!,
+                systemServerClassLoader = systemServerClassLoader
             )
             ZLog.i(TAG_SCOPE, "SensorBackendManager initialized for system_server")
         }
