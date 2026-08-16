@@ -103,10 +103,11 @@ class SimTelephonyHookAdapter(
             "getVoiceMailNumber",
             "getVoiceMailNumberForSubscriber",
             "getVoiceMailNumberWithFeature",
-            // Android 16：PhoneInterfaceManager 恢复无后缀方法，并新增 ForPhone 变体
-            // （TeleService.apk dex 扫描确认 getSimOperatorNameForPhone /
-            // getNetworkOperatorForPhone / getNetworkCountryIsoForPhone /
-            // getSimOperatorNumericForPhone / getSimOperatorForPhone）
+            // Android 16：PhoneInterfaceManager 移除大部分 ForSubscriber/WithFeature 变体，
+            // 仅保留无后缀方法 + 少量 ForPhone 变体（TeleService.apk dex 精确扫描确认：
+            // getNetworkCountryIsoForPhone 在 PhoneInterfaceManager 声明；getSimOperatorNameForPhone /
+            // getNetworkOperatorForPhone / getSimOperatorNumericForPhone / getSimOperatorForPhone
+            // 声明在 android.telephony.TelephonyManager 客户端，不在 Binder 服务端，找不到自动跳过）
             "getSimOperatorForPhone",
             "getSimOperatorNameForPhone",
             "getNetworkOperatorForPhone",
@@ -136,20 +137,35 @@ class SimTelephonyHookAdapter(
         var hooked = 0
         val interfaces = phoneInterfaceClasses.ifEmpty { DEFAULT_PHONE_INTERFACE_CLASSES }
         for (className in interfaces) {
-            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            val clazz = HookSupport.findClass(classLoader, className)
+            if (clazz == null) {
+                ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate NOT FOUND: $className")
+                continue
+            }
+            ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate FOUND: $className")
             hooked += hookPhoneInterfaceManager(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim hooks active on $className")
         }
         val subInfo = phoneSubInfoClasses.ifEmpty { DEFAULT_PHONE_SUB_INFO_CLASSES }
         for (className in subInfo) {
-            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            val clazz = HookSupport.findClass(classLoader, className)
+            if (clazz == null) {
+                ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate NOT FOUND: $className")
+                continue
+            }
+            ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate FOUND: $className")
             hooked += hookPhoneSubInfoController(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim sub-info hooks active on $className")
         }
         // Phone 对象层：getSimOperator/getSimCountryIso 等最终数据源
         val phones = phoneClasses.ifEmpty { DEFAULT_PHONE_CLASSES }
         for (className in phones) {
-            val clazz = HookSupport.findClass(classLoader, className) ?: continue
+            val clazz = HookSupport.findClass(classLoader, className)
+            if (clazz == null) {
+                ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate NOT FOUND: $className")
+                continue
+            }
+            ZLog.i(TAG_SCOPE, "[Android16][SIM] class candidate FOUND: $className")
             hooked += hookPhoneObject(clazz)
             if (hooked > 0) ZLog.i(TAG_SCOPE, "sim phone-object hooks active on $className")
         }

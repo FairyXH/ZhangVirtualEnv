@@ -15,10 +15,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * gsm.operator.alpha / gsm.operator.numeric / gsm.operator.iso-country，按 phoneId 逗号分隔），
  * 不走 ITelephony / IPhoneSubInfo Binder，因此 Binder 侧 Hook 无法覆盖这些字段。
  *
- * 所有属性写入最终都经过 `android.internal.telephony.sysprop.TelephonyProperties` 的
+ * 所有属性写入最终都经过 `TelephonyProperties` 的
  * 6 个 `List<String>` setter（TelephonyManager.setSimOperatorNameForPhone 等内部调用）。
  * 在 com.android.phone 进程拦截这些 setter，把配置槽位的值替换为虚拟值后写回属性；
  * 系统属性是进程级全局，任意 App 读到的都是虚拟值，无需 Hook 第三方 App（符合作用域硬约束）。
+ *
+ * 类路径（JADX Android 16 实测）：Android 15 为 `android.internal.telephony.sysprop.TelephonyProperties`；
+ * Android 16 迁移到 `android.sysprop.TelephonyProperties`（framework_classes2.dex 确认，
+ * setter 名与 List<String> 签名完全一致）。两个候选按顺序查找，找不到即 fail-open。
  *
  * 另启动 1s 轮询：SIM 配置变化（重新保存/启用/禁用）后，即使电话栈没有新的属性写入，
  * 也主动按当前配置重写属性；禁用时放行，属性保持电话栈写入的真实值。
@@ -31,7 +35,11 @@ class SimSystemPropertyHookAdapter(
     companion object {
         private const val TAG_SCOPE = "Hook"
 
-        private const val CLASS_TELEPHONY_PROPERTIES = "android.internal.telephony.sysprop.TelephonyProperties"
+        /** Android 15 / Android 16 的 TelephonyProperties 候选类（先命中先安装）。 */
+        private val TELEPHONY_PROPERTIES_CLASSES = listOf(
+            "android.sysprop.TelephonyProperties",
+            "android.internal.telephony.sysprop.TelephonyProperties",
+        )
 
         /** sysprop setter 方法名 → 系统属性 key。 */
         private val SETTER_KEYS = mapOf(
@@ -47,10 +55,22 @@ class SimSystemPropertyHookAdapter(
     private val pollerStarted = AtomicBoolean(false)
 
     fun install(classLoader: ClassLoader): Int {
-        val clazz = HookSupport.findClass(classLoader, CLASS_TELEPHONY_PROPERTIES) ?: return 0
+        var clazz: Class<*>? = null
+        var usedClassName = ""
+        for (candidate in TELEPHONY_PROPERTIES_CLASSES) {
+            val found = HookSupport.findClass(classLoader, candidate)
+            if (found != null) {
+                clazz = found
+                usedClassName = candidate
+                break
+            }
+            ZLog.i(TAG_SCOPE, "sim property class candidate not found: $candidate")
+        }
+        val target = clazz ?: return 0
+        ZLog.i(TAG_SCOPE, "sim property class resolved: $usedClassName [Android16-compatible candidates=${TELEPHONY_PROPERTIES_CLASSES}]")
         var hooked = 0
         SETTER_KEYS.forEach { (name, key) ->
-            HookSupport.findMethods(clazz, name)
+            HookSupport.findMethods(target, name)
                 .filter { it.parameterCount == 1 && it.parameterTypes[0] == List::class.java }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
@@ -76,13 +96,13 @@ class SimSystemPropertyHookAdapter(
                     }
                     if (ok) {
                         hooked++
-                        ZLog.i(TAG_SCOPE, "hooked TelephonyProperties.$name -> $key")
+                        ZLog.i(TAG_SCOPE, "hooked $usedClassName.$name -> $key")
                     }
                 }
         }
         if (hooked > 0) {
             startPoller()
-            ZLog.i(TAG_SCOPE, "sim system-property hooks active on $CLASS_TELEPHONY_PROPERTIES hooked=$hooked")
+            ZLog.i(TAG_SCOPE, "sim system-property hooks active on $usedClassName hooked=$hooked")
         }
         return hooked
     }
