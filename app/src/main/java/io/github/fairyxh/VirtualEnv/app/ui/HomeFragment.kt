@@ -161,7 +161,7 @@ class HomeFragment : Fragment() {
 
     /** 已保存采集卡导入导出选择模式（复选框单选，一次只处理一份）。 */
     private var savedTransferMode by mutableStateOf(false)
-    private var transferSelected: SavedItem? = null
+    private var transferSelected by mutableStateOf<SavedItem?>(null)
 
     private val importVrenvLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -736,7 +736,11 @@ class HomeFragment : Fragment() {
                         BasicText(
                             playbackSelected.ifBlank { getString(R.string.home_playback_none) },
                             Modifier.padding(top = 6.dp),
-                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            style = TextStyle(
+                                color = if (playbackSelected.isNotBlank()) colors.accent else colors.textSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = if (playbackSelected.isNotBlank()) FontWeight.SemiBold else FontWeight.Normal
+                            )
                         )
                         GlassButton(
                             onClick = { fragment.enableSelectedPlayback() },
