@@ -3,6 +3,8 @@
 > 分析材料：`Adapt\Android 16\framework.jar`（6 dex）、`services.jar`（4 dex）、`Bluetooth.apk`、`TeleService.apk`、`FusedLocation.apk`、`OplusLocationService.apk`（JADX MCP 实析 + dex 字节扫描）
 > 分析方法：逐 Hook 点比对 Android 15 基线签名与 Android 16 实际类/方法；分类 A=完全兼容、B=方法签名变化、C=类结构变化、D=调用链变化、E=字段变化、F=Hook 点消失、G=Hook 点迁移、H=需要全新实现、I=Android 16 不需要 Hook
 
+> **第二阶段勘误（2026-08-16，无真机静态验证）**：本文档第一阶段基于 dex 字符串扫描，部分 SIM 结论需修正——精确 DEX method_id 解析显示 Android 16 的 `PhoneInterfaceManager`（ITelephony.Stub 实现）**只声明** getAllCellInfo/getCellLocation/getDataNetworkType/getNeighboringCellInfo/getNetworkCountryIsoForPhone/getSignalStrength/requestCellInfoUpdate 等少量方法，`getSimOperator/getSimOperatorName/getSubscriberId/getIccSerialNumber/getLine1Number/getImei/getMeid/getNetworkOperator/getNetworkCountryIso/getMsisdn/getVoiceMailNumber/getSimState/getPhoneType/getPhoneCount` **已从 ITelephony Binder 服务端移除**（声明在 TelephonyManager 客户端 / Phone 抽象基类 / IPhoneSubInfo 接口）。另确认 `TelephonyProperties` 类从 `android.internal.telephony.sysprop` 迁移到 **`android.sysprop`**（setter 签名一致）。完整验证等级见 `Android16_Hook_Signature_Report.md`；缺失材料见 `Android16_Missing_Materials.md`。
+
 ---
 
 ## 汇总表
@@ -79,33 +81,33 @@ isProviderEnabledForUser(String, int) : boolean
 
 ### 2.1 PhoneInterfaceManager（TeleService.apk dex 扫描确认）
 
-**关键差异（B 类）：**
+**关键差异（B 类）——含第二阶段勘误：**
 
 | Android 15（含变体） | Android 16 实际方法 |
 |---|---|
-| getSimOperator / getSimOperatorForSubscriber / getSimOperatorWithFeature | **getSimOperator**（无后缀） |
-| getSimOperatorName / +ForSubscriber / +WithFeature | **getSimOperatorName** |
-| getSimCountryIso / +变体 | **getSimCountryIso** |
-| getSimSerialNumber | **getSimSerialNumber** |
-| getSubscriberId / +ForSubscriber / +WithFeature | **getSubscriberId** |
-| getIccSerialNumber / +变体 | **getIccSerialNumber** |
-| getLine1Number / +变体 | **getLine1Number** |
-| getDeviceId / +变体 | **getDeviceId** |
-| getImei / +变体 | **getImei** / **getImeiForSlot** |
-| getMeid / +变体 | **getMeid** / **getMeidForSlot** |
-| getNetworkOperator / +变体 | **getNetworkOperator** |
-| getNetworkOperatorName / +变体 | getSimOperatorName 相关（无独立 getNetworkOperatorName 命中，需注意） |
-| getNetworkCountryIso / +变体 | **getNetworkCountryIso** / **getNetworkCountryIsoForPhone** |
-| getMsisdn / +变体 | **getMsisdn** |
-| getVoiceMailNumber / +变体 | **getVoiceMailNumber** |
-| getSimState / +变体 | **getSimState** |
-| getPhoneType / +变体 | **getPhoneType** |
-| getPhoneCount | **getPhoneCount** |
-| getDataNetworkType / +变体 | **getDataNetworkType** |
-| getVoiceNetworkType / +变体 | **getVoiceNetworkType** |
-| — | **新增 getSimOperatorNameForPhone / getNetworkOperatorForPhone / getNetworkCountryIsoForPhone / getSimOperatorNumericForPhone / getSimOperatorGemini / getSubscriberIdGemini / getSimStateGemini** |
+| getSimOperator / getSimOperatorForSubscriber / getSimOperatorWithFeature | **不在 ITelephony Binder 服务端**（声明在 android.telephony.TelephonyManager 客户端） |
+| getSimOperatorName / +ForSubscriber / +WithFeature | **不在 PhoneInterfaceManager**（客户端 TelephonyManager） |
+| getSimCountryIso / +变体 | **不在 PhoneInterfaceManager**（客户端） |
+| getSimSerialNumber | **不在 PhoneInterfaceManager**（客户端） |
+| getSubscriberId / +ForSubscriber / +WithFeature | **不在 PhoneInterfaceManager**（IPhoneSubInfo 接口 / Phone 抽象基类） |
+| getIccSerialNumber / +变体 | **不在 PhoneInterfaceManager**（IPhoneSubInfo / Phone） |
+| getLine1Number / +变体 | **不在 PhoneInterfaceManager**（IPhoneSubInfo / Phone） |
+| getDeviceId / +变体 | **getDeviceId**（PhoneInterfaceManager 声明存在） |
+| getImei / +变体 | **getImeiForSlot**（PhoneInterfaceManager） |
+| getMeid / +变体 | **getMeidForSlot**（PhoneInterfaceManager） |
+| getNetworkOperator / +变体 | **不在 PhoneInterfaceManager**（客户端 TelephonyManager） |
+| getNetworkOperatorName / +变体 | 未在服务端确认 |
+| getNetworkCountryIso / +变体 | **getNetworkCountryIsoForPhone**（PhoneInterfaceManager 声明存在） |
+| getMsisdn / +变体 | **不在 PhoneInterfaceManager**（IPhoneSubInfo / ImsPhone） |
+| getVoiceMailNumber / +变体 | **不在 PhoneInterfaceManager**（IPhoneSubInfo / Phone） |
+| getSimState / +变体 | **getSimStateForSlotIndex**（PhoneInterfaceManager） |
+| getPhoneType / +变体 | 不在 PhoneInterfaceManager（Phone 抽象基类） |
+| getPhoneCount | 不在 PhoneInterfaceManager（客户端 TelephonyManager） |
+| getDataNetworkType / +变体 | **getDataNetworkType / getDataNetworkTypeForSubscriber**（PhoneInterfaceManager 声明存在） |
+| getVoiceNetworkType / +变体 | **getVoiceNetworkTypeForSubscriber**（PhoneInterfaceManager 声明存在） |
+| — | **新增 getNetworkCountryIsoForPhone / getSimOperatorNameForPhone / getNetworkOperatorForPhone / getSimOperatorNumericForPhone / getSimOperatorForPhone**（其中仅 getNetworkCountryIsoForPhone 在 PhoneInterfaceManager 声明，其余在客户端 TelephonyManager） |
 
-**结论**：现有 STRING_METHODS / INT_METHODS 列表已包含所有无后缀方法名，Android 16 上**无需改方法列表即可命中核心字段**。ForSubscriber/WithFeature 变体在 Android 16 找不到（跳过，无害，fail-open）。可选增强：追加 `getSimOperatorNameForPhone` / `getNetworkOperatorForPhone` / `getNetworkCountryIsoForPhone` / `getSimOperatorNumericForPhone`（Binder 服务端最终读取路径可能走这些 ForPhone 变体）。
+**修正后结论**：Android 16 的 SIM 身份虚拟化**不能依赖 PhoneInterfaceManager 无后缀方法**（大部分已移除）。核心覆盖路径为：Phone 对象层（GsmCdmaPhone/Phone，类体在 telephony-common.jar）+ IPhoneSubInfo 实现（PhoneSubInfoController，同缺）+ TelephonyProperties 属性层（类迁移到 `android.sysprop`，代码已适配）。现有 STRING_METHODS / INT_METHODS 列表保留全部候选无害（找不到即 fail-open）。
 
 ### 2.2 PhoneSubInfoController
 

@@ -31,12 +31,14 @@
 ```
 android14.json  minSdk<=34
 android15.json  minSdk=35 maxSdk=35   ← 2026-08 收窄，防止覆盖 API 36
-android16.json  minSdk=36 maxSdk=99   ← 新增
-android17.json  minSdk=37 maxSdk=37   ← 未来新增（注意收窄 16 的 maxSdk）
+android16.json  minSdk=36 maxSdk=36   ← 2026-08 第二阶段收窄，防止覆盖 API 37
+android17.json  minSdk=37 maxSdk=37   ← 未来新增
 default.json    兜底
 ```
 
-规则：未来 Android 17 适配时，把 android16.json 的 maxSdk 收窄到 36，新增 android17.json（minSdk=37, maxSdk=37）。每代新增一个 profile，不改旧 profile 的 Hook 逻辑。
+规则：未来 Android 17 适配时，把 android16.json 的 maxSdk 收窄到 36（已完成），新增 android17.json（minSdk=37, maxSdk=37）。每代新增一个 profile，不改旧 profile 的 Hook 逻辑。
+
+**无对应版本配置时的行为（已确认，不误选）**：ProfileManager.select 按 `device="*" && sdkInRange` 顺序遍历（zip 字典序 android14 < android15 < android16 < default）。API 37 且尚未建立 android17.json 时，android14/15/16 均不匹配，将回退 **default.json**（device="*"、minSdk=0、maxSdk=99），**不会误选 android16.json**。default.json 是通用兜底 Profile，并非版本错误；如不希望回退，需在拿到 API 37 材料后立即建立 android17.json。
 
 ### 2.2 Adapter 内候选列表（运行时机制）
 
