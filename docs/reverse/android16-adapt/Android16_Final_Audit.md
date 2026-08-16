@@ -1,7 +1,7 @@
 # Android 16 适配最终审计报告（Android16_Final_Audit.md）
 
 > 审计时间：2026-08-16
-> 审计范围：Android 16 适配第一、二阶段全部成果 + 封版审计
+> 审计范围：Android 16 适配第一、二阶段全部成果 + 封版审计 + **补充材料审计（telephony-common / oplus-framework / oplus-wifi-service / oplus-telephony-common / oplus-telephony-common-ext 已获得并分析）**
 > 审计原则：不猜测真机行为、不伪造运行结果、不改动已确认代码；仅修复明确的 P0/P1 级错误
 
 ---
@@ -41,19 +41,18 @@
 
 ---
 
-## 4. Android 16 未确认内容（PARTIAL / REQUIRES_DEVICE / UNKNOWN）
+## 4. Android 16 未确认内容（PARTIAL / REQUIRES_DEVICE / UNKNOWN）— 补充材料后更新
 
 | 项目 | 等级 | 原因 |
 |---|---|---|
-| PhoneSubInfoController 实现类 | PARTIAL | IPhoneSubInfo 接口确认，实现类体在 telephony-common.jar（缺失） |
-| GsmCdmaPhone / Phone 对象层 | PARTIAL | Phone 抽象方法名确认，类体在 telephony-common.jar（缺失） |
-| SubscriptionManagerService / SubscriptionInfoInternal | PARTIAL | ISub 接口确认，实现类体缺失 |
-| RIL 类体 | PARTIAL | RIL 类型引用存在，类体可能 telephony-common.jar |
-| WiFi（WifiServiceImpl 动态类） | REQUIRES_DEVICE | wifi APEX 动态发现，材料无 wifi-service.jar |
+| WiFi（WifiServiceImpl 动态类） | REQUIRES_DEVICE | wifi APEX 动态发现；oplus-wifi-service 仅含 Oplus 扩展（已排除）；AOSP 类名需真机/service-wifi.jar |
 | FGS 新逻辑（USE_NEW_BFSL_LOGIC / USE_NEW_WIU_LOGIC_*） | REQUIRES_DEVICE | 新常量/新方法存在，旧字段 mAllowStart_* 路径是否仍生效仅真机可确认 |
-| IActiveServicesExt 接口 default 命中 | REQUIRES_DEVICE | 实现类（oplus-framework.jar）可能 override，仅真机可确认 |
+| IActiveServicesExt 接口 default 命中 | REQUIRES_DEVICE | 接口签名 VERIFIED；实现类不在 oplus-framework.jar（已排除），可能在 oplus-system-server.jar；是否 override 仅真机可确认 |
 | SIM 属性实际调用链 | REQUIRES_DEVICE | android.sysprop.TelephonyProperties 类体确认，TelephonyManager 是否实际经该类 setter 写属性仅真机可确认 |
-| ActiveServicesExtImpl 实现类位置 | UNKNOWN | 材料中未发现，可能在 oplus-framework.jar |
+| OplusRilImpl 虚拟 modem 分支 | REQUIRES_DEVICE | OplusRilImpl.getCellInfoList(Message) 确认存在，但仅在 isWorkingOnVirtualModem && isVirtualcommDevice 时拦截，非本模块主路径 |
+| ActiveServicesExtImpl 实现类位置 | UNKNOWN | oplus-framework.jar 中无（6504+1284 类 0 命中），可能在 oplus-system-server.jar |
+
+**已确认（补充材料后从 PARTIAL 升级为 VERIFIED_STATIC）**：PhoneSubInfoController / GsmCdmaPhone / Phone / SubscriptionManagerService / SubscriptionInfoInternal / RIL 类体与签名全部确认（见 Signature Report 第 9 节）。
 
 ---
 
@@ -140,13 +139,16 @@ ApiClient GET /api/location/status → NetworkOnMainThreadException
 
 ## 9. 缺失材料
 
-| 材料 | 影响 | 未来获得后验证方式 |
-|---|---|---|
-| telephony-common.jar | PhoneSubInfoController / GsmCdmaPhone / Phone / SubscriptionManagerService / SubscriptionInfoInternal / RIL 类体 | adb pull /system/framework/telephony-common.jar → JADX 核对实现类方法与签名 → 补全 Signature Report 对应 PARTIAL 项 |
-| oplus-framework.jar | IActiveServicesExt 实现类（决定接口 default Hook 是否足够） | adb pull /system/framework/oplus-framework.jar → 找实现类名与 override 情况 |
-| wifi-service.jar | WifiServiceImpl 动态类 | adb pull /apex/com.android.wifi/javalib/service-wifi.jar → 核对类名与方法签名 |
+| 材料 | 状态 | 影响 | 未来获得后验证方式 |
+|---|---|---|---|
+| telephony-common.jar | ✅ 已获得并分析（2026-08-16） | H107/H108/H111/H024 已升级 VERIFIED_STATIC | — |
+| oplus-framework.jar | ✅ 已获得并分析（无 ActiveServicesExt 实现类） | H023 实现类位置 UNKNOWN 保留 | — |
+| oplus-wifi-service.jar | ✅ 已获得并分析（仅 Oplus 扩展，非 AOSP 目标） | H012-H015 仍 REQUIRES_DEVICE | — |
+| oplus-telephony-common.jar / ext | ✅ 已获得并分析（Oplus 扩展路径，不需额外 Hook） | 不影响 | — |
+| oplus-system-server.jar（或同类 oplus-services jar） | ❌ 仍缺失 | H023 IActiveServicesExt 实现类 | adb pull 后搜索 implements IActiveServicesExt，确认是否 override |
+| wifi-service.jar（AOSP wifi APEX） | ❌ 仍缺失 | H012-H015 WifiServiceImpl 类名 | adb pull /apex/com.android.wifi/javalib/service-wifi.jar，核对 4 个方法签名 |
 
-详见 `Android16_Missing_Materials.md`。
+详见 `Android16_Missing_Materials.md`（已更新）。
 
 ---
 
@@ -191,6 +193,7 @@ Android 16 真机验证：未进行
 
 | 级别 | 修改 | Commit |
 |---|---|---|
-| P0 | `VirtualEnvEntry.readSimProfileConfig` SDK 精确匹配（API 37+ 不误选 android16） | 本阶段提交 |
+| P0 | `VirtualEnvEntry.readSimProfileConfig` SDK 精确匹配（API 37+ 不误选 android16） | bd0b908 |
+| P1 | `RilDefensiveHookAdapter` 匹配 Android 16 2 参 `RIL.getCellInfoList(Message, WorkSource)`（补充材料审计发现） | c2f6afa |
 
 其余全部为审计确认，无其他代码修改。

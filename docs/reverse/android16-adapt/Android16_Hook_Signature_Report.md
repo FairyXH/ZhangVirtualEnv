@@ -1,21 +1,22 @@
 # Android 16 Hook Signature Report（静态验证）
 
 > 生成时间：2026-08-16（第二阶段：无真机静态验证）
-> 分析材料：`Adapt\Android 16\framework.jar`（6 dex）、`services.jar`（4 dex）、`Bluetooth.apk`、`TeleService.apk`、`FusedLocation.apk`、`OplusLocationService.apk`
+> 补充材料分析：2026-08-16 封版后获得 `telephony-common.jar` / `oplus-framework.jar` / `oplus-wifi-service.jar` / `oplus-telephony-common.jar` / `oplus-telephony-common-ext.jar`，已完成补充分析（见"补充材料结论"）
+> 分析材料：`Adapt\Android 16\framework.jar`（6 dex）、`services.jar`（4 dex）、`Bluetooth.apk`、`TeleService.apk`、`FusedLocation.apk`、`OplusLocationService.apk` + 补充 5 jar
 > 验证方式：JADX MCP（get_class_source / get_methods_of_class / get_method_by_name / get_fields_of_class）+ DEX 二进制精确解析（method_id / class_defs）
 > 验证等级：`VERIFIED_STATIC` = 通过 Android 16 实际提取文件确认；`PARTIAL_STATIC` = 部分确认但材料缺失；`UNKNOWN` = 无法确定；`REQUIRES_DEVICE` = 需真机确认
-> **注意：本报告修正第一阶段部分过度乐观结论（SIM 层）。**
+> **注意：本报告修正第一阶段部分过度乐观结论（SIM 层），并在补充材料后升级多项验证等级。**
 
 ---
 
-## 0. 结论摘要
+## 0. 结论摘要（补充材料后更新）
 
 | 分类 | 数量 | 说明 |
 |---|---|---|
-| VERIFIED_STATIC | 21 | Location / GNSS / WiFi / BT 身份 / 经典蓝牙 / BLE 新落点 / AM ext 接口 / TelephonyRegistry / RIL / 框架层 |
-| PARTIAL_STATIC | 5 | PhoneSubInfoController / GsmCdmaPhone / Subscription 层 / SIM ForPhone 变体 / FGS 新逻辑 |
-| UNKNOWN | 1 | ActiveServicesExtImpl 实现类位置 |
-| REQUIRES_DEVICE | 5 | 接口 default 方法命中 / FGS 字段写入 / WifiServiceImpl 类名 / Subscription 类加载 / SIM 系统属性调用链 |
+| VERIFIED_STATIC | 25 | Location / GNSS / WiFi 机制 / BT 身份 / 经典蓝牙 / BLE 新落点 / AM ext 接口 / TelephonyRegistry / RIL / 基站 / SIM PhoneSubInfo / SIM Phone 对象 / Subscription / 框架层 |
+| PARTIAL_STATIC | 2 | WifiServiceImpl 动态类（oplus-wifi-service 仅含 Oplus 扩展）；OplusRilImpl 虚拟 modem 分支 |
+| UNKNOWN | 1 | ActiveServicesExtImpl 实现类位置（oplus-framework 已排除） |
+| REQUIRES_DEVICE | 5 | 接口 default 方法命中 / FGS 字段写入 / WifiServiceImpl 类名 / SIM 属性调用链 / OplusRilImpl 虚拟 modem 是否启用 |
 
 ---
 
@@ -170,13 +171,13 @@ getNetworkCountryIsoForPhone / getSignalStrength / requestCellInfoUpdate / getDe
 | H103 | `getCellLocation` | **VERIFIED_STATIC** |
 | H104 | `getNeighboringCellInfo` | **VERIFIED_STATIC** |
 
-### 3.3 SimTelephonyHookAdapter（H105-H109）
+### 3.3 SimTelephonyHookAdapter（H105-H109）— 补充材料后升级
 
 | Hook | Class | Method | 验证状态 |
 |---|---|---|---|
 | H105/106 | PhoneInterfaceManager | 无后缀方法（getSimOperator 等） | **PARTIAL_STATIC**：该层只剩少量方法可命中；其余依赖 Phone/PhoneSubInfo 层 |
-| H107 | `com.android.internal.telephony.PhoneSubInfoController`（IPhoneSubInfo.Stub 实现） | getSubscriberIdForSubscriber 等 | **PARTIAL_STATIC**：IPhoneSubInfo 接口存在（VERIFIED），但实现类体在 telephony-common.jar（缺失） |
-| H108 | `com.android.internal.telephony.GsmCdmaPhone` / `Phone` | getSubscriberId/getIccSerialNumber/getImei/getLine1Number/getMeid/getDeviceId/getVoiceMailNumber/getPhoneType/getSignalStrength（Phone 抽象类声明） | **PARTIAL_STATIC**：Phone 方法名在 framework 引用中存在，类体在 telephony-common.jar |
+| H107 | `com.android.internal.telephony.PhoneSubInfoController`（telephony-common.jar 类体确认） | `getSubscriberIdForSubscriber(int, String, String)`、`getIccSerialNumberForSubscriber`、`getLine1NumberForSubscriber`、`getImeiForSubscriber`、`getMsisdnForSubscriber`、`getVoiceMailNumberForSubscriber`（3 参 String 返回）；无后缀 `getSubscriberId(int)` / `getIccSerialNumber(int)` / `getLine1Number(int)` / `getDeviceId(int)` / `getMsisdn(int)` / `getVoiceMailNumber(int)` 均存在 | **VERIFIED_STATIC**（类体 + 签名 JADX 确认；Hook 过滤 returnType==String 不限制参数数，命中） |
+| H108 | `com.android.internal.telephony.GsmCdmaPhone` / `Phone`（telephony-common.jar 类体确认） | GsmCdmaPhone：`getDeviceId()/getIccSerialNumber()/getLine1Number()/getMeid()/getMsisdn()/getPhoneType()/getSubscriberId()/getVoiceMailNumber()` 0 参 String 均存在；Phone：getAllCellInfo/requestCellInfoUpdate/getIccSerialNumber/getMsisdn/getPhoneType/getSignalStrength | **VERIFIED_STATIC**（类体 + 签名确认；Hook 过滤 returnType==String && paramCount<=1，命中） |
 | ForPhone 变体 | PhoneInterfaceManager | `getNetworkCountryIsoForPhone` **存在**；`getSimOperatorNameForPhone / getNetworkOperatorForPhone / getSimOperatorNumericForPhone / getSimOperatorForPhone` **不在 PhoneInterfaceManager**（声明于 TelephonyManager 客户端） | **PARTIAL_STATIC**：候选保留无害（找不到跳过），实际命中仅 getNetworkCountryIsoForPhone |
 
 ### 3.4 SimSystemPropertyHookAdapter（H110）— 关键修正
@@ -190,21 +191,22 @@ getNetworkCountryIsoForPhone / getSignalStrength / requestCellInfoUpdate / getDe
 | 验证状态 | **VERIFIED_STATIC**（新类路径 + setter 签名）；Hook 代码已增加双候选 |
 | 备注 | 旧路径 `android.internal.telephony.sysprop.TelephonyProperties` 在提供的 6 个 dex 中**不存在**（0 命中）→ Android 16 上旧候选失败、新候选成功 |
 
-### 3.5 RilDefensiveHookAdapter（H111）
+### 3.5 RilDefensiveHookAdapter（H111）— 补充材料后升级 + 代码修复
 
 | 字段 | 值 |
 |---|---|
-| Class | `com.android.internal.telephony.RIL`（framework_classes4/5 引用命中） |
-| Method | 动态匹配 `*CellInfo*` / `*SignalStrength*` + Message 参数 |
-| 验证状态 | **PARTIAL_STATIC**：RIL 类引用存在，类体可能在 telephony-common.jar |
+| Class | `com.android.internal.telephony.RIL`（telephony-common.jar 类体确认） |
+| Method | `getSignalStrength(Message): void`（1 参，命中）；`getCellInfoList(Message, WorkSource): void`（**2 参**，JADX 确认）；`setCellInfoListRate(Message, ...)` 等 |
+| 验证状态 | **VERIFIED_STATIC**（类体 + 签名确认） |
+| 备注 | **P1 修复（2026-08-16 补充材料审计）**：原 Hook 过滤 `parameterCount == 1` 会漏掉 Android 16 的 2 参 `getCellInfoList(Message, WorkSource)`，已改为 `parameterCount >= 1 && parameterTypes[0] == Message`（RilDefensiveHookAdapter.kt，commit c2f6afa）。Oplus 扩展 `com.oplus.internal.telephony.OplusRilImpl.getCellInfoList(Message)`（oplus-telephony-common.jar 确认）是 Oplus 虚拟 modem 分支，仅在 `isWorkingOnVirtualModem && isVirtualcommDevice` 时拦截，不属于本模块虚拟基站主路径（REQUIRES_DEVICE 子项） |
 
-### 3.6 Subscription（H024）
+### 3.6 Subscription（H024）— 补充材料后升级
 
 | 字段 | 值 |
 |---|---|
-| Class | `com.android.internal.telephony.subscription.SubscriptionManagerService` / `SubscriptionInfoInternal` / `ISub` |
-| 材料状态 | `ISub` / `ISub$Stub` / `ISub$Default` 在 framework_classes5.dex **声明**（VERIFIED）；`SubscriptionManagerService` / `SubscriptionInfoInternal` 类体**未在提供材料中声明**（仅 TeleService/framework 类型引用） |
-| 验证状态 | **PARTIAL_STATIC**：ISub 接口存在；实现类体在 telephony-common.jar（缺失） |
+| Class | `com.android.internal.telephony.subscription.SubscriptionManagerService` / `SubscriptionInfoInternal` / `ISub`（telephony-common.jar 类体确认） |
+| Method | `getActiveSubscriptionInfoList(String, String, boolean): List<SubscriptionInfo>`（JADX 确认）、`getActiveSubscriptionInfoForSimSlotIndex`、`getSubscriptionInfo`、`getSubscriptionInfoInternal`、`getDefaultDataSubId()/getDefaultSmsSubId()/getDefaultVoiceSubId()/getDefaultSubId()`（0 参 int）；`SubscriptionInfoInternal.toSubscriptionInfo(): SubscriptionInfo`（0 参，JADX 确认） |
+| 验证状态 | **VERIFIED_STATIC**（类体 + 签名确认；Hook 按返回类型 List/SubscriptionInfo 过滤不限制参数数，命中；INT_METHODS 过滤 parameterCount==0，命中默认 ID 方法） |
 
 ### 3.7 TelephonyRegistry（H025）
 
@@ -295,8 +297,24 @@ getNetworkCountryIsoForPhone / getSignalStrength / requestCellInfoUpdate / getDe
 
 ---
 
-## 9. 结论
+## 9. 补充材料结论（2026-08-16 封版后）
+
+新增 `telephony-common.jar` / `oplus-framework.jar` / `oplus-wifi-service.jar` / `oplus-telephony-common.jar` / `oplus-telephony-common-ext.jar` 后：
+
+| 材料 | 结论 | 验证等级变化 |
+|---|---|---|
+| telephony-common.jar | PhoneSubInfoController / GsmCdmaPhone / Phone / SubscriptionManagerService / SubscriptionInfoInternal / RIL **类体全部存在**，关键方法签名与 Hook 过滤兼容；RIL.getCellInfoList 为 2 参（已修复 Hook） | PARTIAL → **VERIFIED_STATIC**（H107/H108/H111/H024） |
+| oplus-framework.jar | **无 ActiveServicesExt 实现类**（6504+1284 类扫描 0 命中）→ IActiveServicesExt 实现类不在该 jar，可能在未提供的 oplus-system-server/oplus-services jar；ActiveServices 中 mActiveServicesExt 的实例化方式未确认 | UNKNOWN 保留（范围收窄） |
+| oplus-wifi-service.jar | 仅含 `OplusWifiServiceImpl`（Oplus 扩展）与 `com.android.server.wifi.interfaces/*`；**不含 AOSP `com.android.server.wifi.WifiServiceImpl`**（仍在 wifi APEX）→ 动态发现机制不变 | REQUIRES_DEVICE 保留 |
+| oplus-telephony-common.jar | `OplusRilImpl.getCellInfoList(Message)`（Oplus 虚拟 modem 分支）、`OplusGsmCdmaPhoneImpl`（getSubscriberId/getIccSerialNumber 扩展）、`OplusPhoneImpl` 存在；均为 Oplus 扩展路径，不改变本模块主 Hook | PARTIAL（记录，不需 Hook） |
+| oplus-telephony-common-ext.jar | `OplusPhoneInterfaceManagerExt`（AT 命令/属性扩展）无 SIM 身份目标 | 不影响 |
+
+---
+
+## 10. 结论
 
 - **Location / GNSS / 经典蓝牙 / BT 身份 / BLE 新落点 / AM ext 接口 / 基站 / TelephonyRegistry / WiFi 机制 / 框架层**：静态签名全部确认（VERIFIED_STATIC），Android 16 上应正常工作（除 WifiServiceImpl 类名待真机）。
-- **SIM 层**：第一阶段的"无后缀方法自动覆盖"结论需要修正——Android 16 的 PhoneInterfaceManager 上大部分 SIM 方法已不存在；核心覆盖依赖 Phone 对象层 + IPhoneSubInfo + TelephonyProperties（类路径已迁移到 android.sysprop，代码已适配）。Phone/PhoneSubInfo/Subscription 类体在 telephony-common.jar（缺失材料）。
+- **SIM 层（补充材料后）**：PhoneSubInfoController / GsmCdmaPhone / Phone / SubscriptionManagerService / SubscriptionInfoInternal / RIL 类体与签名全部确认（VERIFIED_STATIC）；唯一剩余不确定性是 SIM 系统属性调用链（android.sysprop.TelephonyProperties 是否实际被 TelephonyManager 属性读取路径调用）→ REQUIRES_DEVICE。
+- **RIL**：发现并修复 Android 16 `getCellInfoList(Message, WorkSource)` 2 参签名差异（commit c2f6afa）。
+- **IActiveServicesExt**：接口签名 VERIFIED_STATIC；实现类不在 oplus-framework.jar（UNKNOWN），接口 default 是否被 override 仅真机可确认（REQUIRES_DEVICE）。
 - **所有新增 Hook 均 fail-open**：找不到类/方法/字段时跳过，不影响其它 Hook 与 Android 15 路径。
