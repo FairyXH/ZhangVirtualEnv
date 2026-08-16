@@ -13,21 +13,27 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 全局系统传感器后端（SensorService Data Injection）。
+ * 全局系统传感器后端（SensorService 系统级注入，两种通道）。
  *
- * 运行在 **system_server** 进程。通过 Android @SystemApi
- * `SensorManager.initDataInjection / injectSensorData` 向 SensorService
- * 注入真实传感器 handle 的虚拟数据，事件经原生共享内存分发到**所有 App**，
- * 无需任何第三方 App 作用域。
+ * 运行在 **system_server** 进程。
  *
- * 能力探测：
- * 1. mode=4（HAL_BYPASS_REPLAY）：优先，绕过 `sensor.isDataInjectionSupported()` 限制；
- * 2. mode=1（DATA_INJECTION）：回退，要求 native 支持且传感器 flag 支持注入。
+ * 通道 1（首选）：`SensorManager.initDataInjection / injectSensorData`
+ * （@SystemApi，Oplus 15 实测 MODE_NOT_SUPPORTED，native 未实现）。
  *
- * 失败保护（fail-open）：
- * - `initDataInjection` 失败 → 停止并报告 MODE_NOT_SUPPORTED，由 Manager 切换 LEGACY；
- * - 每次 `injectSensorData` try/catch，异常仅记日志，绝不抛到系统调用栈；
- * - `stop()` 调用 `initDataInjection(false)` 恢复原生事件流。
+ * 通道 2（回退，Oplus 15 实证可用）：`SensorService.sendRuntimeSensorEventNative`
+ * （public static native，JADX 实证签名 `(long mPtr, int handle, int type,
+ * long timestampNanos, float[] values):boolean`）。
+ * 绕过 Java 层 `LocalService.sendSensorEvent` 的 mRuntimeSensorHandles 检查，
+ * 直接以**真实传感器 handle** 调用 native：JNI 桥不校验 handle 是否 runtime sensor，
+ * 反汇编确认最终调用 `SensorService::sendRuntimeSensorEvent(sensors_event_t&)`，
+ * 该函数仅加锁 → 事件入队 → notify_all → SensorThread 全局分发（共享内存 →
+ * 所有注册该 handle 的 App），无需任何 App 作用域。
+ * type 白名单掩码 0x4efc631e0 / 0x61e 之外（如 STEP_COUNTER=19）传 values.length>=17
+ * 走 memcpy(80B) 分支后同样进入分发；STEP_DETECTOR(18) 走单值分支；
+ * ACCELEROMETER(1) 走三值分支。
+ *
+ * 失败保护（fail-open）：所有反射/注入 try/catch，异常仅记日志；
+ * stop() 仅停止调度（通道 2 无状态，无需恢复原生）。
  */
 class SystemSensorBackend(
     private val sensorManagerProvider: () -> SensorManager?,
@@ -40,6 +46,9 @@ class SystemSensorBackend(
         /** DATA_INJECTION / REPLAY / HAL_BYPASS_REPLAY（对应 SystemSensorManager switch 分支）。 */
         private const val MODE_DATA_INJECTION = 1
         private const val MODE_HAL_BYPASS_REPLAY = 4
+
+        /** 通道 2：SensorService.sendRuntimeSensorEventNative（native 事件注入）。 */
+        private const val MODE_RUNTIME_EVENT_NATIVE = 10
 
         /** 各类型注入周期：步频按 stepFrequency 动态，加速度固定 100ms。 */
         private const val ACCEL_PERIOD_MS = 100L
@@ -68,6 +77,9 @@ class SystemSensorBackend(
     private var scheduler: ScheduledExecutorService? = null
     private var activeMode: Int = -1
 
+    /** 通道 2：SensorService 实例 mPtr（反射获取，native 句柄）。 */
+    private var nativeSensorServicePtr: Long = 0L
+
     @Volatile
     private var started = false
 
@@ -86,7 +98,16 @@ class SystemSensorBackend(
                 ZLog.w(TAG_SCOPE, "SystemSensorBackend start failed: SensorManager unavailable")
                 return
             }
-            val mode = detectInjectionMode(sm)
+            var mode = detectInjectionMode(sm)
+            if (mode < 0) {
+                // 通道 1 不可用：尝试通道 2（SensorService.sendRuntimeSensorEventNative）
+                val ptr = resolveSensorServicePtr()
+                if (ptr != 0L) {
+                    mode = MODE_RUNTIME_EVENT_NATIVE
+                    nativeSensorServicePtr = ptr
+                    ZLog.i(TAG_SCOPE, "Data Injection unavailable, using SensorService native runtime event channel (ptr=${ptr})")
+                }
+            }
             if (mode < 0) {
                 reason = "MODE_NOT_SUPPORTED"
                 ZLog.w(TAG_SCOPE, "[!] Sensor injection unavailable\nReason: MODE_NOT_SUPPORTED\nFallback: LEGACY App Hook enabled")
@@ -102,17 +123,20 @@ class SystemSensorBackend(
             ZLog.i(TAG_SCOPE, "[✓] System injection available (mode=$mode)\nSelected backend: SYSTEM")
             startSchedules(exec)
             if (entries.isEmpty()) {
-                // 找不到任何可注入的传感器：禁用注入，避免 SensorService 进入注入模式却无数据
-                ZLog.w(TAG_SCOPE, "[!] No target sensors found for injection, disabling data injection")
+                // 找不到任何可注入的传感器：禁用注入（通道 1 需恢复，通道 2 无状态）
+                ZLog.w(TAG_SCOPE, "[!] No target sensors found for injection, disabling system injection")
                 started = false
                 reason = "NO_TARGET_SENSOR"
                 exec.shutdownNow()
                 scheduler = null
-                try {
-                    invokeInitDataInjection(sm, false, activeMode)
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "disable data injection after no-sensor failed", t)
+                if (activeMode == MODE_HAL_BYPASS_REPLAY || activeMode == MODE_DATA_INJECTION) {
+                    try {
+                        invokeInitDataInjection(sm, false, activeMode)
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "disable data injection after no-sensor failed", t)
+                    }
                 }
+                nativeSensorServicePtr = 0L
                 activeMode = -1
             }
         }
@@ -126,15 +150,20 @@ class SystemSensorBackend(
             entries.clear()
             scheduler?.shutdownNow()
             scheduler = null
-            val sm = sensorManagerProvider()
-            if (sm != null) {
-                try {
-                    invokeInitDataInjection(sm, false, activeMode)
-                    ZLog.i(TAG_SCOPE, "SystemSensorBackend stopped, data injection disabled (native restored)")
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "disable data injection failed", t)
+            if (activeMode == MODE_HAL_BYPASS_REPLAY || activeMode == MODE_DATA_INJECTION) {
+                val sm = sensorManagerProvider()
+                if (sm != null) {
+                    try {
+                        invokeInitDataInjection(sm, false, activeMode)
+                        ZLog.i(TAG_SCOPE, "SystemSensorBackend stopped, data injection disabled (native restored)")
+                    } catch (t: Throwable) {
+                        ZLog.w(TAG_SCOPE, "disable data injection failed", t)
+                    }
                 }
+            } else {
+                ZLog.i(TAG_SCOPE, "SystemSensorBackend stopped (native runtime event channel, stateless)")
             }
+            nativeSensorServicePtr = 0L
             activeMode = -1
         }
     }
@@ -223,17 +252,148 @@ class SystemSensorBackend(
         if (!started) return
         try {
             val values = engine.tick(type) ?: return
-            val sm = sensorManagerProvider() ?: return
-            val ok = invokeInjectSensorData(sm, sensor, values, 3, SystemClock.elapsedRealtimeNanos())
+            val ok = when (activeMode) {
+                MODE_RUNTIME_EVENT_NATIVE -> invokeSendRuntimeSensorEventNative(sensor, type, values)
+                else -> {
+                    val sm = sensorManagerProvider() ?: return
+                    invokeInjectSensorData(sm, sensor, values, 3, SystemClock.elapsedRealtimeNanos())
+                }
+            }
             if (ok) {
                 eventCount.incrementAndGet()
             }
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "injectSensorData type=$type failed", t)
+            ZLog.w(TAG_SCOPE, "inject sensor type=$type failed", t)
         }
     }
 
-    // ---------- @SystemApi 反射（system_server 有权限；普通 SDK 编译不可见） ----------
+    // ---------- 通道 2：SensorService.sendRuntimeSensorEventNative（system_server 反射） ----------
+
+    /**
+     * 解析 SensorService 实例的 native mPtr。
+     *
+     * 路径：LocalServices.getService(SensorManagerInternal.class) → LocalService
+     * → 内部类外引用（this$0）→ SensorService.mPtr。
+     * 失败返回 0（fail-open）。
+     */
+    private fun resolveSensorServicePtr(): Long {
+        return try {
+            val localServices = Class.forName("com.android.server.LocalServices")
+            val smiCls = Class.forName("com.android.server.sensors.SensorManagerInternal")
+            val localService = localServices.getMethod("getService", Class::class.java)
+                .invoke(null, smiCls)
+                ?: return 0L
+            val sensorService = extractOuterInstance(localService)
+                ?: return 0L
+            val ptr = readLongField(sensorService, "mPtr")
+                ?: invokeNestGetter(sensorService)
+                ?: 0L
+            ptr
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "resolve SensorService.mPtr failed", t)
+            0L
+        }
+    }
+
+    /** 反射读取内部类对象的外类引用：优先 this$0，其次按字段类型匹配。 */
+    private fun extractOuterInstance(inner: Any): Any? {
+        var cls: Class<*>? = inner.javaClass
+        while (cls != null) {
+            runCatching {
+                val f = cls.getDeclaredField("this\$0")
+                f.isAccessible = true
+                return f.get(inner)
+            }
+            runCatching {
+                val target = Class.forName("com.android.server.sensors.SensorService")
+                for (f in cls.declaredFields) {
+                    if (f.type == target) {
+                        f.isAccessible = true
+                        return f.get(inner)
+                    }
+                }
+            }
+            cls = cls.superclass
+        }
+        return null
+    }
+
+    /** 多候选读取 long 字段（R8 可能重命名）。 */
+    private fun readLongField(obj: Any, vararg names: String): Long? {
+        var cls: Class<*>? = obj.javaClass
+        while (cls != null) {
+            for (name in names) {
+                runCatching {
+                    val f = cls.getDeclaredField(name)
+                    f.isAccessible = true
+                    return f.getLong(obj)
+                }
+            }
+            cls = cls.superclass
+        }
+        return null
+    }
+
+    /** 通过 R8 Nest 桥方法读取 mPtr（`m869$$Nest$fgetmPtr` 模式）。 */
+    private fun invokeNestGetter(instance: Any): Long? {
+        return try {
+            val cls = instance.javaClass
+            for (m in cls.declaredMethods) {
+                val name = m.name
+                if (name.contains("Nest\$fgetmPtr", ignoreCase = true) || name.endsWith("\$\$Nest\$fgetmPtr")) {
+                    m.isAccessible = true
+                    return m.invoke(null, instance) as? Long
+                }
+            }
+            null
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "invoke Nest getter for mPtr failed", t)
+            null
+        }
+    }
+
+    /**
+     * 直接调用 SensorService.sendRuntimeSensorEventNative(mPtr, handle, type, ts, values)。
+     *
+     * 注意：Java 侧 LocalService.sendSensorEvent 会检查 mRuntimeSensorHandles，
+     * 这里绕过该检查用真实 handle 注入。values 长度要求：
+     * - STEP_COUNTER(19) 不在 type 掩码 → 必须 >=17（用 20 槽位）
+     * - STEP_DETECTOR(18) 单值
+     * - ACCELEROMETER(1) 三值
+     */
+    private fun invokeSendRuntimeSensorEventNative(
+        sensor: Sensor,
+        type: Int,
+        values: FloatArray
+    ): Boolean {
+        return try {
+            val ptr = nativeSensorServicePtr
+            if (ptr == 0L) return false
+            val handle = runCatching {
+                sensor.javaClass.getMethod("getHandle").invoke(sensor) as Int
+            }.getOrNull() ?: return false
+            val payload = when (type) {
+                VirtualSensorConfig.TYPE_ACCELEROMETER -> FloatArray(3).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 3)) }
+                VirtualSensorConfig.TYPE_STEP_DETECTOR -> floatArrayOf(values.firstOrNull() ?: 1f)
+                else -> FloatArray(20).also { System.arraycopy(values, 0, it, 0, minOf(values.size, 20)) }
+            }
+            val clazz = Class.forName("com.android.server.sensors.SensorService")
+            val method = clazz.getMethod(
+                "sendRuntimeSensorEventNative",
+                Long::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType,
+                FloatArray::class.java
+            )
+            (method.invoke(null, ptr, handle, type, SystemClock.elapsedRealtimeNanos(), payload) as? Boolean) == true
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "sendRuntimeSensorEventNative type=$type failed", t)
+            false
+        }
+    }
+
+    // ---------- 通道 1：@SystemApi Data Injection 反射（system_server 有权限） ----------
 
     private fun invokeInitDataInjection(sm: SensorManager, enable: Boolean, mode: Int): Boolean {
         return try {
