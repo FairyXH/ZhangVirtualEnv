@@ -489,6 +489,9 @@ class ApiServer(
     private fun envUse(body: String): ApiResult {
         val json = JSONObject(body)
         val id = json.optLong("id", -1)
+        if (!backend.isModuleEnabled()) {
+            return ApiResult.error("module disabled: enable module master switch first")
+        }
         val snapshot = backend.useEnvSnapshot(id)
             ?: return ApiResult.error("env snapshot not found or unsupported: $id")
         ZLog.i(TAG_SCOPE, "env use id=$id type=${snapshot.optString("type")}")
