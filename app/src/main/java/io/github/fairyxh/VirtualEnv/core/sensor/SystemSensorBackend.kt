@@ -278,7 +278,7 @@ class SystemSensorBackend(
      */
     private fun resolveSensorServicePtr(): Long {
         return try {
-            val sys = ClassLoader.getSystemClassLoader()
+            val sys = systemServerClassLoader() ?: return 0L
             val localServices = Class.forName("com.android.server.LocalServices", false, sys)
             val smiCls = Class.forName("com.android.server.sensors.SensorManagerInternal", false, sys)
             val localService = localServices.getMethod("getService", Class::class.java)
@@ -293,6 +293,23 @@ class SystemSensorBackend(
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "resolve SensorService.mPtr failed", t)
             0L
+        }
+    }
+
+    /** system_server 应用类加载器（含 services.jar；LSPosed 下 getSystemClassLoader 会被替换成模块 loader）。 */
+    private fun systemServerClassLoader(): ClassLoader? {
+        return try {
+            // system_server 中 com.android.server.SystemServer 由 PathClassLoader 加载（含 services.jar）
+            Class.forName("com.android.server.SystemServer").classLoader
+                ?: runCatching {
+                    val app = Class.forName("android.app.ActivityThread")
+                        .getMethod("currentApplication")
+                        .invoke(null) as? Context
+                    app?.classLoader
+                }.getOrNull()
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "resolve system_server classloader failed", t)
+            null
         }
     }
 
@@ -381,7 +398,7 @@ class SystemSensorBackend(
             val clazz = Class.forName(
                 "com.android.server.sensors.SensorService",
                 false,
-                ClassLoader.getSystemClassLoader()
+                systemServerClassLoader() ?: return false
             )
             val method = clazz.getMethod(
                 "sendRuntimeSensorEventNative",
