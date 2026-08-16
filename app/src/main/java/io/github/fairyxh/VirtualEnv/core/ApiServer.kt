@@ -244,6 +244,7 @@ class ApiServer(
                 path == "/api/hook/status" && method == "GET" -> hookStatusGet()
                 path == "/api/report/export" && method == "GET" -> reportExport()
                 path == "/api/debug/random-env" && method == "POST" -> randomEnv()
+                path == "/api/debug/load-sample-profile" && method == "POST" -> randomEnv()
                 path == "/api/debug/observe/start" && method == "POST" -> observeStart()
                 path == "/api/debug/observe/end" && method == "POST" -> observeEnd()
                 path == "/api/debug/observe/snapshot" && method == "GET" -> observeSnapshot()

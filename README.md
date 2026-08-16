@@ -1,287 +1,261 @@
-# ZhangVirtualEnv — Android Environment Simulation Framework
+# ZhangVirtualEnv — Android 系统环境参数测试与兼容性验证框架
 
-基于 LSPosed API 101 的 Android 环境模拟测试框架，从**系统层面**为开发测试提供位置、基站、WiFi、蓝牙 BLE、GNSS、传感器与 Telephony 环境模拟，帮助开发者在不修改应用源码的前提下验证应用在不同环境下的运行行为。
+基于 LSPosed API 101 的系统级测试适配框架，面向 Android 应用开发、自动化测试与兼容性验证。框架在自有设备或已获授权的测试环境中，通过系统服务层的测试适配机制提供可控的测试数据，帮助开发者在不修改应用源码的前提下，验证应用在不同系统 API 返回条件、设备环境参数与系统版本下的行为。
 
 > 工程名 `ZhangVirtualEnv`；控制端 App 显示名「虚拟环境测试框架」，包名 `io.github.fairyxh.VirtualEnv`。
 
-> 设计思想：真实环境采集 → 环境数据包 → 环境加载 → 应用在测试环境中运行，用于开发调试、自动化测试与兼容性验证。
+> 测试数据流：环境参数采集 → 测试数据包（Environment Profile）→ 测试环境加载 → 应用在测试环境中运行，用于开发调试、自动化测试与兼容性验证。
 
-> 检测生效：可以通过独立设计的检测器判断虚拟环境是否生效：[VirEnvDetector](https://github.com/FairyXH/VirEnvDetector)
-
----
-
-## Overview
-
-这是一个基于 LSPosed 的 Android 环境模拟测试框架。框架从系统框架层模拟系统 API 返回的环境数据，使开发者可以在不修改应用源码的前提下，测试应用在不同环境下的运行行为。
-
-- 面向开发者、测试人员与研究人员
-- 仅作用于系统框架与必要系统组件，不注入第三方应用进程
-- 用于应用开发调试、自动化测试与设备兼容性验证
-
-## Features
-
-- **Location Provider Testing** — 单点位置与路线移动模拟，用于 Location API 测试
-- **Navigation Scenario Simulation** — 路线轨迹、循环播放与平滑回程场景模拟
-- **GNSS Environment Simulation** — 卫星状态 / 星历 / 信噪比环境模拟
-- **Sensor Data Injection Testing** — 步频 / 步数等传感器数据测试
-- **Network Environment Simulation** — WiFi 扫描结果与基站环境模拟
-- **Telephony API Testing** — SIM 身份 / 运营商 / 信号强度测试 Profile
-
-其他能力：
-
-- 环境采集（快照 / 持续录像）与回放，用于测试数据准备与回归测试
-- 已保存采集导入导出：主页已保存采集卡可将快照导出为 VirtualRegion 兼容的 `.vrenv.json`，也可导入 vrenv 文件生成采集快照（一次一份）
-- 配置状态预设：一键保存 / 加载完整测试配置
-- 配置导入导出：模块整体配置备份与恢复
-- 悬浮摇杆与路线控制面板
-- 独立检测器 VirEnvDetector：从第三方视角验证环境是否生效
-
-## Use Cases
-
-适用：
-
-- Android 应用开发测试
-- LBS 服务调试
-- 自动化测试
-- 系统兼容性验证
-
-## Disclaimer
-
-This project is designed for development,
-testing and educational purposes.
-
-It must not be used for:
-- bypassing security mechanisms
-- fraudulent activities
-- cheating
-- violating third-party service agreements
-- faking location, attendance, check-in, identity or any real-world state for deceptive purposes
-
-Users are responsible for their own usage.
-
-> 本项目的唯一设计目标是**开发调试、自动化测试与兼容性验证**，仅建议在自有设备、自有应用或已获授权的测试环境中使用。严禁用于伪造考勤/打卡/签到、规避监管或安全机制、欺骗他人或第三方服务、冒充身份等任何非测试用途。作者不承担因滥用本项目产生的任何责任；请勿利用本项目规避任何检测机制。
+> 测试结果校验：可通过独立工具 [VirEnvDetector](https://github.com/FairyXH/VirEnvDetector) 从测试环境外部校验测试数据是否按预期生效。
 
 ---
 
-## 1. 功能简介
+## 项目简介
 
-| 类别 | 能力 |
-|---|---|
-| 定位（GPS） | 单点位置模拟、路线模拟（循环播放 / 终点→起点平滑回程 / 跑步级随机抖动）、悬浮摇杆移动；**摇杆松手保留当前位置**（不溜回原点），斜向移动经方向平滑 + 注入频率对齐（摇杆启用时 fix/push 加速至 ~200-250ms）后顺滑无锯齿；**随机抖动可在设置页关闭**（`/api/settings/jitter`） |
-| 基站（Cell） | LTE / NR / GSM / WCDMA 虚拟小区（mcc/mnc/tac/ci/nci/pci/rsrp），可采集真实小区后模拟；NR NCI 36bit 合法范围消毒，缺失/越界自动派生合法值；无配置时回退**带虚拟坐标与合法 ID 的 CDMA 基站**（保证小区 ID 落在标准取值范围，供测试场景使用） |
-| OpenCellID 基站数据库 | BYOK 模式接入 OpenCellID：设置页填写/测试 API Key（明文显示，与地图 Key 一致；仅日志脱敏）；**CSV 离线数据库**支持导入多个 OpenCellID 官方下载 CSV（如 460.csv，行偏移+网格索引随机读行，无需 API Key），查询模式三选一：**离线 / 在线 / 混合（离线优先，无结果自动转在线）**；位置页**可收起「基站查询」卡片**按当前选点查询附近基站（BBOX 面积受限自动分片拼接 + Haversine 二次过滤 + 结果分页/经纬度/估算信号），一键保存到基站模拟（信号强度由距离/覆盖半径/样本数算法估算）；可选**为 OpenCellID 社区贡献真实测量数据**（默认关闭：一键采集结果下方显示上传结果；**录像持续采集出现新基站自动实时上传**，会话级去重；仅挂起窗口内的真实观测，虚拟数据严禁上传） |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座/信噪比）+ **虚拟 NMEA（$GPRMC，状态 V）**：system_server 层接管 `registerGnssStatusCallback` / `registerGnssNmeaCallback`，虚拟卫星数据与 NMEA 保持自洽，供开发测试验证 GNSS 相关逻辑；**针对内置定位服务的第三方应用**，模块在系统服务层提供兼容性适配，不把该应用加入作用域 |
-| 定位投递保真 | 注入的虚拟 fix **统一刷新 `time`/`elapsedRealtimeNanos`**（保证虚拟数据符合 Location API 对时间戳的新鲜度要求，避免因时间语义不合法导致上报异常），并按配置频率持续上报（即使坐标未变化也保持稳定投递） |
-| 摇杆实时投递 | **全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**：虚拟定位启用时，任何到达 App 的 fix 在 Binder 出口统一替换为虚拟位置；同时向所有活跃 listener 主动推送，不依赖真实 GPS/provider 链路，地图类应用摇杆移动实时生效 |
-| 自动托管 | 基站 / WiFi / BLE / GNSS / 传感器子页可开启「自动托管」：忽略手动配置，由模块基于虚拟位置自动生成自洽的测试环境（GNSS 卫星、CDMA 合法 ID 基站、派生 WiFi/BLE、默认步频）；**是否启用该类型模拟仍由用户开关控制** |
-| SIM | SIM 身份 / 运营商 / 国家地区 / 信号强度测试 Profile，自动识别真实卡槽，国家模板一键填充 |
-| WiFi | 虚拟扫描结果（ssid/bssid/level/frequency），可采集真实环境后模拟 |
-| 蓝牙（BLE / 经典 / 双模） | 虚拟 Beacon 扫描（BLE）+ **经典 BR/EDR 发现模拟**（`startDiscovery` → 逐个 ACTION_FOUND，蓝牙栈内 Hook 全局生效）；设备可配「连接模式」：BLE 仅 / 经典仅 / 双模，支持 `classOfDevice` / `classicRssi`；虚拟发现期间丢弃真实设备 |
-| GNSS | 虚拟卫星状态（卫星数/使用数/星座），测试进程中接管真实卫星回调 |
-| 传感器 | 步频/步数连续注入，加速度/陀螺仪等连续流或录像事件回放 |
-| 环境录制回放 | 流式录像采集（最低 0.1s 间隔）、中断兜底恢复、帧间平滑插值+抖动、帧详情查看 |
-| 采集导入导出 | 主页已保存采集卡右上角「导入导出」：点击后列表变复选框单选，一次一份；快照可导出为 **VirtualRegion 兼容 `.vrenv.json`**（`virtualregion-environment` 格式，含 name/location/wifi/cells/bluetooth），也可导入 vrenv 文件生成 collect 快照并拆分轨道（与本地采集一致，可回放）；录像不支持导出 |
-| Hook 层观测 | 采集真实环境时在各 Hook 点记录**未虚拟化前的真实数据**（位置/基站/WiFi/GNSS），采集包附带 `hookObserve` 字段用于 Hook 层检验（不只普通 App 视角）；一键采集位置自动保存到“已保存地点/位置模拟”；基站采集 mcc/mnc 优先字符串 getter（部分 ROM 旧 int getter 不可靠） |
-| 配置状态预设 | 主页一键保存当前完整测试配置（位置/路线/摇杆/环境六大板块）为多份预设（名称+备注），点击即快速加载 |
-| 配置导入导出 | 设置页整体备份模块配置（路线/地点/环境快照/环境状态/预设/应用设置）为 JSON 文件，可一键恢复 |
-| 模块总开关（总闸） | 主页“模块状态”卡一键停用模块**所有**功能（位置/路线/摇杆/WiFi/基站/BLE/GNSS/传感器/SIM 固化），Hook 全部恢复传递真实数据；重新开启恢复关闭前完整状态（持久化，重启保持） |
-| Hook 状态与调试报告 | 设置页展示**各作用域 Hook 点状态**（成功/失败/跳过明细，如 `system 46/46`、`com.android.phone 59/60`），一键 SAF 导出完整调试 JSON（Hook 状态 + 全引擎状态 + 配置 + Hook 层观测 + 测试报告）；检测器“导出报告”落盘完整检测报告 |
-| 界面与外观 | 桌面图标可选隐藏（仅保留 LSPosed 模块入口）、地图选点 GCJ-02→WGS-84 自动转换 |
+本项目是一个 Android 系统环境参数测试与兼容性验证框架，用于：
+
+- 验证应用对 **Location API** 数据变化、轨迹变化与时间戳处理逻辑的兼容性；
+- 验证应用对不同网络制式 **CellInfo** 数据结构解析的兼容性；
+- 验证应用对 **GNSS 卫星状态 / NMEA 数据解析 / 定位算法**的兼容性；
+- 验证应用对 **Telephony API** 不同返回条件与订阅状态的兼容性；
+- 验证应用对 **WiFi / BLE 扫描结果**、**传感器事件流** 的兼容性；
+- 通过**测试数据包（Environment Profile）**在不同系统版本间复用测试场景。
+
+框架采用"数据驱动测试"设计：开发者将测试参数封装为 Profile，在系统服务层加载测试数据，应用读取到的系统 API 返回值即测试数据；测试完成后可随时恢复系统默认行为。
 
 ### 设计原则
 
-- **严格前后端分离**：前端 App（控制端）只调用 API；Backend（system_server 内）持有所有状态与模拟逻辑；Hook Adapter 只做 Android 接口适配、不保存业务状态。
-- **全局虚拟化，不 Hook 第三方应用**：作用域仅含必要系统进程（`system`、`com.android.phone`、`com.android.bluetooth`、`com.google.android.gms`、`com.android.location.fused`、`com.oplus.location`）与模块自身/检测器。**不向 scope 添加任何第三方 App**，所有第三方 App 通过系统级 Hook 间接获得测试环境。SIM 模拟同样只在 `com.android.phone`（ITelephony / IPhoneSubInfo 服务端 + TelephonyProperties 系统属性层）与 `system_server`（ISub 服务端）实现，不注入任何 App 进程。GMS 为必要系统服务（提供定位/位置服务），与 VirtualRegion 的 GMS 处理一致，必须保留在作用域内。
-- **内置定位服务的第三方应用兼容性适配仍是系统层**：部分第三方应用内置定位服务组件，模块在系统服务层按组件类名做兼容性处理，不把任何第三方应用加入 `scope.list`。
-- **API 鉴权**：本地 API（`127.0.0.1:18790`）要求 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开。
-- **fail-open**：任何 Hook 点异常时恢复原始系统行为，避免影响宿主稳定性。
+- **严格前后端分离**：控制端 App 只调用本地测试 API；核心服务持有测试状态与测试数据；测试适配层只负责系统 API 测试数据适配，不保存业务状态。
+- **仅测试必要系统组件**：测试适配范围仅包含系统框架与必要系统组件，不注入任何第三方应用进程。
+- **fail-open**：任何测试适配点异常时恢复系统原始行为，避免影响宿主稳定性。
+- **测试可控**：测试数据可随时启停、可持久化、可导入导出，便于回归与自动化测试。
 
 ---
 
-## 2. 架构
+## 使用场景
 
-```
-┌────────────────────────────┐
-│  控制端 App（本模块 APK）    │  地图选点 / 路线编辑 / 摇杆 / 环境管理 / 设置
-│  app/  (MainActivity, ...) │
-└──────────────┬─────────────┘
-               │ HTTP API（127.0.0.1:18790，X-ZVE-Token 鉴权）
-┌──────────────▼─────────────┐
-│  Backend Core（system_server│  位置/路线/摇杆/传感器/基站/WiFi/BLE/GNSS Engine
-│  进程内运行）               │  Profile 配置 / 环境快照 / 录制回放 / 数据库
-│  core/                      │
-└──────────────┬─────────────┘
-               │ raw TCP 轮询 /api/env/status（500ms）
-┌──────────────▼─────────────┐
-│  Hook Adapter（scope 进程） │  LocationManager / TelephonyManager /
-│  hook/                      │  WifiManager / BluetoothLeScanner /
-│                             │  SensorManager / GnssStatus 框架层 Hook
-└────────────────────────────┘
-```
-
-关键组件：
-
-- `core/ApiServer.kt` — 本地 HTTP 服务，所有控制端操作与 Hook 取数入口
-- `core/Backend.kt` — system_server 内的核心服务，持有各 Engine 与持久化
-- `core/EnvStateCache.kt` — App 进程侧 500ms 轮询缓存，Hook 层读取快照
-- `hook/FrameworkEnvHookAdapter.kt` — 普通 App 进程内的框架 API Hook
-- `hook/LocationHookAdapter.kt` — system_server 定位 Hook：provider 上报替换 + **全局 ILocationListener Proxy 出口替换 + 500ms 主动推送**（摇杆实时投递）
-- `hook/PhoneInterfaceManagerHookAdapter.kt` — phone 进程 Binder 层基站 Hook
-- `hook/SimTelephonyHookAdapter.kt` — phone 进程 ITelephony / IPhoneSubInfo SIM 身份与信号 Hook
-- `hook/SimSystemPropertyHookAdapter.kt` — phone 进程 TelephonyProperties 系统属性层 SIM 身份虚拟化（部分 ROM 上 `getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读 `gsm.sim.operator.*`/`gsm.operator.*` 系统属性，需在属性写入层做适配才能全局生效；`TelephonyProperties` 类在 Android 15 为 `android.internal.telephony.sysprop.TelephonyProperties`、Android 16 迁移为 `android.sysprop.TelephonyProperties`，模块按双候选自动命中，属性进程级全局且不 Hook 第三方进程）
-- `hook/SimSubscriptionHookAdapter.kt` — system_server ISub SubscriptionInfo 全局改写
-- `hook/StepSensorInjector.kt` — 传感器连续模拟注入器（pending + refresh）
-- `profile/` — 不同系统版本的适配 Profile
+| 场景 | 说明 |
+|---|---|
+| Android 应用开发测试 | 开发阶段验证应用在不同系统 API 返回条件下的逻辑正确性 |
+| LBS 功能调试 | 调试定位、轨迹、周边网络环境相关功能 |
+| 自动化测试 | 通过本地测试 API 驱动测试数据，配合脚本与 CI 回归 |
+| 系统版本适配 | 验证应用在目标系统版本下的 API 行为差异 |
+| ROM 兼容性验证 | 在自有设备上验证不同 ROM 的系统 API 实现差异 |
+| QA 回归测试 | 复用测试 Profile 进行可重复的兼容性回归 |
 
 ---
 
-## 3. 使用方法
+## 快速开始
 
-### 3.1 环境要求
+### 环境要求
 
 - Android 10+（当前验证机型：**OPPO/OnePlus Oplus Android 15**，API 35）
 - 已 Root（Magisk）+ LSPosed（API 101）
-- 模块与检测器需要同时安装
+- 控制端与测试结果校验工具需要同时安装
 
-### 3.2 构建
+### 构建
 
 ```bash
-# 模块（控制端 + Hook）
+# 控制端 + 测试适配模块
 cd ZhangVirtualEnv
 ./gradlew assembleDebug --no-daemon
 
-# 检测器（独立工程）
+# 测试结果校验工具（独立工程）
 cd ../VirEnvDetector
 ./gradlew assembleDebug --no-daemon
 ```
 
 产物：
+
 - `ZhangVirtualEnv/app/build/outputs/apk/debug/app-debug.apk`
 - `VirEnvDetector/app/build/outputs/apk/debug/app-debug.apk`
 
-### 3.3 安装与启用
-
-1. 安装两个 APK：
+### 安装与启用
 
 ```bash
 adb install -r ZhangVirtualEnv/app/build/outputs/apk/debug/app-debug.apk
 adb install -r VirEnvDetector/app/build/outputs/apk/debug/app-debug.apk
-```
-
-2. 在 LSPosed 管理中启用 `ZhangVirtualEnv`，作用域默认已包含所需系统进程与检测器（**不要手动添加第三方 App**）。
-3. 重启设备：
-
-```bash
 adb reboot
 ```
 
-4. 打开控制端 App（`io.github.fairyxh.VirtualEnv`），授予定位/蓝牙/WiFi/悬浮窗等权限。首次启动需阅读并确认开发者用途声明。
+在 LSPosed 管理中启用 `ZhangVirtualEnv`。作用域默认包含测试所需的系统组件（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、`com.google.android.gms`）与模块自身、校验工具；**不要手动添加任何第三方应用**。
 
-> Hook 加载需要重启生效。模块更新后同样 `adb install -r` + `adb reboot`。
+> 测试适配模块在系统服务层加载，安装或更新后需要重启设备生效。
 
-### 3.4 控制端使用
+### 控制端使用
 
-控制端主界面分为：
+控制端 App（`io.github.fairyxh.VirtualEnv`）提供以下测试入口：
 
-- **主页**：模块状态（实时功能状态：位置 / 路线 / 摇杆 / 基站 / WiFi / BLE / GNSS / 传感器）+ **配置状态卡**（一键保存当前完整测试配置为预设，可保存多份并重命名/备注，点击即加载，位置：模块状态卡下方、悬浮窗卡上方）+ 悬浮窗开关 + 一键采集（快照/录像）+ 已保存采集回放；**已保存采集卡右上角「导入导出」**：进入选择模式后勾选一份快照导出为 `.vrenv.json`，或直接导入 vrenv 文件生成采集（一次一份，录像不支持导出）
-- **位置模拟**：地图选点设置单点位置（地图 SDK GCJ-02 自动转换为 WGS-84 输出）；坐标卡片提供**传送到该点**（直接设置坐标并启用单点定位，不保存到列表）与**保存此点**两个按钮；创建/编辑/启动路线，支持**循环播放**与**终点→起点平滑过渡**（循环开启时到达终点以设定速度沿“终点→起点”连线平滑回到起点，再开始新一轮；不勾选则瞬间回到起点）；路线移动带**跑步级随机抖动**（幅度随速度增大）；悬浮摇杆微调（悬浮窗空白区域均可拖动）；底部**可收起「基站查询」卡片**：按当前选点/输入坐标通过 OpenCellID 查询附近基站（默认半径 1500 米，可调），展示制式/运营商/距离/信号/样本，点击条目勾选后**一键保存到基站模拟**（信号强度由距离/覆盖半径/样本数算法估算）
-- **环境模拟**：基站 / WiFi / BLE / GNSS / 传感器 / **SIM** 配置与启用，支持采集真实环境保存为快照；每个类型条目表单右上角提供**随机**按钮，一键生成合法随机参数
-  - **自动托管（测试环境自动生成）**：基站 / WiFi / BLE / GNSS / 传感器子页面顶部提供「自动托管」开关。开启后该类型忽略手动配置，由模块基于当前虚拟位置自动生成自洽的测试环境（GNSS 卫星 / 合法 ID 基站 / WiFi / BLE / 步频派生默认值），便于快速搭建场景。**是否进行该类型环境模拟仍由用户开关决定**，开启虚拟定位时 UI 仅提示建议打开环境模拟；关闭自动托管后恢复手动配置
-  - **SIM 模拟**：分两步操作——先「选择目标卡槽」自动识别真实卡槽（订阅信息 / 运营商 / 国家码 / 信号），再在「详细参数」卡片设置 SIM 身份；国家/运营商采用双下拉选择（内置 28 个国家模板与各国运营商预设，含 MCC/MNC/IMSI/ICCID 前缀与区号，支持自定义），可修改运营商名称、IMSI、ICCID、本机号码、设备 ID、IMEI 与 GSM/LTE/NR 信号强度；可添加多个卡槽，保存时全部卡保存为一份配置，全局生效；保存后可随时从「已保存配置」一键使用（`/api/env/use` 已支持 `sim` 类型，加载即启用）。**使用 SIM 配置时会同时通过 CarrierConfig 持久化固化（与同类测试方案相同接口 `ICarrierConfigLoader.overrideConfig(..., true)`）**：国家码/运营商名称覆盖写入系统持久存储，重启设备甚至禁用框架后仍生效；清除/关闭 SIM 虚拟化时自动还原真实配置。**部分 ROM 专属：`getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 直接读系统属性（`gsm.sim.operator.*`/`gsm.operator.*`），由 `SimSystemPropertyHookAdapter` 在 `com.android.phone` 系统属性层写入虚拟值并 1s 轮询保持（电话栈启动/网络注册后仍会持续修正），全 App 全局生效且不 Hook 第三方进程**
-- **环境配置持久化**：**wifi/cell/ble/gnss/sensor/sim 六类环境引擎的上次配置（数据 + 开关 + 来源快照）自动持久化到 `env_state` 表**（system_server 的 zve.db），重启后自动恢复并直接生效（enabled=true 的类型开机即应用）；环境页卡片实时显示“使用中 · 配置摘要/使用配置：快照名”，清除配置后持久化记录同步删除
-- **录制回放**：流式录像采集（间隔 0.1~300 秒，支持小数），录像中断自动兜底恢复；回放支持开始/暂停/倍速/循环，帧间平滑插值+随机抖动；录像详情可按帧查看各信息原始数据
-- **设置**：地图 SDK Key（可选，用于地图可视化）、**OpenCellID 基站数据库**（BYOK：自行在 [opencellid.org](https://opencellid.org) 注册并填写 API Key，明文显示、仅日志脱敏；一键**测试 API Key**；**查询模式**离线/在线/混合三选一；**CSV 离线数据库**可导入多个 OpenCellID 官方下载 CSV 文件（无需 API Key，支持删除，可离线查询附近基站）；「为 opencellid 社区贡献数据」复选框默认关闭，开启后主页一键采集会顺带把**挂起窗口内的真实观测**（位置 + 基站标识 + 信号 + 测量时间）批量上传到 OpenCellID，虚拟基站/虚拟坐标严禁上传）、API Token、**桌面图标隐藏开关**（可选，启用后仅可从 LSPosed 模块界面打开）、环境实时测试、调试入口、**配置导入导出**（导出模块整体设置为 JSON 备份文件，或从备份恢复，恢复会覆盖当前配置并立即生效，不含录像数据）、**关于本项目与免责声明**（含开发者用途声明重新查看入口）
+- **测试状态**：查看各测试项当前状态与测试数据摘要
+- **测试参数配置**：配置 Location / 轨迹 / GNSS / CellInfo / Telephony / WiFi / BLE / 传感器 测试数据
+- **测试配置预设**：一键保存 / 加载完整测试配置
+- **环境数据采集与回放**：采集测试设备环境参数，保存为测试数据包并回放
+- **测试开关**：一键停用全部测试数据，系统恢复默认行为
+- **测试状态与调试报告**：导出测试适配状态与完整调试信息，用于问题定位
 
-所有操作走本地 API，无需外部网络（地图 SDK、OpenCellID 查询与数据贡献除外）。
+所有操作走本地测试 API（`127.0.0.1:18790`，需 `X-ZVE-Token` 鉴权），无需外部网络（地图 SDK、基站数据查询等可选能力除外）。
 
-### 3.5 常用 API（供自动化/脚本）
+---
+
+## 测试能力
+
+| 类别 | 测试能力 | 用途 |
+|---|---|---|
+| Location API 测试支持 | 单点测试数据、轨迹数据回放、位置更新频率控制、随机扰动测试数据 | 验证应用对位置数据变化、轨迹变化、时间戳处理等逻辑 |
+| 轨迹数据回放测试 | 轨迹点序列、循环回放、平滑过渡、运动速度控制 | 地图渲染、轨迹算法、位置更新逻辑测试 |
+| GNSS 数据测试 | 卫星状态（数量/星座/信噪比）、NMEA 数据、卫星状态回调序列 | GNSS 数据解析、定位算法、卫星状态展示测试 |
+| CellInfo 数据测试 | LTE / NR / GSM / WCDMA 小区信息测试数据 | 验证应用读取不同网络制式、小区信息结构时的数据解析兼容性 |
+| Telephony API 测试 Profile | 运营商配置、订阅状态、网络类型、信号强度等测试 Profile | 验证应用在不同运营商配置、订阅状态和 Telephony API 返回情况下的兼容性 |
+| WiFi 扫描数据测试 | 扫描结果测试数据（ssid/bssid/level/frequency） | WiFi 列表渲染、扫描结果解析测试 |
+| BLE 扫描数据测试 | Beacon 扫描测试数据、经典发现测试数据 | BLE 扫描逻辑、设备发现逻辑测试 |
+| 传感器数据测试 | 步频/步数连续测试数据、传感器事件流回放 | 传感器事件解析、计步逻辑测试 |
+| 环境数据采集与回放 | 采集设备环境参数（位置/小区/WiFi/GNSS 等），保存为测试数据包并回放 | 构造可复现测试场景、回归复现 |
+| 测试配置预设 | 一键保存 / 加载完整测试配置 | 测试场景复用、自动化回归 |
+| 测试配置导入导出 | 整体配置备份与恢复 | 测试环境迁移、CI 集成 |
+| 测试状态与调试报告 | 各测试适配点状态（成功/跳过/失败明细）、完整调试 JSON 导出 | 测试可观测性、问题定位 |
+| 测试结果校验 | 通过 VirEnvDetector 从测试环境外部校验测试数据是否生效 | 独立视角验证测试链路 |
+
+### 测试数据组织
+
+- 每个测试项独立配置，可单独启用/停用；
+- 测试配置持久化保存，重启后自动恢复；
+- 测试数据包（`.vrenv.json`，VirtualRegion 兼容格式）可导入导出，便于在不同测试设备间复用；
+- 提供"自动生成测试环境"模式：基于测试位置自动生成自洽的测试数据（GNSS / 小区 / WiFi / BLE / 传感器），便于快速搭建场景。
+
+### 测试参数校验
+
+- 测试数据字段自动做取值范围校验（如小区标识符位宽、频点范围等），避免非法测试数据；
+- 提供调试接口生成随机测试数据，用于冒烟测试与全链路验证。
+
+---
+
+## 系统架构
+
+```
+┌────────────────────────────┐
+│  控制端 App（本模块 APK）    │  测试参数配置 / 轨迹编辑 / 环境管理 / 设置
+│  app/  (MainActivity, ...) │
+└──────────────┬─────────────┘
+               │ 本地测试 API（127.0.0.1:18790，X-ZVE-Token 鉴权）
+┌──────────────▼─────────────┐
+│  Backend Core（系统服务层）  │  测试数据引擎 / Profile 配置 / 测试数据包 / 回放
+│  core/                      │  环境快照 / 录制回放 / 数据库
+└──────────────┬─────────────┘
+               │ 测试状态轮询（500ms）
+┌──────────────▼─────────────┐
+│  测试适配层（必要系统组件）   │  LocationManager / TelephonyManager /
+│  hook/                      │  WifiManager / BluetoothLeScanner /
+│                             │  SensorManager / GnssStatus API 测试适配
+└────────────────────────────┘
+```
+
+### 核心组件
+
+| 组件 | 说明 |
+|---|---|
+| `core/ApiServer.kt` | 本地测试 API 服务，控制端操作与测试适配层取数入口 |
+| `core/Backend.kt` | 系统服务层核心服务，持有测试数据引擎与持久化 |
+| `core/EnvStateCache.kt` | 测试状态缓存，测试适配层按周期读取 |
+| `hook/FrameworkEnvHookAdapter.kt` | Framework API 测试适配（Telephony / WiFi / BLE / 传感器 / GNSS） |
+| `hook/LocationHookAdapter.kt` | Location API 测试适配：测试数据上报、持续推送、监听器出口适配 |
+| `hook/PhoneInterfaceManagerHookAdapter.kt` | CellInfo 数据测试适配（电话服务 Binder 层） |
+| `hook/SimTelephonyHookAdapter.kt` | Telephony API 测试适配（SIM 身份 / 运营商 / 信号强度 Profile） |
+| `hook/SimSystemPropertyHookAdapter.kt` | Telephony 系统属性层测试适配（部分 ROM 运营商字段直读系统属性时的写入适配） |
+| `hook/SimSubscriptionHookAdapter.kt` | Subscription 数据测试适配（订阅信息测试数据） |
+| `hook/StepSensorInjector.kt` | 传感器连续测试数据注入器 |
+| `profile/` | 不同系统版本的测试适配 Profile |
+
+### 模块结构
+
+```
+ZhangVirtualEnv/
+├── app/
+│   └── src/main/
+│       ├── java/io/github/fairyxh/VirtualEnv/
+│       │   ├── app/          # 控制端（MainActivity、地图、摇杆、设置）
+│       │   ├── core/         # ApiServer、Backend、Engine、EnvStateCache
+│       │   ├── hook/         # Android Framework API 测试适配层
+│       │   ├── profile/      # 系统版本适配 Profile
+│       │   └── util/         # 日志、Token 等
+│       ├── assets/           # api_token.txt
+│       └── resources/META-INF/xposed/  # module.prop / scope.list
+└── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
+```
+
+---
+
+## API 参考
+
+本地测试 API（`127.0.0.1:18790`），所有请求需携带 `X-ZVE-Token` 头；未授权请求不返回任何字节直接断开。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/status` | 服务与模块状态 |
 | GET | `/api/system/info` | 系统信息 |
-| GET | `/api/location/status` | 当前位置模拟状态 |
-| POST | `/api/location/set` | 设置单点位置 |
-| POST | `/api/location/enable` | 启用/关闭位置模拟 |
-| POST | `/api/route/create` / `start` / `stop` | 路线管理 |
-| POST | `/api/joystick/set` | 摇杆移动 |
-| GET | `/api/env/status` | 全部环境类型状态（wifi/cell/ble/sensor/gnss/sim） |
-| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` `/api/sim/set` | 设置各类型测试环境 |
-| POST | `/api/env/enable` `/api/env/auto-managed` `/api/env/clear` `/api/env/suspend` `/api/env/resume` | 环境开关、自动托管开关与生命周期 |
-| POST | `/api/env-snapshot/create` `/list` `/delete` | 环境快照（采集/回放） |
-| POST | `/api/env/use` | 应用快照 |
-| POST | `/api/debug/random-env` | 调试：生成全套随机测试环境并启用 |
-| GET/POST | `/api/test/report` | 检测器上报/查询报告 |
-| POST | `/api/recording/start` `/append` `/stop` | 录制 |
-| GET | `/api/recording/list` `/get` | 录像列表（含 `interrupted` 中断标记）/ 帧数据 |
+| GET | `/api/location/status` | 当前测试位置数据状态 |
+| POST | `/api/location/set` | 设置测试位置数据 |
+| POST | `/api/location/enable` | 启用/关闭位置测试数据 |
+| POST | `/api/route/create` / `start` / `stop` | 轨迹测试数据管理 |
+| POST | `/api/joystick/set` | 测试位置微调 |
+| GET | `/api/env/status` | 全部测试项状态（wifi/cell/ble/sensor/gnss/sim） |
+| POST | `/api/cell/set` `/api/wifi/set` `/api/bluetooth/set` `/api/sensor/set` `/api/gnss/set` `/api/sim/set` | 设置各测试项测试数据 |
+| POST | `/api/env/enable` `/api/env/auto-managed` `/api/env/clear` `/api/env/suspend` `/api/env/resume` | 测试项开关与生命周期 |
+| POST | `/api/env-snapshot/create` `/list` `/delete` | 测试数据包（采集/回放） |
+| POST | `/api/env/use` | 应用测试数据包 |
+| POST | `/api/debug/load-sample-profile` | 加载预设测试环境（随机生成全套测试数据并启用，冒烟测试） |
+| GET/POST | `/api/test/report` | 测试结果上报/查询 |
+| POST | `/api/recording/start` `/append` `/stop` | 环境数据录制 |
+| GET | `/api/recording/list` `/get` | 录制列表 / 帧数据 |
 | POST | `/api/recording/play` `/pause` `/resume` `/stop-play` `/speed` | 回放控制 |
-| POST | `/api/recording/smooth` | 回放帧间平滑插值开关 `{"enabled":bool}` |
-| POST | `/api/preset/create` `/load` `/rename` `/delete` | 配置状态预设：保存当前完整测试配置/加载/重命名/删除 |
-| GET | `/api/preset/list` | 配置状态预设列表 |
-| GET | `/api/config/export` | 导出模块整体配置（JSON） |
-| POST | `/api/config/import` | 导入模块整体配置（整体覆盖并立即生效） |
+| POST | `/api/recording/smooth` | 回放帧间平滑插值开关 |
+| POST | `/api/preset/create` `/load` `/rename` `/delete` | 测试配置预设管理 |
+| GET | `/api/preset/list` | 测试配置预设列表 |
+| GET | `/api/config/export` | 导出测试配置（JSON） |
+| POST | `/api/config/import` | 导入测试配置 |
+
+> 说明：`/api/debug/load-sample-profile` 为推荐路径；旧路径 `/api/debug/random-env` 仍兼容可用。
 
 请求示例：
 
 ```bash
-# 设置单点位置（需要 token 头）
+# 设置测试位置数据（需要 token 头）
 curl -X POST http://127.0.0.1:18790/api/location/set \
   -H "X-ZVE-Token: <token>" \
   -H "Content-Type: application/json" \
   -d '{"latitude":24.6477,"longitude":118.2993}'
 
-# 启用随机全套环境（调试用）
-curl -X POST http://127.0.0.1:18790/api/debug/random-env \
+# 加载预设测试环境（冒烟测试）
+curl -X POST http://127.0.0.1:18790/api/debug/load-sample-profile \
   -H "X-ZVE-Token: <token>"
 ```
 
-### 3.6 API Token
+### API Token
 
-- Token 存于两个 APK 的 `assets/api_token.txt`（模块与检测器必须一致）。
-- 未带 Token 的请求**不返回任何字节直接断连**（fail-closed）。
+- Token 存于两个 APK 的 `assets/api_token.txt`（控制端与校验工具必须一致）。
+- 未带 Token 的请求**不返回任何字节直接断连**。
 - 重新构建前如需更换 Token，同时更新两份文件并重新打包。
 
-### 3.7 OpenCellID 数据与许可
+### 可选数据服务
 
-- 基站数据库查询使用 [OpenCellID](https://opencellid.org/) 数据，数据许可：**Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)**。
-- API Key 由用户自行在 opencellid.org 注册申请（BYOK），仅保存在本地，不上传项目服务器、不写入日志。
-- 数据贡献默认关闭；开启后只上传设备**真实观测**的基站测量，严禁上传虚拟基站/虚拟坐标数据。
-- 官方文档：<https://wiki.opencellid.org/index.php/API>、<https://wiki.opencellid.org/wiki/Server_usage_policy>、<https://wiki.opencellid.org/wiki/Attribution>
+- **地图 SDK Key**：可选，用于测试界面的地图可视化；地图坐标（GCJ-02）会自动转换为 WGS-84 测试数据。
+- **OpenCellID 基站数据库**：可选，用于测试数据准备（按坐标查询周边小区信息并导入测试数据）。查询使用 [OpenCellID](https://opencellid.org/) 数据（CC BY-SA 4.0），API Key 由用户自行申请（BYOK），仅保存在本地。
 
 ---
 
-## 4. 检测器（VirEnvDetector）
+## 测试流程
 
-独立工程：`VirEnvDetector/`，包名 `io.github.fairyxh.VirEnvDetector`。
-
-### 4.1 作用
-
-模块无法 Hook 自身，传感器等 App 进程内检测结果不可靠，因此单独提供检测器 App 作为**第三方视角**验证环境模拟是否生效：
-
-> 说明：检测器仅用于**验证测试环境是否按配置生效**（正向校验），不提供也不包含任何反检测能力。
-
-- 读取真实环境（位置/基站/WiFi/BLE/传感器/GNSS）
-- 拉取模块期望配置（`/api/env/status`、`/api/location/status`、`/api/route/status`）
-- 逐项比较输出 `PASS / FAIL / SYNCING / NOT_ENABLED / UNKNOWN`
-- **识别录像/回放状态**：新增“录像/回放状态”区，显示 `PLAYING / PAUSED / RECORDING / IDLE`、播放段/帧进度、平滑插值开关；回放中位置判定容差放宽至 800m（帧间插值+抖动）
-- 一键"随机模拟"调用 `/api/debug/random-env` 后自动开始检测
-- 上报报告到 `/api/test/report`（含 `playback` 对象）
-- **Hook 层观测区块**：显示模块 Hook 点最近经手的真实数据（`/api/debug/observe/snapshot`）
-- **实时同步实时计算**：location/GNSS/sensor/BLE 回调到达即渲染判定，不等待 1s 刷新周期；点“开始检测”立即拉取期望配置
-- **结束按钮清空全部数据结果**（不再保留最后一次快照）
-- **基站全字段适配**：显示并校验 LTE（EARFCN/RSRQ/SINR/TA）、NR（NRARFCN/SS-RSRP/SS-RSRQ/SS-SINR）、GSM（BSIC/RSSI/TA）、WCDMA（PSC/RSSI/RSCP/EcNo）、CDMA（SID/NID/BID）；**空基站配置（0 基站）判定为 PASS**（读到 0 基站即通过）
-- **内置检测器同步**：模块设置页「环境实时测试」内置检测器与独立检测器同一套字段显示/判定逻辑（`SettingsFragment.buildCellText/judgeCell`）
-
-### 4.2 使用
+### 基本流程
 
 ```bash
+# 1. 安装并重启
+adb install -r app-debug.apk && adb reboot
+
+# 2. 启动测试结果校验工具 → 加载预设测试环境 → 自动开始校验
 adb shell am start -n io.github.fairyxh.VirEnvDetector/.MainActivity
-# 授予权限 → 点"开始检测" 或 "随机模拟"
-# 观察 logcat
 adb logcat -s VirEnvDetector:I
 ```
 
-六项全 PASS 表示模拟全链路生效：
+校验工具逐项输出 `PASS / FAIL / SYNCING / NOT_ENABLED / UNKNOWN`：
 
 ```
 location: PASS | provider=gps
@@ -292,159 +266,70 @@ sensor:   PASS | 计步器步数: 15801
 gnss:     PASS | 卫星总数: 16 使用: 5
 ```
 
-### 4.3 Root 支持
+### 推荐测试步骤
 
-检测器已内置 Root 检测（`su -c id`），UI 显示 Root 状态。若系统存在模块隐藏类工具，检测器仍可通过 Root 直接读取模块持久化配置验证模块存在。**若需该能力，请在 Magisk 中为检测器授权 Root。**
+1. 在自有测试设备上安装控制端与校验工具；
+2. 配置测试参数或导入测试数据包（Profile）；
+3. 启用需要验证的测试项；
+4. 在目标测试应用上执行测试用例（无需修改应用源码）；
+5. 通过校验工具或测试报告确认测试数据是否按预期生效；
+6. 测试完成后停用测试项或使用"测试开关"一键恢复系统默认行为。
 
-### 4.4 实时配置刷新
+### 自动化测试
 
-- 模块 `EnvStateCache` 500ms 轮询，配置切换后 Hook 层快速追平
-- BLE/GNSS 采用"配置就绪后自动接管"（pending callback / 300ms 周期投递）
-- 检测器在配置切换后有 2s 同步宽限期（`SYNCING`），避免瞬时误判
-
-### 4.5 Hook 层真实数据观测（采集检验）
-
-模块在 system_server 内提供 Hook 层真实数据观测：
-
-- 观测点：位置（`LocationProviderManager.onReportLocation` / `GnssLocationProvider.onReportLocation` / `getLastLocation`）、GNSS（`GnssLocationProvider.onReportSvStatus`）、WiFi（`WifiServiceImpl.getScanResults` 原始结果）、基站（`com.android.server.TelephonyRegistry.notifyCellInfoForSubscriber` + 挂起时直连 phone Binder 实时拉取）
-- API：`POST /api/debug/observe/start|end`、`GET /api/debug/observe/snapshot`
-- 一键采集流程：`observe/start → env/suspend → collectAll → observe/snapshot（挂起中）→ env/resume`，观测结果合并进采集包 `hookObserve` 字段
+- 全部操作通过本地测试 API 完成，可集成到脚本与 CI 流程；
+- 测试配置可导出为 JSON 备份，跨测试设备复用；
+- 测试数据包（`.vrenv.json`）支持导入导出，用于构造固定测试场景；
+- 提供 `/api/debug/load-sample-profile` 加载预设测试环境，用于全链路冒烟测试。
 
 ---
 
-## 5. 新设备如何适配
+## 多版本兼容性
 
-当前已适配并验证机型：**Oplus Android 15（API 35）**；已完成 **Android 16（API 36）增量适配**（2026-08，基于 `Adapt\Android 16\` 实际系统文件静态分析与构建验证；真机运行验证尚未进行）。
+当前已适配并验证：**Oplus Android 15（API 35）**；已完成 **Android 16（API 36）增量适配**（2026-08，基于 Android 16 实际系统文件静态分析与构建验证；真机运行验证尚未进行）。
 
-Android 16 适配结论（不破坏 Android 15 基线）：
-
-| 功能 | Android 16 状态 | 处理 |
+| 测试项 | Android 16 状态 | 说明 |
 |---|---|---|
-| 虚拟定位 / GNSS / WiFi / 经典蓝牙 / 配对 / SIM 属性层 / RIL / 框架层 | ✅ 静态兼容 | 签名一致，无改动 |
-| BLE 扫描（蓝牙栈） | ✅ 适配 | Android 16 移除 `TransitionalScanHelper` / `BluetoothGattBinder` / `BluetoothScanBinder`，统一落点迁移到 `ScanController.startScan(int, ScanSettings, List, AttributionSource)`；`ScannerApp` 回调字段由 `callback` 变为 `mCallback`（`BleStackHookAdapter` 已双候选 + API 36 门控） |
-| ColorOS 服务兼容 | ✅ 适配 | Android 16 的 `ActiveServicesExtImpl` 变为接口 `IActiveServicesExt`（4 参签名一致），`OplusServiceStartBypass` 已双候选 |
-| SIM Binder 服务端 | ✅ 适配 | Android 16 的 `PhoneInterfaceManager` 保留无后缀方法 + 少量 `ForPhone` 变体；核心 SIM 身份由 `PhoneSubInfoController`（telephony-common.jar）与 Phone 对象层覆盖，均已在 `SimTelephonyHookAdapter` 候选内 |
-| SIM 系统属性层 | ✅ 适配 | Android 16 将 `TelephonyProperties` 从 `android.internal.telephony.sysprop` 迁移到 `android.sysprop`（setter 签名一致），`SimSystemPropertyHookAdapter` 已双候选 |
-| RIL 防御层 | ✅ 适配 | Android 16 `RIL.getCellInfoList(Message, WorkSource)` 为 2 参，`RilDefensiveHookAdapter` 已按"第 1 参 Message"匹配 |
-| Subscription | ✅ 适配 | `SubscriptionManagerService` / `SubscriptionInfoInternal.toSubscriptionInfo()` 均在 telephony-common.jar 确认，`SimSubscriptionHookAdapter` 候选命中 |
-| Profile 选择 | ✅ 修正 | 新增 `android16.json`（minSdk 36, maxSdk 36），`android15.json` 收窄 `maxSdk=35`，`com.android.phone` 进程按 `SDK_INT` 精确选择 sim profile（API 37+ 回退 default.json，不误用 android16） |
+| Location / GNSS / WiFi / 经典蓝牙 / 配对 / Telephony / RIL / Framework | 静态兼容 | API 签名一致 |
+| BLE 扫描 | 已适配 | Android 16 蓝牙栈结构调整，测试适配层已迁移适配 |
+| 系统服务兼容 | 已适配 | Android 16 系统服务扩展接口变化，适配层已支持 |
+| Telephony API | 已适配 | Android 16 类结构变化已适配（含 `android.sysprop.TelephonyProperties` 类迁移） |
+| 版本 Profile | 已适配 | 新增 `android16.json`，`android15.json` 精确收窄，API 37+ 回退默认 Profile，不误用旧版本配置 |
 
-**Android 16 真机待确认项**（静态材料无法覆盖，拿到真机后逐项验证）：`IActiveServicesExt` 实现类位置（oplus-framework.jar 中未发现，可能在 oplus-system-server.jar，决定接口 default Hook 是否足够）、FGS 新逻辑（`USE_NEW_BFSL_LOGIC` 等是否仍读旧字段）、`WifiServiceImpl` 动态类名、SIM 系统属性实际调用链。
+**Android 17/18 未来适配流程**：为每个新版本新增独立 Profile 并收窄上一版本边界；对每个测试适配点按"类名 / 方法签名 / 字段"做差异分析，只新增适配候选，不修改已验证逻辑；新增适配一律 fail-open。
 
-**Android 17/18 未来适配流程**：为每个新版本新增独立 Profile（如 `android17.json`，minSdk=37, maxSdk=37）并把上一版本的 maxSdk 收窄到其 API 上限，保证新版本不误用旧配置；对每个 Hook 点按"类名/方法签名/字段"候选列表做差异分析，只新增候选或新 hook 函数，不修改已验证旧版本逻辑；新增 Hook 一律 fail-open。已知 Android 16 与 15 的关键差异（蓝牙栈迁移、AM ext 接口化、SIM 方法/属性类迁移、RIL 2 参签名）作为 Android 17 差异对照基线。
+### 新设备适配流程
 
-换新设备/系统版本时按以下流程适配：
+1. **确定作用域**：按实际 ROM 保留必要系统组件，不添加任何第三方应用；
+2. **确认 Framework API 签名**：不同 ROM 的 framework 类构造器签名可能不同，优先真机反射枚举比对 AOSP 预期；
+3. **扩展测试适配层**：如构造器不同，在对应适配器调整参数顺序或增加分支；
+4. **真机验证**：通过校验工具逐项确认测试数据生效。
 
-### 5.1 确定作用域
+### 已知问题
 
-```bash
-# 列出系统相关包（按实际 ROM 调整）
-adb shell pm list packages | grep -E "location|phone|bluetooth|gms|oplus|oneplus"
-```
-
-编辑 `app/src/main/resources/META-INF/xposed/scope.list`，只保留**必要系统进程**：
-
-```
-system
-com.android.phone
-com.android.bluetooth
-com.android.location.fused
-com.oplus.location        # Oplus 私有位置服务，其他 ROM 可去掉
-com.google.android.gms    # GMS 位置服务
-io.github.fairyxh.VirtualEnv
-io.github.fairyxh.VirEnvDetector
-```
-
-**硬性约束：不得加入任何第三方 App。**
-
-### 5.2 逆向确认 Hook 目标签名
-
-模块大量使用反射构造虚拟对象，**不同 ROM 的 framework.jar 构造器签名可能不同**。优先使用真机反射枚举（比 jadx CLI 反编译 dex 快且准）：
-
-在 Hook 层临时打印目标类的方法/构造器签名（参考 `FrameworkEnvHookAdapter` 中的枚举写法），或在检测器中增加反射输出，然后与 AOSP 预期比对。重点确认：
-
-| 目标 | 需确认内容 |
-|---|---|
-| `CellInfoLte/Gsm/Nr` | 是否 public 无参构造 + `setCellIdentity`/`setCellSignalStrength` |
-| `CellIdentityLte` | 5 参构造参数顺序 `(mcc, mnc, ci, pci, tac)`；TAC 16 位、CI 28 位、PCI 0~503 越界会被归一化为 `Integer.MAX_VALUE` |
-| `CellIdentityNr` | 构造参数顺序，`additionalPlmns` 不能传 null（否则 NPE） |
-| `GnssStatus$Builder.addSatellite` | Oplus 只暴露 **12 参**版本（AOSP 8 参被隐藏），且 `hasBasebandCn0/basebandCn0` 顺序与 AOSP 不同 |
-| `SensorEvent` | 本 ROM 提供 public 4 参构造；否则用隐藏构造 + 反射字段 |
-| `ScanResult` / `BluetoothDevice` | public 构造与 `getRemoteDevice` |
-| `SignalStrength` | 是否 public `(CellSignalStrength[])` 构造；无则用无参 + `mCellSignalStrengths` 字段（`VirtualSignalFactory` 已双方案回退） |
-| `PhoneInterfaceManager` / `PhoneSubInfoController` | SIM 身份方法（getSimOperator 等）的参数个数/顺序：AOSP 是 `(String callingPackage, String callingFeatureId)`，老版本可能只有 1 参 |
-| `TelephonyManager` 读系统属性 | **部分 ROM 上 `getSimOperatorName/getSimCountryIso/getSimOperator/getNetworkOperator/getNetworkOperatorName` 不走 Binder，直接读 `gsm.sim.operator.*`/`gsm.operator.*` 系统属性**；需在 `com.android.phone` 对 `TelephonyProperties` 的 6 个 `List<String>` setter 做写入适配（`SimSystemPropertyHookAdapter`，Android 15/16 双类候选），属性为进程级全局，无需 Hook 第三方 App |
-| `SubscriptionManagerService` / `SubscriptionController` | system_server 里 ISub 实现类名：Android 12+ 为 `SubscriptionManagerService`，旧版为 `SubscriptionController`（`SimSubscriptionHookAdapter` 已按 Profile 多候选） |
-
-真机反射枚举示例（模块日志）：
-
-```
-[Hook] GnssStatus.Builder method addSatellite(int,int,float,float,float,boolean,boolean,boolean,boolean,float,boolean,float)
-[Hook] CellIdentityLte diag wanted ci=... pci=... tac=... got ...
-```
-
-### 5.3 适配 Hook 代码
-
-- `hook/VirtualCellFactory.kt`：如构造器不同，调整参数顺序/增加对应分支
-- `hook/FrameworkEnvHookAdapter.kt`：如 `GnssStatus$Builder` 方法签名不同，修改反射参数列表
-- `hook/StepSensorInjector.kt`：如 SensorEvent 构造不同，修改 buildEvent
-- `hook/SimTelephonyHookAdapter.kt`：SIM 身份方法按“方法名 + 返回类型”查找，参数个数变化自动兼容（1~4 参均可命中）；`VirtualSignalFactory` 对 SignalStrength 构造提供数组构造/字段反射双回退
-- `hook/SimSystemPropertyHookAdapter.kt`：系统属性层；6 个 `TelephonyProperties` setter 全部做写入适配 + 1s 轮询按配置同步属性（配置变化无需电话栈重新写入）；禁用时恢复真实值；Android 15/16 双类候选
-- `hook/SimSubscriptionHookAdapter.kt`：ISub 实现类名与 SubscriptionInfo 字段名均可经 Profile 调整
-- `profile/`：建议为不同系统版本建立 Profile，将签名差异收口到 Profile 配置；SIM 相关可配置 `sim.phoneInterfaceClasses` / `sim.phoneSubInfoClasses` / `sim.subscriptionClasses`
-
-### 5.4 真机验证
-
-```bash
-# 构建 + 安装 + 重启
-adb install -r app-debug.apk && adb reboot
-# 启动检测器 → 随机模拟 → 六项 PASS
-adb logcat -s VirEnvDetector:I
-```
-
-如果某类 FAIL，优先看检测器读取值与期望配置的差异，再回查对应 Hook 的反射构造是否正确（例如 LTE 读出 `tac=2147483647` = 字段越界或顺序错）。
-
-### 5.5 已知坑
-
-- **系统属性层 SIM**：部分 ROM 的 `TelephonyManager` 五个运营商/国家字段直接读系统属性，Binder Hook 无效；必须用 `SimSystemPropertyHookAdapter`。属性按 phoneId 逗号分隔（如 `gsm.sim.operator.numeric=[45500,46002]`），只替换配置槽位、保留未配置槽位真实值；Android 15 类路径 `android.internal.telephony.sysprop.TelephonyProperties`、Android 16 迁移为 `android.sysprop.TelephonyProperties`，均已在候选内
-- **SIM 引擎配置持久化**：六类环境引擎配置均持久化在 `env_state` 表（数据+开关+来源快照），重启自动恢复；恢复的 SIM 配置会自动重新 CarrierConfig 固化（enabled）或 reset（disabled）
-- **jadx CLI 反编译 framework.jar 很慢**：framework.jar 是 dex 且体积大；优先真机反射枚举
-- **LTE 值范围**：TAC 16 位、CI 28 位、PCI 0~503，random 生成必须落在范围内
-- **GNSS 真实回调覆盖**：需要接管 `registerGnssStatusCallback`（不 proceed）并周期投递虚拟状态，避免真实卫星数据与虚拟值混用导致测试结果不稳定
-- **NMEA 数据语义**：虚拟 NMEA 使用 $GPRMC 格式并保持状态字段语义一致，且 fix 数据统一携带卫星数等附加信息，保证 GNSS 相关测试场景数据自洽；`LocationFresh.fresh()` 已统一处理
-- **NMEA listener 注销后必须清理**：DeadObjectException 不处理会导致回调停更，进而影响持续上报；`GnssDataBlockHookAdapter` 已实现 dead listener 自愈
-- **摇杆实时性**：除了 provider 注入，还需要**全局 `ILocationListener$Stub$Proxy.onLocationChanged` 出口替换 + 500ms 周期主动推送**（`LocationHookAdapter`），保证在无真实 GPS fix 时虚拟 fix 仍能持续送达，摇杆位移实时生效
-- **ApiServer 假死**：`acceptLoop` 单次 accept 异常不得 break（否则监听 socket 在但连接全挂，App 端显示 Backend 离线）；已改为异常重试 + socket 重建 + 固定线程池
-- **NetworkOnMainThread**：检测器 API 调用必须在后台线程，UI 更新回主线程
-- **HMA / 模块隐藏类工具**：不影响 LSPosed Hook 注入；检测器需要 Root 才能直读模块持久化配置
-- **地图 SDK 坐标是 GCJ-02**：地图选点/POI/定位坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后才能注入系统（否则偏差数百米）；内部持久化统一 WGS-84，回显地图时 `wgs84ToGcj02` 转回。**本次更新前保存的旧地点/路线坐标是 GCJ 语义，建议重新选点保存**
-- **流式录像**：录像使用 `StreamEnvironmentSampler` 持续监听 + 快照截帧，间隔输入框为 `numberDecimal`（支持 0.1s 小数）；录像中断（system_server 重启/崩溃）后自动标记 `interrupted` 并按实际帧数据恢复时长/帧数
-- **回放平滑插值**：默认开启；帧间位置按时间插值 + 小随机抖动（约 ±1.5m），可用 `/api/recording/smooth` 关闭；检测器回放中容差 800m
-- **桌面图标入口**：可选隐藏桌面图标，通过禁用 `Launcher` activity-alias 实现；主 Activity（LSPosed `MODULE_SETTINGS` 入口）始终可用，不要手动禁用 MainActivity 组件
+- **LTE 测试数据范围**：TAC 16 位、CI 28 位、PCI 0~503，测试数据生成必须落在范围内；
+- **jadx CLI 反编译 framework.jar 很慢**：framework.jar 是 dex 且体积大；优先真机反射枚举；
+- **地图 SDK 坐标是 GCJ-02**：地图选点/POI 坐标必须经 `GeoCoordConverter.gcj02ToWgs84` 转换后作为测试数据（否则偏差数百米）；内部持久化统一 WGS-84；
+- **NetworkOnMainThread**：测试校验工具的 API 调用必须在后台线程，UI 更新回主线程；
+- **ApiServer 假死**：`acceptLoop` 单次 accept 异常不得 break；已改为异常重试 + socket 重建 + 固定线程池；
+- **流式录制**：录制中断（系统服务重启/崩溃）后自动标记 `interrupted` 并按实际帧数据恢复时长/帧数。
 
 ---
 
-## 6. 目录结构
+## 开发者声明
 
-```
-ZhangVirtualEnv/
-├── app/
-│   └── src/main/
-│       ├── java/io/github/fairyxh/VirtualEnv/
-│       │   ├── app/          # 控制端（MainActivity、地图、摇杆、设置）
-│       │   ├── core/         # Backend、ApiServer、Engine、EnvStateCache
-│       │   ├── hook/         # Framework/Phone/BLE/Sensor/GNSS Hook
-│       │   ├── profile/      # 系统版本适配 Profile
-│       │   └── util/         # 日志、Token 等
-│       ├── assets/           # api_token.txt
-│       └── resources/META-INF/xposed/  # module.prop / scope.list
-└── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
-```
+本项目仅用于软件开发、测试和兼容性验证，不会针对任何特定第三方服务提供适配方案。
 
-> 逆向分析、Hook 签名核对与真机验证过程记录保存在本地开发机（**不随本仓库分发**）。仓库内 README 已直接给出关键结论，不依赖任何外部文档即可使用本项目。
+使用者应确保：
+
+- 测试设备属于本人或已获得授权；
+- 测试对象具有合法的测试权限；
+- 使用行为符合当地法律法规和服务协议。
+
+使用者应自行承担使用本项目进行测试所产生的全部责任。
 
 ---
 
-## 7. 许可证
+## 许可证
 
 见仓库根目录 `LICENSE`。
