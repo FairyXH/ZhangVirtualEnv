@@ -1501,7 +1501,14 @@ class Backend private constructor(private val dataDir: File) {
             put("cell", cellEngine.statusJson())
             put("ble", bleEngine.statusJson())
             put("gnss", gnssEngine.statusJson())
-            put("sensor", sensorEngine.statusJson())
+            put("sensor", sensorEngine.statusJson().also { s ->
+                // 附加后端状态：App 进程 EnvStateCache 依赖此字段决定是否抑制本地 Hook 注入
+                try {
+                    s.put("backendStatus", io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendManager.statusJson())
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "append sensor backend status failed", t)
+                }
+            })
             put("sim", simEngine.statusJson())
         }
     }
