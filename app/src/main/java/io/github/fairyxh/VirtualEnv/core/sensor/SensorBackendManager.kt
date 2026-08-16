@@ -151,6 +151,17 @@ object SensorBackendManager {
         val cfg = provider() ?: VirtualSensorConfig()
         synchronized(this) {
             backend.stop()
+            if (!cfg.enabled) {
+                statusRef.set(
+                    SensorBackendStatus(
+                        type = SensorBackendType.NONE,
+                        started = false,
+                        reason = "SENSOR_SIM_DISABLED"
+                    )
+                )
+                ZLog.i(TAG_SCOPE, "Sensor Backend Manager:\n[!] Sensor simulation disabled\nSelected backend: NONE")
+                return
+            }
             val preference = cfg.backend.ifBlank { VirtualSensorConfig.BACKEND_AUTO }
             if (preference == VirtualSensorConfig.BACKEND_LEGACY) {
                 statusRef.set(
