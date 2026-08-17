@@ -93,6 +93,10 @@ typedef struct {
 static zve_config_t g_cfg;
 static zve_motion_t g_motion;
 static zve_stats_t g_stats;
+
+/* 双 hook（sendEvents + write）可能先后改写同一事件批，用批指纹幂等去重 */
+static uint64_t g_last_batch_ts;
+static size_t g_last_batch_count;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Hook 状态 */
@@ -294,6 +298,17 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
     g_stats.rewrite_calls++;
     if (events == NULL || count == 0 || !g_cfg.enabled) return;
     pthread_mutex_lock(&g_mutex);
+
+    /* 幂等：同一事件批（首事件 timestamp + count）已被另一 hook 改写则跳过，
+     * 避免 sendEvents 与 write 双 hook 时 advance 两次导致步数翻倍 */
+    uint64_t batch_ts = events[0].timestamp;
+    if (batch_ts == g_last_batch_ts && count == g_last_batch_count) {
+        pthread_mutex_unlock(&g_mutex);
+        return;
+    }
+    g_last_batch_ts = batch_ts;
+    g_last_batch_count = count;
+
     zve_motion_advance();
     zve_phone_update();
 
@@ -742,39 +757,45 @@ static int zve_write_hook_uninstall(void) {
 }
 
 /*
- * 安装优先级：sendEvents 入口（覆盖 BitTube + Android15 共享内存全部路径），
- * 失败回退 write（仅 BitTube 路径）。g_stats.hooked: 2=sendEvents, 1=write。
+ * 安装策略（双 hook 并存，覆盖 BitTube 全链）：
+ *   - sendEvents 入口：SensorEventConnection 发送汇聚点（BitTube + 部分共享内存）
+ *   - write 入口：SensorEventQueue::write（BitTube 直写/缓存路径）
+ * 同一事件批由 rewrite 批指纹去重，保证只推进一次。
+ * g_stats.hooked: 3=双装, 2=仅 sendEvents, 1=仅 write。
  */
 static int zve_hook_install(void) {
     if (g_stats.hooked) return 1;
     g_stats.last_error = 0;
-    int rc = zve_sendevents_hook_install();
-    if (rc == 0) {
-        g_stats.hooked = 2;
-        g_stats.events_rewritten = 0;
-        g_stats.delivery_verified = 0;
-        LOGI("[✓] native hook installed via sendEvents (hooked=2)");
-        return 0;
+    int se_rc = zve_sendevents_hook_install();
+    int w_rc = zve_write_hook_install();
+    if (se_rc != 0 && w_rc != 0) {
+        g_stats.last_error = (se_rc != 0) ? se_rc : w_rc;
+        LOGW("both hooks failed se=%d write=%d", se_rc, w_rc);
+        return g_stats.last_error;
     }
-    LOGW("sendEvents hook unavailable rc=%d, fallback write hook", rc);
-    rc = zve_write_hook_install();
-    if (rc == 0) {
+    if (se_rc == 0 && w_rc == 0) {
+        g_stats.hooked = 3;
+        LOGI("[✓] native hook installed via sendEvents + write (hooked=3)");
+    } else if (se_rc == 0) {
+        g_stats.hooked = 2;
+        LOGI("[✓] native hook installed via sendEvents (hooked=2)");
+    } else {
         g_stats.hooked = 1;
-        g_stats.events_rewritten = 0;
-        g_stats.delivery_verified = 0;
         LOGI("[✓] native hook installed via write (hooked=1)");
     }
-    return rc;
+    g_stats.events_rewritten = 0;
+    g_stats.delivery_verified = 0;
+    return 0;
 }
 
 static int zve_hook_uninstall(void) {
     if (!g_stats.hooked) return 0;
-    int rc = (g_stats.hooked == 2) ? zve_sendevents_hook_uninstall()
-                                   : zve_write_hook_uninstall();
+    int rc1 = zve_sendevents_hook_uninstall();
+    int rc2 = zve_write_hook_uninstall();
     g_stats.hooked = 0;
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
-    return rc;
+    return (rc1 != 0) ? rc1 : rc2;
 }
 
 /* ---------- JNI ---------- */
