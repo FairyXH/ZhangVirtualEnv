@@ -758,45 +758,31 @@ static int zve_write_hook_uninstall(void) {
 }
 
 /*
- * 安装策略（双 hook 并存，覆盖 BitTube 全链）：
- *   - sendEvents 入口：SensorEventConnection 发送汇聚点（BitTube + 部分共享内存）
- *   - write 入口：SensorEventQueue::write（BitTube 直写/缓存路径）
- * 同一事件批由 rewrite 批指纹去重，保证只推进一次。
- * g_stats.hooked: 3=双装, 2=仅 sendEvents, 1=仅 write。
+ * 回退 59c8742 验证策略：write hook 单装（BitTube 路径全覆盖），
+ * sendEvents hook 经实证为名存实亡（Oplus vtable 不指向 AOSP 实现），
+ * 保留在代码中但不再安装，避免双 hook 干扰。
+ * g_stats.hooked: 1=write 单装（59c8742 模式）
  */
 static int zve_hook_install(void) {
     if (g_stats.hooked) return 1;
     g_stats.last_error = 0;
-    int se_rc = zve_sendevents_hook_install();
-    int w_rc = zve_write_hook_install();
-    if (se_rc != 0 && w_rc != 0) {
-        g_stats.last_error = (se_rc != 0) ? se_rc : w_rc;
-        LOGW("both hooks failed se=%d write=%d", se_rc, w_rc);
-        return g_stats.last_error;
-    }
-    if (se_rc == 0 && w_rc == 0) {
-        g_stats.hooked = 3;
-        LOGI("[✓] native hook installed via sendEvents + write (hooked=3)");
-    } else if (se_rc == 0) {
-        g_stats.hooked = 2;
-        LOGI("[✓] native hook installed via sendEvents (hooked=2)");
-    } else {
+    int rc = zve_write_hook_install();
+    if (rc == 0) {
         g_stats.hooked = 1;
-        LOGI("[✓] native hook installed via write (hooked=1)");
+        g_stats.events_rewritten = 0;
+        g_stats.delivery_verified = 0;
+        LOGI("[✓] native hook installed via write (hooked=1, 59c8742 mode)");
     }
-    g_stats.events_rewritten = 0;
-    g_stats.delivery_verified = 0;
-    return 0;
+    return rc;
 }
 
 static int zve_hook_uninstall(void) {
     if (!g_stats.hooked) return 0;
-    int rc1 = zve_sendevents_hook_uninstall();
-    int rc2 = zve_write_hook_uninstall();
+    int rc = zve_write_hook_uninstall();
     g_stats.hooked = 0;
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
-    return (rc1 != 0) ? rc1 : rc2;
+    return rc;
 }
 
 /* ---------- JNI ---------- */
