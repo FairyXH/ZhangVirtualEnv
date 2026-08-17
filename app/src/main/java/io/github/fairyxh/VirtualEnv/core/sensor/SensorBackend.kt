@@ -25,6 +25,10 @@ data class SensorBackendStatus(
     val injectMode: Int = -1,
     val reason: String = "",
     val eventCount: Long = 0L,
+    /** 系统级通道是否已实证送达（Native Hook 首次改写事件后为 true；LEGACY 抑制的依据）。 */
+    val deliveryVerified: Boolean = false,
+    /** 后端详情（如 Native Hook 地址/重写计数 JSON）。 */
+    val detail: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("type", type.name)
@@ -32,6 +36,8 @@ data class SensorBackendStatus(
         put("injectMode", injectMode)
         put("reason", reason)
         put("eventCount", eventCount)
+        put("deliveryVerified", deliveryVerified)
+        put("detail", detail)
     }
 
     companion object {
@@ -44,6 +50,8 @@ data class SensorBackendStatus(
                 injectMode = json.optInt("injectMode", -1),
                 reason = json.optString("reason", ""),
                 eventCount = json.optLong("eventCount", 0L),
+                deliveryVerified = json.optBoolean("deliveryVerified", false),
+                detail = json.optString("detail", ""),
             )
         }
     }

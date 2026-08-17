@@ -50,7 +50,9 @@ object SensorBackendManager {
     /** system_server 初始化：创建引擎 + 全局后端。configProvider 返回当前 sensor 配置。 */
     fun initSystemServer(
         configProvider: () -> VirtualSensorConfig?,
-        systemServerClassLoader: ClassLoader? = null
+        systemServerClassLoader: ClassLoader? = null,
+        moduleApkPath: String? = null,
+        nativeLibDir: String? = null
     ) {
         synchronized(this) {
             if (role.get() == Role.SYSTEM_SERVER) return
@@ -63,7 +65,9 @@ object SensorBackendManager {
             systemBackend = SystemSensorBackend(
                 sensorManagerProvider = { SystemSensorBackend.systemServerSensorManager() },
                 engine = engine!!,
-                systemServerClassLoader = systemServerClassLoader
+                systemServerClassLoader = systemServerClassLoader,
+                moduleApkPath = moduleApkPath,
+                nativeLibDir = nativeLibDir
             )
             ZLog.i(TAG_SCOPE, "SensorBackendManager initialized for system_server")
         }
@@ -206,10 +210,19 @@ object SensorBackendManager {
     /** App 进程侧更新跨进程 system 状态（EnvStateCache 轮询写入）。 */
     fun updateSystemStatusFromCache(systemStatus: SensorBackendStatus) {
         statusRef.set(systemStatus)
-        // 注意：通道 2（SensorService sendRuntimeSensorEvent）在 Oplus 15 实测只更新
-        // last-event 缓存、不进入 App 分发（见 docs/reverse §8.3），因此 SYSTEM 状态
-        // 不可作为 suppress 依据——LEGACY 本地注入保持启用，确保实际可送达。
-        // 若未来系统级通道验证可送达，再恢复按 SYSTEM 状态抑制避免双重注入。
-        // onSystemBackendStatus(systemStatus)
+        val backend = appBackend ?: return
+        // 仅 Native 全局 Hook（injectMode=100）且已实证改写事件时才抑制 LEGACY：
+        // - Native Hook 在 SensorEventQueue::write 改写所有连接的事件，全局真实送达；
+        // - deliveryVerified 防止「SYSTEM 状态可信但实际未送达」导致 LEGACY 被误关
+        //   （8.4 回归根因：通道 2 只更新 last-event 缓存、不进入 App 分发）。
+        val nativeVerified = systemStatus.type == SensorBackendType.SYSTEM &&
+            systemStatus.started &&
+            systemStatus.injectMode == NativeSensorBridge.MODE_NATIVE_GLOBAL &&
+            systemStatus.deliveryVerified
+        if (nativeVerified) {
+            backend.suppress()
+        } else {
+            backend.unsuppress()
+        }
     }
 }

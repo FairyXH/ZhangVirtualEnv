@@ -85,6 +85,7 @@ class AppHookSensorBackend(private val cache: EnvStateCache) : SensorBackend {
     }
 
     fun unsuppress() {
+        if (!suppressed) return
         suppressed = false
         refresh()
         ZLog.i(TAG_SCOPE, "AppHookSensorBackend unsuppressed (legacy hook active)")

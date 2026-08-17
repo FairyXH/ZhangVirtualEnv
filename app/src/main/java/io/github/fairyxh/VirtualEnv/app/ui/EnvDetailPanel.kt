@@ -684,6 +684,8 @@ fun EnvDetailPanel(
                         val mode = backendStatus.optInt("injectMode", -1)
                         val reason = backendStatus.optString("reason", "")
                         sensorBackendStatus = when {
+                            typeName == "SYSTEM" && started && mode == io.github.fairyxh.VirtualEnv.core.sensor.NativeSensorBridge.MODE_NATIVE_GLOBAL ->
+                                "系统级全局模式已生效（Native 全局事件通道, mode=$mode）"
                             typeName == "SYSTEM" && started -> "全局系统模式已生效（SensorService 注入, mode=$mode）"
                             typeName == "SYSTEM" && !started -> "全局系统模式（未启动${if (reason.isNotBlank()) "：$reason" else ""}）"
                             typeName == "LEGACY" -> "应用兼容模式（LSPosed 作用域内生效）"

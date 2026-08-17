@@ -253,7 +253,9 @@ class VirtualEnvEntry : XposedModule() {
                         io.github.fairyxh.VirtualEnv.core.sensor.VirtualSensorConfig
                             .fromStatus(backend.sensorEngine.statusJson())
                     },
-                    systemServerClassLoader = param.javaClass.getMethod("getClassLoader").invoke(param) as? ClassLoader
+                    systemServerClassLoader = param.javaClass.getMethod("getClassLoader").invoke(param) as? ClassLoader,
+                    moduleApkPath = moduleApplicationInfo.sourceDir,
+                    nativeLibDir = moduleApplicationInfo.nativeLibraryDir
                 )
                 scheduleSensorBackendStart()
             } catch (t: Throwable) {

@@ -16,12 +16,17 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 全局系统传感器后端（SensorService 系统级注入，两种通道）。
+ * 全局系统传感器后端（SensorService 系统级注入，多通道）。
  *
  * 运行在 **system_server** 进程。数据统一来自 [VirtualMotionEngine]
  * （人体运动模型），本类只负责探测/调度/注入。
  *
- * 通道 1（首选）：`SensorManager.initDataInjection / injectSensorData`
+ * 通道 0（首选）：Native 全局 Hook —— `SensorEventQueue::write`
+ * （libsensor.so）inline hook，所有离开 SensorService 的事件在写入
+ * 连接共享内存前被改写，任何 App 均生效且无需作用域；实证见
+ * `docs/reverse/native-sensor-hook-oplus15.md`。
+ *
+ * 通道 1（回退）：`SensorManager.initDataInjection / injectSensorData`
  * （@SystemApi，Oplus 15 实测 MODE_NOT_SUPPORTED，native 未实现）。
  *
  * 通道 2（回退）：`SensorService.sendRuntimeSensorEventNative`
@@ -34,6 +39,8 @@ class SystemSensorBackend(
     private val sensorManagerProvider: () -> SensorManager?,
     private val engine: VirtualMotionEngine,
     private val systemServerClassLoader: ClassLoader? = null,
+    private val moduleApkPath: String? = null,
+    private val nativeLibDir: String? = null,
 ) : SensorBackend {
 
     companion object {
@@ -51,6 +58,9 @@ class SystemSensorBackend(
 
         /** 通道 2：SensorService.sendRuntimeSensorEventNative（native 事件注入）。 */
         private const val MODE_RUNTIME_EVENT_NATIVE = 10
+
+        /** 通道 0：Native 全局 Hook（SensorEventQueue::write inline hook）。 */
+        private const val MODE_NATIVE_GLOBAL = NativeSensorBridge.MODE_NATIVE_GLOBAL
 
         /** 各类型注入周期：步频按 stepFrequency 动态，加速度固定 100ms。 */
         private const val ACCEL_PERIOD_MS = 100L
@@ -95,6 +105,19 @@ class SystemSensorBackend(
     override fun start() {
         synchronized(lock) {
             if (started) return
+            // 通道 0（首选）：Native 全局 Hook，不依赖 SensorManager 就绪
+            if (NativeSensorBridge.loadLibrary(moduleApkPath, nativeLibDir)) {
+                val rc = NativeSensorBridge.install()
+                if (rc == 0 || rc == 1) {
+                    activeMode = MODE_NATIVE_GLOBAL
+                    started = true
+                    reason = ""
+                    applyNativeConfig(lastConfig)
+                    ZLog.i(TAG_SCOPE, "[✓] Native global sensor hook installed (mode=$MODE_NATIVE_GLOBAL rc=$rc)")
+                    return
+                }
+                ZLog.w(TAG_SCOPE, "[!] Native global hook unavailable rc=$rc\nFallback: Java injection channels")
+            }
             val sm = sensorManagerProvider() ?: run {
                 reason = "SENSOR_MANAGER_UNAVAILABLE"
                 ZLog.w(TAG_SCOPE, "SystemSensorBackend start failed: SensorManager unavailable")
@@ -156,6 +179,13 @@ class SystemSensorBackend(
         synchronized(lock) {
             if (!started) return
             started = false
+            if (activeMode == MODE_NATIVE_GLOBAL) {
+                // Native 通道：卸载 hook 恢复原指令（fail-open）
+                val rc = NativeSensorBridge.uninstall()
+                ZLog.i(TAG_SCOPE, "SystemSensorBackend stopped, native hook uninstalled rc=$rc (original restored)")
+                activeMode = -1
+                return
+            }
             entries.values.forEach { it.future.cancel(false) }
             entries.clear()
             scheduler?.shutdownNow()
@@ -182,6 +212,11 @@ class SystemSensorBackend(
         val old = lastConfig
         lastConfig = config
         engine.updateProfile(config?.toMotionProfile() ?: MotionProfile.STATIONARY)
+        if (activeMode == MODE_NATIVE_GLOBAL) {
+            // Native 通道：直接同步配置到 native 引擎（无调度器）
+            applyNativeConfig(config)
+            return
+        }
         if (old?.enabled != config?.enabled || old?.stepFrequency != config?.stepFrequency ||
             old?.mode != config?.mode || old?.amplitude != config?.amplitude
         ) {
@@ -196,6 +231,18 @@ class SystemSensorBackend(
     }
 
     override fun getStatus(): SensorBackendStatus {
+        if (activeMode == MODE_NATIVE_GLOBAL) {
+            val st = NativeSensorBridge.status()
+            return SensorBackendStatus(
+                type = if (started) SensorBackendType.SYSTEM else SensorBackendType.NONE,
+                started = started,
+                injectMode = MODE_NATIVE_GLOBAL,
+                reason = reason,
+                eventCount = st.optLong("eventsRewritten", 0L),
+                deliveryVerified = st.optBoolean("deliveryVerified", false),
+                detail = st.toString(),
+            )
+        }
         val running = started && entries.isNotEmpty()
         return SensorBackendStatus(
             type = if (started) SensorBackendType.SYSTEM else SensorBackendType.NONE,
@@ -207,6 +254,28 @@ class SystemSensorBackend(
     }
 
     // ---------- 内部 ----------
+
+    /** 同步配置到 Native 引擎（模式/步频/速度/幅度/噪声）。 */
+    private fun applyNativeConfig(config: VirtualSensorConfig?) {
+        val cfg = config ?: VirtualSensorConfig()
+        val profile = cfg.toMotionProfile()
+        val mode = when (profile.activity) {
+            ActivityMode.STATIONARY -> 0
+            ActivityMode.RUN -> 2
+            else -> 1
+        }
+        NativeSensorBridge.setConfig(
+            enabled = cfg.enabled,
+            mode = mode,
+            stepFrequency = profile.stepFrequency.toFloat(),
+            speedKmh = profile.effectiveSpeedKmh.toFloat(),
+            amplitude = profile.amplitudeOverride ?: -1f,
+            randomNoise = profile.randomNoise,
+            headingDeg = 0f,
+            initialStepCount = cfg.stepCount,
+        )
+        ZLog.d(TAG_SCOPE, "native config: enabled=${cfg.enabled} mode=$mode steps=${profile.stepFrequency} speed=${profile.effectiveSpeedKmh} amp=${profile.amplitudeOverride ?: -1f} noise=${profile.randomNoise}")
+    }
 
     /** 探测 Data Injection 可用性：优先 mode=4，失败回退 mode=1；均失败返回 -1。 */
     private fun detectInjectionMode(sm: SensorManager): Int {
