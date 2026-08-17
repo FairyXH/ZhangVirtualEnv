@@ -98,6 +98,12 @@ static void *g_write_addr;
 static void *g_write_helper_addr;
 static uint32_t g_orig_b_insn; /* write+8 原始指令 */
 static void *g_stub_mem;       /* 手工构建的 arm64 重写桩页 */
+
+/* sendEvents 入口 hook 状态（g_stats.hooked=2 时生效） */
+static void *g_se_addr;
+static uint32_t g_se_orig_insn; /* sendEvents 入口原始指令（paciasp） */
+static void *g_se_stub_mem;
+
 static uint64_t g_rng_state = 0x9E3779B97F4A7C15ULL;
 
 /* ---------- 基础工具 ---------- */
@@ -390,11 +396,52 @@ static int zve_build_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t helper
     return ZVE_STUB_SIZE;
 }
 
+/*
+ * SensorEventConnection::sendEvents 入口 trampoline（72 字节）。
+ * 原入口为 paciasp（PAC 签名），本桩必须在 SP 恢复原值后再 paciasp，
+ * 保证函数尾部 autiasp 验签通过；跳回 sendEvents+4 继续执行原函数体。
+ *   0x00 sub sp, sp, #0x20       （额外帧）
+ *   0x04 stp x0, x1, [sp]
+ *   0x08 str x30, [sp, #0x10]
+ *   0x0c ldr x16, [pc, #0x38] -> 0x44 rewrite 字面量
+ *   0x10 blr x16                 （x0=events, x1=count 天然匹配）
+ *   0x14 ldp x0, x1, [sp]
+ *   0x18 ldr x30, [sp, #0x10]
+ *   0x1c add sp, sp, #0x20
+ *   0x20 paciasp                 （SP=原值，签名原 LR）
+ *   0x24 ldr x17, [pc, #0x28] -> 0x4c 返回地址字面量
+ *   0x28 br x17
+ *   0x44 <quad rewrite_addr>
+ *   0x4c <quad sendEvents+4>
+ */
+#define ZVE_SE_STUB_SIZE 0x54
+
+static int zve_build_sendevents_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t ret_addr) {
+    static const uint32_t kSe[] = {
+        0xD10083FFu, /* 0x00 sub sp, sp, #0x20 */
+        0xA90007E0u, /* 0x04 stp x0, x1, [sp] */
+        0xF9000BFEu, /* 0x08 str x30, [sp, #0x10] */
+        0x580001D0u, /* 0x0c ldr x16, [pc, #0x38] */
+        0xD63F0200u, /* 0x10 blr x16 */
+        0xA94007E0u, /* 0x14 ldp x0, x1, [sp] */
+        0xF9400BFEu, /* 0x18 ldr x30, [sp, #0x10] */
+        0x910083FFu, /* 0x1c add sp, sp, #0x20 */
+        0xD503233Fu, /* 0x20 paciasp */
+        0x58000151u, /* 0x24 ldr x17, [pc, #0x28] */
+        0xD61F0220u, /* 0x28 br x17 */
+    };
+    memset(out, 0, ZVE_SE_STUB_SIZE);
+    memcpy(out, kSe, sizeof(kSe));                     /* 0x00-0x2b */
+    *(uint64_t *)(out + 0x44) = (uint64_t)rewrite_addr; /* 0x44-0x4b */
+    *(uint64_t *)(out + 0x4c) = (uint64_t)ret_addr;     /* 0x4c-0x53 */
+    return ZVE_SE_STUB_SIZE;
+}
+
 /* 在目标库加载地址附近分配可执行页（±96MB 内保证 B 可达）。
  * system_server 库区密集，固定偏移候选几乎全被占用（EEXIST），
  * 因此直接扫描 /proc/self/maps 在 [lib_base-96MB, lib_base+96MB]
  * 区间内找未映射空洞，取空洞起始页 mmap。 */
-static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr, uintptr_t lib_base) {
+static void *zve_alloc_exec_page(uintptr_t lib_base) {
     long page = sysconf(_SC_PAGESIZE);
     uintptr_t lo = (lib_base > 0x6000000u) ? lib_base - 0x6000000u : (uintptr_t)page;
     uintptr_t hi = lib_base + 0x6000000u;
@@ -453,12 +500,7 @@ static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr,
             mem = (uint8_t *)p;
         }
     }
-    zve_build_stub(mem, rewrite_addr, helper_addr);
-    if (mprotect(mem, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
-        LOGW("stub mprotect RX failed: %s", strerror(errno));
-        munmap(mem, (size_t)page);
-        return NULL;
-    }
+    /* 返回 RW 页：调用者写入桩代码后自行 mprotect RX */
     LOGI("stub mem allocated at %p (lib_base=%p)", mem, (void *)lib_base);
     return mem;
 }
@@ -542,8 +584,62 @@ static uintptr_t zve_lib_base_from_maps(const char *libname) {
  * 加载后实际地址 = base + vaddr，且必须通过下方字节校验才生效） */
 #define WRITE_VADDR_OPLUS15 0x11660u
 
-static int zve_hook_install(void) {
-    if (g_stats.hooked) return 1;
+/* libsensorservice.so 中 SensorEventConnection::sendEvents 的 vaddr。
+ * sendEvents 是所有连接事件发送的汇聚点（含 Android 15 共享内存通道），
+ * 在其入口改写 events 缓冲区即全局生效；Oplus15 实证字节：paciasp。 */
+#define SENDEVENTS_VADDR_OPLUS15 0x29944u
+
+static int zve_sendevents_hook_install(void) {
+    uintptr_t base = zve_lib_base_from_maps("libsensorservice.so");
+    if (base == 0) {
+        LOGW("libsensorservice.so not found in /proc/self/maps");
+        return -20;
+    }
+    void *fn = (void *)(base + SENDEVENTS_VADDR_OPLUS15);
+    const uint32_t *insn = (const uint32_t *)fn;
+    if (insn[0] != 0xD503233Fu) { /* paciasp */
+        LOGW("unexpected sendEvents prologue word0=%08x", insn[0]);
+        return -21;
+    }
+    uint8_t *stub = zve_alloc_exec_page(base);
+    if (stub == NULL) return -8;
+    zve_build_sendevents_stub(stub, (uintptr_t)&zve_rewrite_events, (uintptr_t)fn + 4);
+    long page = sysconf(_SC_PAGESIZE);
+    if (mprotect(stub, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
+        LOGW("sendevents stub mprotect RX failed: %s", strerror(errno));
+        munmap(stub, (size_t)page);
+        return -22;
+    }
+    g_se_orig_insn = insn[0];
+    int rc = zve_patch_branch((uintptr_t)fn, (uintptr_t)stub);
+    if (rc != 0) {
+        LOGW("sendevents patch failed rc=%d fn=%p stub=%p", rc, fn, stub);
+        munmap(stub, (size_t)page);
+        return rc;
+    }
+    g_se_addr = fn;
+    g_se_stub_mem = stub;
+    LOGI("sendEvents hook installed: fn=%p stub=%p", fn, stub);
+    return 0;
+}
+
+static int zve_sendevents_hook_uninstall(void) {
+    if (g_se_addr == NULL) return 0;
+    int rc = zve_patch_restore((uintptr_t)g_se_addr, g_se_orig_insn);
+    if (rc != 0) {
+        LOGW("sendevents restore failed rc=%d", rc);
+        return rc;
+    }
+    if (g_se_stub_mem != NULL) {
+        munmap(g_se_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
+        g_se_stub_mem = NULL;
+    }
+    g_se_addr = NULL;
+    LOGI("sendEvents hook uninstalled (original restored)");
+    return 0;
+}
+
+static int zve_write_hook_install(void) {
     void *write_fn = NULL;
     void *h = zve_lib_handle();
     if (h != NULL) {
@@ -587,11 +683,19 @@ static int zve_hook_install(void) {
     Dl_info di;
     uintptr_t lib_base = 0;
     if (dladdr(write_fn, &di) != 0) lib_base = (uintptr_t)di.dli_fbase;
-    g_stub_mem = zve_prepare_stub_mem((uintptr_t)&zve_rewrite_events, helper, lib_base);
+    g_stub_mem = zve_alloc_exec_page(lib_base);
     if (g_stub_mem == NULL) {
         g_stats.last_error = -8;
         LOGW("prepare stub mem failed (base=%p)", (void *)lib_base);
         return -8;
+    }
+    zve_build_stub(g_stub_mem, (uintptr_t)&zve_rewrite_events, helper);
+    long page = sysconf(_SC_PAGESIZE);
+    if (mprotect(g_stub_mem, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
+        LOGW("write stub mprotect RX failed: %s", strerror(errno));
+        munmap(g_stub_mem, (size_t)page);
+        g_stub_mem = NULL;
+        return -23;
     }
 
     g_write_helper_addr = (void *)helper;
@@ -601,20 +705,17 @@ static int zve_hook_install(void) {
         g_stats.last_error = rc;
         int64_t d = (int64_t)g_stub_mem - (int64_t)((uintptr_t)write_fn + 8);
         LOGW("patch branch failed rc=%d write=%p stub=%p delta=%lld bytes", rc, write_fn, g_stub_mem, (long long)d);
-        munmap(g_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
+        munmap(g_stub_mem, (size_t)page);
         g_stub_mem = NULL;
         return rc;
     }
     g_write_addr = write_fn;
-    g_stats.hooked = 1;
-    g_stats.events_rewritten = 0;
-    g_stats.delivery_verified = 0;
-    LOGI("native hook installed: write=%p helper=%p stub=%p", write_fn, (void *)helper, g_stub_mem);
+    LOGI("native write hook installed: write=%p helper=%p stub=%p", write_fn, (void *)helper, g_stub_mem);
     return 0;
 }
 
-static int zve_hook_uninstall(void) {
-    if (!g_stats.hooked) return 0;
+static int zve_write_hook_uninstall(void) {
+    if (g_write_addr == NULL) return 0;
     int rc = zve_patch_restore((uintptr_t)g_write_addr + 8, g_orig_b_insn);
     if (rc != 0) {
         g_stats.last_error = rc;
@@ -625,13 +726,46 @@ static int zve_hook_uninstall(void) {
         munmap(g_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
         g_stub_mem = NULL;
     }
+    g_write_addr = NULL;
+    g_write_helper_addr = NULL;
+    LOGI("native write hook uninstalled (original restored)");
+    return 0;
+}
+
+/*
+ * 安装优先级：sendEvents 入口（覆盖 BitTube + Android15 共享内存全部路径），
+ * 失败回退 write（仅 BitTube 路径）。g_stats.hooked: 2=sendEvents, 1=write。
+ */
+static int zve_hook_install(void) {
+    if (g_stats.hooked) return 1;
+    g_stats.last_error = 0;
+    int rc = zve_sendevents_hook_install();
+    if (rc == 0) {
+        g_stats.hooked = 2;
+        g_stats.events_rewritten = 0;
+        g_stats.delivery_verified = 0;
+        LOGI("[✓] native hook installed via sendEvents (hooked=2)");
+        return 0;
+    }
+    LOGW("sendEvents hook unavailable rc=%d, fallback write hook", rc);
+    rc = zve_write_hook_install();
+    if (rc == 0) {
+        g_stats.hooked = 1;
+        g_stats.events_rewritten = 0;
+        g_stats.delivery_verified = 0;
+        LOGI("[✓] native hook installed via write (hooked=1)");
+    }
+    return rc;
+}
+
+static int zve_hook_uninstall(void) {
+    if (!g_stats.hooked) return 0;
+    int rc = (g_stats.hooked == 2) ? zve_sendevents_hook_uninstall()
+                                   : zve_write_hook_uninstall();
     g_stats.hooked = 0;
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
-    g_write_addr = NULL;
-    g_write_helper_addr = NULL;
-    LOGI("native hook uninstalled (original restored)");
-    return 0;
+    return rc;
 }
 
 /* ---------- JNI ---------- */
