@@ -159,20 +159,29 @@ SDK Key 需在开放平台按当前应用包名与签名 SHA1 配置，应用内
 传感器连续测试数据（步频/步数/加速度事件流）通过**多级测试数据后端**注入，根据设备能力自动选择：
 
 ```
-传感器测试数据引擎（VirtualSensorEngine）
+传感器测试数据引擎（VirtualMotionEngine）
         │
         ▼
 传感器后端管理器（SensorBackendManager，自动选择）
+        ├─ Native 全局事件通道（首选）
+        │    基于系统传感器事件分发点的 Native 层测试适配（系统服务层，
+        │    对任意测试目标全局生效，无需为其配置作用域；见下方说明）
         ├─ 全局系统后端（SystemSensorBackend）
         │    基于 SensorService 数据注入（系统服务层，对测试目标全局生效，
-        │    无需为目标应用配置作用域）；默认优先启用。
+        │    无需为目标应用配置作用域）；Native 通道不可用时自动启用。
         └─ 应用兼容后端（AppHookSensorBackend）
              基于 Framework API 测试适配（LSPosed 作用域内进程生效，
              仅作为全局后端不可用时的自动回退，无需手动切换）。
 ```
 
-- 默认打开传感器测试即优先使用**全局系统模式**（SensorService 数据注入，对所有应用生效）；
+- 默认打开传感器测试即优先使用 **Native 全局事件通道**：在系统传感器事件分发点
+  （`SensorEventQueue::write`）改写事件数据，所有应用统一收到测试事件流，
+  且**不需要任何应用作用域**；通道安装前会做二进制特征校验，不匹配的 ROM
+  自动失败回退，不影响系统原行为；
 - 全局后端不可用时自动回退**应用兼容模式**（仅在 LSPosed 作用域内生效，不注入任何第三方应用）；
+- 系统级通道是否真实送达由“已确认送达（delivery verified）”状态控制：只有
+  Native 通道确实改写事件后，应用兼容模式才会自动抑制，避免双重注入或
+  系统通道失效时误关唯一可达链路；
 - 两套后端实现统一 `SensorBackend` 接口，上层业务与 UI 不感知具体注入方式；
 - 控制端传感器面板展示当前后端模式与运行状态，并内置 5 秒传感器事件检测器验证事件送达。
 
@@ -192,7 +201,8 @@ SDK Key 需在开放平台按当前应用包名与签名 SHA1 配置，应用内
 | `hook/StepSensorInjector.kt` | 传感器连续测试数据注入器（应用兼容后端核心） |
 | `core/sensor/SensorBackend.kt` | 传感器后端统一接口与状态模型 |
 | `core/sensor/SensorBackendManager.kt` | 传感器后端管理器（自动选择 / 回退策略） |
-| `core/sensor/SystemSensorBackend.kt` | 全局系统传感器后端（SensorService 数据注入） |
+| `core/sensor/SystemSensorBackend.kt` | 全局系统传感器后端（Native 通道优先，SensorService 注入回退） |
+| `core/sensor/NativeSensorBridge.kt` | Native 全局事件通道 JNI 桥（库加载 / Hook 安装 / 配置同步） |
 | `core/sensor/AppHookSensorBackend.kt` | 应用兼容传感器后端（包装 StepSensorInjector） |
 | `core/sensor/VirtualSensorEngine.kt` | 传感器测试数据引擎（步频/步数/时间戳/噪声） |
 | `core/sensor/VirtualSensorConfig.kt` | 传感器测试数据配置模型 |
@@ -210,6 +220,7 @@ ZhangVirtualEnv/
 │       │   ├── hook/         # Android Framework API 测试适配层
 │       │   ├── profile/      # 系统版本适配 Profile
 │       │   └── util/         # 日志、Token 等
+│       ├── jni/              # Native 传感器事件通道（arm64，CMake）
 │       ├── assets/           # api_token.txt
 │       └── resources/META-INF/xposed/  # module.prop / scope.list
 └── (VirEnvDetector 为独立工程，放 ZhangVirtualProject 同级)
