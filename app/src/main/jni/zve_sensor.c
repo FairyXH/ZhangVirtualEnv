@@ -300,9 +300,10 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
     pthread_mutex_lock(&g_mutex);
 
     /* 幂等：同一事件批（首事件 timestamp + count）已被另一 hook 改写则跳过，
-     * 避免 sendEvents 与 write 双 hook 时 advance 两次导致步数翻倍 */
+     * 避免 sendEvents 与 write 双 hook 时 advance 两次导致步数翻倍。
+     * timestamp==0 的批（meta/flush 等）不做指纹去重，避免误跳真实事件。 */
     uint64_t batch_ts = events[0].timestamp;
-    if (batch_ts == g_last_batch_ts && count == g_last_batch_count) {
+    if (batch_ts != 0 && batch_ts == g_last_batch_ts && count == g_last_batch_count) {
         pthread_mutex_unlock(&g_mutex);
         return;
     }
