@@ -625,7 +625,8 @@ static int zve_build_sendevents_stub(uint8_t *out, uintptr_t rewrite_addr, uintp
 #define ZVE_BATCH_STUB_SIZE 0x58
 
 static int zve_build_batch_stub(uint8_t *out, uintptr_t process_addr, uintptr_t ret_addr) {
-    static const uint32_t kBatch[] = {
+    /* Literal pool at 0x24 must not be overwritten by the tail instructions. */
+    static const uint32_t kBatchHead[] = {
         0xD10103FFu, /* 0x00 sub sp, sp, #0x40 */
         0xA90007E0u, /* 0x04 stp x0, x1, [sp] */
         0xA9010FE2u, /* 0x08 stp x2, x3, [sp, #0x10] */
@@ -635,6 +636,8 @@ static int zve_build_batch_stub(uint8_t *out, uintptr_t process_addr, uintptr_t 
         0x58000070u, /* 0x18 ldr x16, [pc, #0xc] -> 0x24 */
         0xD63F0200u, /* 0x1c blr x16 */
         0x14000003u, /* 0x20 b 0x2c */
+    };
+    static const uint32_t kBatchTail[] = {
         0xF90017E0u, /* 0x2c str x0, [sp, #0x28] */
         0xA94007E0u, /* 0x30 ldp x0, x1, [sp] */
         0xA9410FE2u, /* 0x34 ldp x2, x3, [sp, #0x10] */
@@ -646,9 +649,10 @@ static int zve_build_batch_stub(uint8_t *out, uintptr_t process_addr, uintptr_t 
         0xD61F0220u, /* 0x4c br x17 */
     };
     memset(out, 0, ZVE_BATCH_STUB_SIZE);
-    memcpy(out, kBatch, sizeof(kBatch));               /* 0x00-0x4f */
-    *(uint64_t *)(out + 0x24) = (uint64_t)process_addr; /* 0x24-0x2b */
-    *(uint64_t *)(out + 0x50) = (uint64_t)ret_addr;     /* 0x50-0x57 */
+    memcpy(out, kBatchHead, sizeof(kBatchHead));          /* 0x00-0x23 */
+    *(uint64_t *)(out + 0x24) = (uint64_t)process_addr;   /* 0x24-0x2b */
+    memcpy(out + 0x2c, kBatchTail, sizeof(kBatchTail));  /* 0x2c-0x4f */
+    *(uint64_t *)(out + 0x50) = (uint64_t)ret_addr;       /* 0x50-0x57 */
     return ZVE_BATCH_STUB_SIZE;
 }
 
