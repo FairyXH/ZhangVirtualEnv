@@ -2,7 +2,11 @@ package io.github.fairyxh.VirtualEnv.core.sensor
 
 import android.content.Context
 import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.SystemClock
 import io.github.fairyxh.VirtualEnv.core.sensor.motion.ActivityMode
 import io.github.fairyxh.VirtualEnv.core.sensor.motion.MotionProfile
@@ -100,6 +104,10 @@ class SystemSensorBackend(
 
     private val eventCount = AtomicLong(0L)
 
+    /** Native 通道送达探测：system_server 内注册真实监听，制造事件流驱动 deliveryVerified。 */
+    private var probeThread: HandlerThread? = null
+    private var probeListener: SensorEventListener? = null
+
     private var lastConfig: VirtualSensorConfig? = null
 
     override fun start() {
@@ -112,11 +120,12 @@ class SystemSensorBackend(
                     activeMode = MODE_NATIVE_GLOBAL
                     started = true
                     reason = ""
-                    applyNativeConfig(lastConfig)
                     ZLog.i(TAG_SCOPE, "[✓] Native global sensor hook installed (mode=$MODE_NATIVE_GLOBAL rc=$rc)")
+                    applyNativeConfig(lastConfig)
+                    startDeliveryProbe()
                     return
                 }
-                ZLog.w(TAG_SCOPE, "[!] Native global hook unavailable rc=$rc\nFallback: Java injection channels")
+                ZLog.w(TAG_SCOPE, "Native global hook unavailable rc=$rc, fallback to Java channels")
             }
             val sm = sensorManagerProvider() ?: run {
                 reason = "SENSOR_MANAGER_UNAVAILABLE"
@@ -181,7 +190,10 @@ class SystemSensorBackend(
             started = false
             if (activeMode == MODE_NATIVE_GLOBAL) {
                 // Native 通道：卸载 hook 恢复原指令（fail-open）
+                stopDeliveryProbe()
                 val rc = NativeSensorBridge.uninstall()
+                // 删除提取的 .so：SELinux context 随文件删除释放，不残留规则
+                NativeSensorBridge.cleanup()
                 ZLog.i(TAG_SCOPE, "SystemSensorBackend stopped, native hook uninstalled rc=$rc (original restored)")
                 activeMode = -1
                 return
@@ -254,6 +266,55 @@ class SystemSensorBackend(
     }
 
     // ---------- 内部 ----------
+
+    /**
+     * Native 通道送达探测：system_server 内注册一个真实 ACCEL 监听。
+     * 背景：App 侧 LEGACY 拦截 registerListener 后，SensorService 没有真实
+     * 客户端，事件流不经过 SensorEventQueue::write，Native 改写永远无法
+     * 证实送达（deliveryVerified 死锁）。注册本监听后 SensorService 激活
+     * 传感器并持续向该连接写事件 → 必经 write → Native 重写 → deliveryVerified。
+     * 送达后 App 侧才抑制 LEGACY，随后 App 重新注册走真实全局链路。
+     */
+    private fun startDeliveryProbe() {
+        try {
+            if (probeThread != null) return
+            val sm = sensorManagerProvider() ?: run {
+                ZLog.w(TAG_SCOPE, "delivery probe: sensor manager unavailable")
+                return
+            }
+            val sensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: run {
+                ZLog.w(TAG_SCOPE, "delivery probe: no accel sensor")
+                return
+            }
+            val th = HandlerThread("zve-native-probe").apply { start() }
+            val listener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) = Unit
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+            }
+            if (sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI, Handler(th.looper))) {
+                probeThread = th
+                probeListener = listener
+                ZLog.i(TAG_SCOPE, "native delivery probe registered (accel, delay=UI)")
+            } else {
+                th.quitSafely()
+                ZLog.w(TAG_SCOPE, "native delivery probe register failed")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "native delivery probe start failed", t)
+        }
+    }
+
+    private fun stopDeliveryProbe() {
+        try {
+            val sm = sensorManagerProvider()
+            probeListener?.let { sm?.unregisterListener(it) }
+            probeListener = null
+            probeThread?.quitSafely()
+            probeThread = null
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "native delivery probe stop failed", t)
+        }
+    }
 
     /** 同步配置到 Native 引擎（模式/步频/速度/幅度/噪声）。 */
     private fun applyNativeConfig(config: VirtualSensorConfig?) {
