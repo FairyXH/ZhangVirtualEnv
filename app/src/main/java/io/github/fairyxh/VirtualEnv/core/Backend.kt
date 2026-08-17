@@ -8,6 +8,7 @@ import io.github.fairyxh.VirtualEnv.core.engine.RouteEngine
 import io.github.fairyxh.VirtualEnv.core.engine.JoystickEngine
 import io.github.fairyxh.VirtualEnv.core.engine.RecordingEngine
 import io.github.fairyxh.VirtualEnv.core.model.LocationState
+import io.github.fairyxh.VirtualEnv.core.gnss.GNSSSimulationEngine
 import io.github.fairyxh.VirtualEnv.profile.ProfileManager
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import java.io.File
@@ -83,6 +84,8 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 虚拟 GNSS / 传感器（步频）状态（Phase 4 接入 Hook，状态由同一引擎管理）。 */
     val gnssEngine = EnvStateEngine("gnss")
+    /** GNSS geometry/signal model. It never owns a position; Backend supplies the current snapshot. */
+    val gnssSimulationEngine = GNSSSimulationEngine()
     val sensorEngine = EnvStateEngine("sensor")
 
     /** 虚拟 SIM 卡身份 / 信号状态（com.android.phone / system_server Hook 读取）。 */
@@ -377,14 +380,10 @@ class Backend private constructor(private val dataDir: File) {
         return autoCellCache.get() ?: org.json.JSONObject().apply { put("entries", org.json.JSONArray()) }
     }
 
-    /** 自动托管：GNSS 卫星充足（usedInFix=12 > 百度 a>2 阈值）+ 虚拟 NMEA。 */
+    /** 自动托管：derive GNSS geometry and signal fields from the authoritative virtual Location. */
     private fun autoGnssData(): org.json.JSONObject {
-        return org.json.JSONObject().apply {
-            put("satelliteCount", 24)
-            put("usedInFix", 12)
-            put("cn0", 38.0)
-            put("nmeaEnabled", true)
-        }
+        val location = currentLocation() ?: return org.json.JSONObject().apply { put("satellites", org.json.JSONArray()) }
+        return gnssSimulationEngine.toJson(location)
     }
 
     /** 自动托管：WiFi 扫描列表（基于虚拟位置派生，BSSID/SSID 合法）。 */

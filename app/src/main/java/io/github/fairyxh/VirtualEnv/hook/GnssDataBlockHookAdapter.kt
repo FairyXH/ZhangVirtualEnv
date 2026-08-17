@@ -425,7 +425,7 @@ class GnssDataBlockHookAdapter(
         }
     }
 
-    /** 用 GnssStatus.Builder 构造虚拟卫星状态（复用 FrameworkEnvHookAdapter 的 12 参 addSatellite 签名）。 */
+    /** 用 GNSSSimulationEngine 的同一位置/时间快照构造状态，避免固定卫星和固定角度。 */
     private fun buildVirtualGnssStatus(): Any? {
         return try {
             val builderClass = Class.forName("android.location.GnssStatus\$Builder")
@@ -445,37 +445,26 @@ class GnssDataBlockHookAdapter(
                 Boolean::class.javaPrimitiveType,
                 Float::class.javaPrimitiveType
             )
-            val cfg = backend.gnssEngine.currentData()
-            val total = cfg?.optInt("satelliteCount", DEFAULT_SATELLITE_COUNT)?.coerceIn(4, 64)
-                ?: DEFAULT_SATELLITE_COUNT
-            val used = cfg?.optInt("usedInFix", DEFAULT_USED_IN_FIX)?.coerceIn(4, total)
-                ?: DEFAULT_USED_IN_FIX
-            val configuredCn0 = cfg?.optDouble("cn0", DEFAULT_CN0_DBHZ.toDouble())?.toFloat()
-                ?: DEFAULT_CN0_DBHZ
-            val constellations = intArrayOf(
-                android.location.GnssStatus.CONSTELLATION_GPS,
-                android.location.GnssStatus.CONSTELLATION_GLONASS,
-                android.location.GnssStatus.CONSTELLATION_BEIDOU,
-                android.location.GnssStatus.CONSTELLATION_GALILEO
-            )
-            for (i in 0 until total) {
-                val svid = i + 1
-                val cn0 = (configuredCn0 - 4f + (i % 5)).coerceIn(25f, 50f)
-                val usedInFix = i < used
+            val location = backend.currentLocation() ?: return null
+            val satellites = backend.gnssSimulationEngine
+                .snapshot(location, System.currentTimeMillis())
+                .filter { it.visible }
+            for (satellite in satellites) {
+                val model = satellite.model
                 addSatellite.invoke(
                     builder,
-                    svid,
-                    constellations[i % constellations.size],
-                    cn0,
-                    10f + i,
-                    90f + i * 7,
-                    true, // hasEphemeris
-                    true, // hasAlmanac
-                    usedInFix,
+                    model.svid,
+                    model.constellation,
+                    satellite.cn0DbHz,
+                    satellite.elevationDeg,
+                    satellite.azimuthDeg,
+                    satellite.hasEphemerisData,
+                    satellite.hasAlmanacData,
+                    satellite.usedInFix,
                     false, // hasBasebandCn0
-                    cn0,
+                    satellite.cn0DbHz,
                     false, // isBasebandInFix
-                    1575.42f // carrierFrequencyHz (L1)
+                    model.carrierFrequencyHz
                 )
             }
             builderClass.getMethod("build").invoke(builder)

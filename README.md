@@ -108,6 +108,8 @@ VirEnvDetector 与控制端内置环境测试分别从普通应用视角注册 G
 
 所有操作走本地测试 API（`127.0.0.1:18790`，需 `X-ZVE-Token` 鉴权），无需外部网络（地图 SDK、基站数据查询等可选能力除外）。
 
+GNSS 自动测试数据由独立 `GNSSSimulationEngine` 生成：它从当前统一虚拟位置和时间戳计算卫星轨道近似位置，再经过 WGS-84 LLA/ECEF、ENU 坐标变换得到方位角、高度角和距离，并据此计算可见性、历书/星历状态、UsedInFix 与平滑 C/N0。卫星目录固定包含 GPS、BeiDou、Galileo、GLONASS 和 QZSS 的合法 SVID 与合理测试频率；不会按刷新周期随机更换卫星、数量或几何数据。该模型用于 Android API 数据路径和应用兼容性测试，不模拟真实射频、GNSS 芯片输入、伪距或导航电文。
+
 ---
 
 ## 测试能力
