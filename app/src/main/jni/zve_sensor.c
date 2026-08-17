@@ -397,43 +397,48 @@ static int zve_build_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t helper
 }
 
 /*
- * SensorEventConnection::sendEvents 入口 trampoline（72 字节）。
+ * SensorEventConnection::sendEvents 入口 trampoline（96 字节）。
+ * sendEvents 为成员函数：x0=this, x1=events, x2=count。
  * 原入口为 paciasp（PAC 签名），本桩必须在 SP 恢复原值后再 paciasp，
  * 保证函数尾部 autiasp 验签通过；跳回 sendEvents+4 继续执行原函数体。
- *   0x00 sub sp, sp, #0x20       （额外帧）
- *   0x04 stp x0, x1, [sp]
- *   0x08 str x30, [sp, #0x10]
- *   0x0c ldr x16, [pc, #0x38] -> 0x44 rewrite 字面量
- *   0x10 blr x16                 （x0=events, x1=count 天然匹配）
- *   0x14 ldp x0, x1, [sp]
- *   0x18 ldr x30, [sp, #0x10]
- *   0x1c add sp, sp, #0x20
- *   0x20 paciasp                 （SP=原值，签名原 LR）
- *   0x24 ldr x17, [pc, #0x28] -> 0x4c 返回地址字面量
- *   0x28 br x17
- *   0x44 <quad rewrite_addr>
- *   0x4c <quad sendEvents+4>
+ *   0x00 sub sp, sp, #0x20
+ *   0x04 stp x0, x1, [sp]          （this, events）
+ *   0x08 stp x2, x30, [sp, #0x10]  （count, LR）
+ *   0x0c mov x0, x1                （events）
+ *   0x10 mov x1, x2                （count）
+ *   0x14 ldr x16, [pc, #0x38] -> 0x50 rewrite 字面量
+ *   0x18 blr x16
+ *   0x1c ldp x0, x1, [sp]
+ *   0x20 ldp x2, x30, [sp, #0x10]
+ *   0x24 add sp, sp, #0x20
+ *   0x28 paciasp                   （SP=原值，签名原 LR）
+ *   0x2c ldr x17, [pc, #0x28] -> 0x58 返回地址字面量
+ *   0x30 br x17
+ *   0x50 <quad rewrite_addr>
+ *   0x58 <quad sendEvents+4>
  */
-#define ZVE_SE_STUB_SIZE 0x54
+#define ZVE_SE_STUB_SIZE 0x60
 
 static int zve_build_sendevents_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t ret_addr) {
     static const uint32_t kSe[] = {
         0xD10083FFu, /* 0x00 sub sp, sp, #0x20 */
         0xA90007E0u, /* 0x04 stp x0, x1, [sp] */
-        0xF9000BFEu, /* 0x08 str x30, [sp, #0x10] */
-        0x580001D0u, /* 0x0c ldr x16, [pc, #0x38] */
-        0xD63F0200u, /* 0x10 blr x16 */
-        0xA94007E0u, /* 0x14 ldp x0, x1, [sp] */
-        0xF9400BFEu, /* 0x18 ldr x30, [sp, #0x10] */
-        0x910083FFu, /* 0x1c add sp, sp, #0x20 */
-        0xD503233Fu, /* 0x20 paciasp */
-        0x58000151u, /* 0x24 ldr x17, [pc, #0x28] */
-        0xD61F0220u, /* 0x28 br x17 */
+        0xA9017BE2u, /* 0x08 stp x2, x30, [sp, #0x10] */
+        0xAA0103E0u, /* 0x0c mov x0, x1 */
+        0xAA0203E1u, /* 0x10 mov x1, x2 */
+        0x580001F0u, /* 0x14 ldr x16, [pc, #0x3c] -> 0x50 */
+        0xD63F0200u, /* 0x18 blr x16 */
+        0xA94007E0u, /* 0x1c ldp x0, x1, [sp] */
+        0xA9417BE2u, /* 0x20 ldp x2, x30, [sp, #0x10] */
+        0x910083FFu, /* 0x24 add sp, sp, #0x20 */
+        0xD503233Fu, /* 0x28 paciasp */
+        0x58000171u, /* 0x2c ldr x17, [pc, #0x2c] -> 0x58 */
+        0xD61F0220u, /* 0x30 br x17 */
     };
     memset(out, 0, ZVE_SE_STUB_SIZE);
-    memcpy(out, kSe, sizeof(kSe));                     /* 0x00-0x2b */
-    *(uint64_t *)(out + 0x44) = (uint64_t)rewrite_addr; /* 0x44-0x4b */
-    *(uint64_t *)(out + 0x4c) = (uint64_t)ret_addr;     /* 0x4c-0x53 */
+    memcpy(out, kSe, sizeof(kSe));                     /* 0x00-0x33 */
+    *(uint64_t *)(out + 0x50) = (uint64_t)rewrite_addr; /* 0x50-0x57 */
+    *(uint64_t *)(out + 0x58) = (uint64_t)ret_addr;     /* 0x58-0x5f */
     return ZVE_SE_STUB_SIZE;
 }
 
