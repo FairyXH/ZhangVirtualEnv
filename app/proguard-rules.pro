@@ -34,6 +34,12 @@
 -dontwarn com.amap.ams.gnss.GnssSoftLocator
 -dontwarn net.jafama.FastMath
 
+# Native 传感器全局模拟：JNI RegisterNatives 按类名注册，R8 不得改名/裁剪
+-keep class io.github.fairyxh.VirtualEnv.core.sensor.NativeSensorBridge {
+    private native <methods>;
+    <fields>;
+}
+
 # AMap SDK 必须整体保留原名：libAMapSDK_MAP_v11_2_100.so 在 GL 线程通过 JNI
 # FindClass/GetStaticMethodID 按原始类名反查 Java 类，混淆/裁剪会导致
 # "JNI DETECTED ERROR IN APPLICATION: java_class == null" -> SIGABRT（位置/路线页闪退）。

@@ -18,6 +18,10 @@ android {
         targetSdk = 33
         versionName = gitVersion[0]
         versionCode = gitVersion[1].toInt()
+        ndk {
+            // 仅 arm64：Native 传感器全局模拟只面向真机 64 位
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -26,6 +30,15 @@ android {
             isShrinkResources = true
             proguardFiles("proguard-rules.pro")
             signingConfig = signingConfigs["debug"]
+        }
+    }
+
+    // Native 传感器全局模拟：arm64 内联 Hook（SensorEventQueue::write 分发点）
+    ndkVersion = "27.1.12297006"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/jni/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
