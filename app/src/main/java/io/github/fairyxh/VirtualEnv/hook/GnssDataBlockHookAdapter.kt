@@ -47,7 +47,7 @@ class GnssDataBlockHookAdapter(
         /** 默认虚拟卫星：总数 24，usedInFix 6（>2，满足百度 GPS 有效性判定）。 */
         private const val DEFAULT_SATELLITE_COUNT = 24
         private const val DEFAULT_USED_IN_FIX = 6
-        private const val INJECT_INTERVAL_MS = 500L
+        private const val INJECT_INTERVAL_MS = 1000L
         private const val DEFAULT_CN0_DBHZ = 38f
     }
 
@@ -168,7 +168,18 @@ class GnssDataBlockHookAdapter(
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "record nmea failed", t)
             }
-            chain.proceed()
+            val virtual = if (virtualLocationEnabled()) backend.currentLocation() else null
+            if (virtual != null) {
+                val nmea = buildVirtualNmea(virtual.latitude, virtual.longitude)
+                if (nmea != null) {
+                    chain.proceed(arrayOf(chain.getArg(0), nmea))
+                    ZLog.d(TAG_SCOPE, "GnssLocationProvider.onReportNmea -> virtual")
+                } else {
+                    chain.proceed()
+                }
+            } else {
+                chain.proceed()
+            }
             null
         }
         if (ok) {
@@ -197,8 +208,15 @@ class GnssDataBlockHookAdapter(
             return 0
         }
         val ok = registrar.register(method) { chain ->
-            io.github.fairyxh.VirtualEnv.core.HookObserver.recordGnssStatus(chain.getArg(0))
-            chain.proceed()
+            val original = chain.getArg(0)
+            io.github.fairyxh.VirtualEnv.core.HookObserver.recordGnssStatus(original)
+            val virtual = if (virtualLocationEnabled()) buildVirtualGnssStatus() else null
+            if (virtual != null) {
+                chain.proceed(arrayOf(virtual))
+                ZLog.d(TAG_SCOPE, "GnssLocationProvider.onReportSvStatus -> virtual")
+            } else {
+                chain.proceed()
+            }
             null
         }
         if (ok) {
@@ -280,8 +298,9 @@ class GnssDataBlockHookAdapter(
                 try {
                     val pkg = chain.getArg(1) as? String ?: "?"
                     allStatusListeners[listener] = true
-                    startStatusInject(listener)
-                    ZLog.i(TAG_SCOPE, "GnssStatus callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
+                    val result = chain.proceed()
+                    ZLog.i(TAG_SCOPE, "GnssStatus registered through system dispatch pkg=$pkg listener=${listener.javaClass.name}")
+                    return@register result
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssStatus takeover failed, fallback", t)
                     allStatusListeners[listener] = false
@@ -367,7 +386,14 @@ class GnssDataBlockHookAdapter(
                 ZLog.i(TAG_SCOPE, "GnssStatus delivered to ${listener.javaClass.name} usedInFix=$used")
             }
         } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "deliver virtual GnssStatus failed", t)
+            val cause = unwrap(t)
+            if (cause is android.os.DeadObjectException) {
+                statusTasks.remove(listener)?.cancel(false)
+                allStatusListeners.remove(listener)
+                ZLog.i(TAG_SCOPE, "GnssStatus listener dead, task cancelled (${listener.javaClass.name})")
+            } else {
+                ZLog.w(TAG_SCOPE, "deliver virtual GnssStatus failed", t)
+            }
         }
     }
 
@@ -450,8 +476,9 @@ class GnssDataBlockHookAdapter(
                 try {
                     val pkg = chain.getArg(1) as? String ?: "?"
                     allNmeaListeners[listener] = true
-                    startNmeaInject(listener)
-                    ZLog.i(TAG_SCOPE, "GnssNmea callback taken over pkg=$pkg listener=${listener.javaClass.name} (virtual)")
+                    val result = chain.proceed()
+                    ZLog.i(TAG_SCOPE, "GnssNmea registered through system dispatch pkg=$pkg listener=${listener.javaClass.name}")
+                    return@register result
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssNmea takeover failed, fallback", t)
                     allNmeaListeners[listener] = false
