@@ -48,6 +48,7 @@ class GnssDataBlockHookAdapter(
         private const val DEFAULT_SATELLITE_COUNT = 24
         private const val DEFAULT_USED_IN_FIX = 6
         private const val INJECT_INTERVAL_MS = 500L
+        private const val DEFAULT_CN0_DBHZ = 38f
     }
 
     /** 虚拟定位启用（单点或路线任一开启；采集暂停时放行）。 */
@@ -351,12 +352,11 @@ class GnssDataBlockHookAdapter(
         try {
             if (!virtualLocationEnabled()) return
             val status = buildVirtualGnssStatus() ?: return
-            // Stub$Proxy 方法签名在不同 ROM 可能不同（参数类型/可见性），
-            // 用 declaredMethods 遍历 name+参数个数匹配，避免 getMethod 精确签名失败。
-            val method = listener.javaClass.declaredMethods.firstOrNull {
-                it.name == "onSatelliteStatusChanged" && it.parameterCount == 1
-            } ?: return
-            method.isAccessible = true
+            val method = findCallbackMethod(
+                listener,
+                "onSvStatusChanged",
+                "onSatelliteStatusChanged"
+            ) ?: return
             method.invoke(listener, status)
             val now = SystemClock.elapsedRealtime()
             val last = lastStatusLog[listener] ?: 0L
@@ -392,10 +392,12 @@ class GnssDataBlockHookAdapter(
                 Float::class.javaPrimitiveType
             )
             val cfg = backend.gnssEngine.currentData()
-            val total = cfg?.optInt("satelliteCount", DEFAULT_SATELLITE_COUNT)?.coerceIn(0, 64)
+            val total = cfg?.optInt("satelliteCount", DEFAULT_SATELLITE_COUNT)?.coerceIn(4, 64)
                 ?: DEFAULT_SATELLITE_COUNT
-            val used = cfg?.optInt("usedInFix", DEFAULT_USED_IN_FIX)?.coerceIn(0, total)
+            val used = cfg?.optInt("usedInFix", DEFAULT_USED_IN_FIX)?.coerceIn(4, total)
                 ?: DEFAULT_USED_IN_FIX
+            val configuredCn0 = cfg?.optDouble("cn0", DEFAULT_CN0_DBHZ.toDouble())?.toFloat()
+                ?: DEFAULT_CN0_DBHZ
             val constellations = intArrayOf(
                 android.location.GnssStatus.CONSTELLATION_GPS,
                 android.location.GnssStatus.CONSTELLATION_GLONASS,
@@ -404,7 +406,7 @@ class GnssDataBlockHookAdapter(
             )
             for (i in 0 until total) {
                 val svid = i + 1
-                val cn0 = 18f + (i % 22)
+                val cn0 = (configuredCn0 - 4f + (i % 5)).coerceIn(25f, 50f)
                 val usedInFix = i < used
                 addSatellite.invoke(
                     builder,
@@ -521,10 +523,7 @@ class GnssDataBlockHookAdapter(
             if (!virtualLocationEnabled()) return
             val loc = backend.currentLocation() ?: return
             val nmea = buildVirtualNmea(loc.latitude, loc.longitude) ?: return
-            val method = listener.javaClass.declaredMethods.firstOrNull {
-                it.name == "onNmeaReceived" && it.parameterCount == 2
-            } ?: return
-            method.isAccessible = true
+            val method = findCallbackMethod(listener, "onNmeaReceived") ?: return
             method.invoke(listener, SystemClock.elapsedRealtimeNanos(), nmea)
             val now = SystemClock.elapsedRealtime()
             val last = lastNmeaLog[listener] ?: 0L
@@ -557,6 +556,25 @@ class GnssDataBlockHookAdapter(
             cur = cur.cause!!
         }
         return cur
+    }
+
+    /** Binder Stub/Proxy 的回调方法可能声明在父类或接口中。 */
+    private fun findCallbackMethod(listener: Any, vararg names: String): java.lang.reflect.Method? {
+        var type: Class<*>? = listener.javaClass
+        while (type != null) {
+            type.declaredMethods.firstOrNull { it.name in names && it.parameterCount > 0 }?.let {
+                it.isAccessible = true
+                return it
+            }
+            for (iface in type.interfaces) {
+                iface.methods.firstOrNull { it.name in names && it.parameterCount > 0 }?.let {
+                    it.isAccessible = true
+                    return it
+                }
+            }
+            type = type.superclass
+        }
+        return null
     }
 
     /**
