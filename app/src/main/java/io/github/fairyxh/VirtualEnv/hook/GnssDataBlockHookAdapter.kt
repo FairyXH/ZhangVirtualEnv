@@ -95,8 +95,33 @@ class GnssDataBlockHookAdapter(
         hooked += hookOldGpsStatusTransport(classLoader)
         hooked += hookRealSvStatus(classLoader)
         hooked += hookRealNmea(classLoader)
+        hooked += hookGnssManagerService(classLoader)
         startTakeoverMonitor()
         return hooked
+    }
+
+    /**
+     * Oplus separates listener storage into GnssStatusProvider. Hook its service boundary too
+     * when present, preventing a physical callback racing the virtual callback.
+     */
+    private fun hookGnssManagerService(classLoader: ClassLoader): Int {
+        val clazz = HookSupport.findClass(classLoader, "com.android.server.location.gnss.GnssManagerService") ?: return 0
+        val method = HookSupport.findMethods(clazz, "registerGnssStatusCallback")
+            .firstOrNull { it.parameterCount >= 1 && it.parameterTypes[0].simpleName.contains("IGnssStatusListener") }
+            ?: return 0
+        val ok = registrar.register(method) { chain ->
+            val listener = chain.getArg(0)
+            if (!virtualLocationEnabled() || listener == null) return@register chain.proceed()
+            allStatusListeners[listener] = true
+            startStatusInject(listener)
+            ZLog.i(TAG_SCOPE, "GnssManagerService register -> virtual-only listener=${listener.javaClass.name}")
+            null
+        }
+        if (ok) {
+            ZLog.i(TAG_SCOPE, "hooked GnssManagerService.registerGnssStatusCallback")
+            return 1
+        }
+        return 0
     }
 
     /**
@@ -298,9 +323,12 @@ class GnssDataBlockHookAdapter(
                 try {
                     val pkg = chain.getArg(1) as? String ?: "?"
                     allStatusListeners[listener] = true
-                    val result = chain.proceed()
-                    ZLog.i(TAG_SCOPE, "GnssStatus registered through system dispatch pkg=$pkg listener=${listener.javaClass.name}")
-                    return@register result
+                    // Keep one authoritative data plane. The original provider would dispatch
+                    // physical satellites in parallel with our virtual callback and inflate the
+                    // satellite count (and make apps see mixed constellations).
+                    startStatusInject(listener)
+                    ZLog.i(TAG_SCOPE, "GnssStatus registered as virtual-only pkg=$pkg listener=${listener.javaClass.name}")
+                    return@register null
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssStatus takeover failed, fallback", t)
                     allStatusListeners[listener] = false
@@ -476,9 +504,9 @@ class GnssDataBlockHookAdapter(
                 try {
                     val pkg = chain.getArg(1) as? String ?: "?"
                     allNmeaListeners[listener] = true
-                    val result = chain.proceed()
-                    ZLog.i(TAG_SCOPE, "GnssNmea registered through system dispatch pkg=$pkg listener=${listener.javaClass.name}")
-                    return@register result
+                    startNmeaInject(listener)
+                    ZLog.i(TAG_SCOPE, "GnssNmea registered as virtual-only pkg=$pkg listener=${listener.javaClass.name}")
+                    return@register null
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssNmea takeover failed, fallback", t)
                     allNmeaListeners[listener] = false

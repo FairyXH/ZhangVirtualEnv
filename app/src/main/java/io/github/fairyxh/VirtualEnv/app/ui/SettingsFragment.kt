@@ -26,6 +26,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
 import android.telephony.CellInfo
 import android.telephony.CellInfoCdma
 import android.telephony.CellInfoGsm
@@ -94,6 +95,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Locale
 
 /**
  * 设置页：应用标识（包名 / SHA1）复制 + 高德地图 Key 配置 + 隐私合规同意 +
@@ -117,7 +119,7 @@ class SettingsFragment : Fragment() {
         private const val OPEN_CELL_ID_URL = "https://opencellid.org"
     }
 
-    private enum class Verdict { PASS, FAIL, NOT_ENABLED }
+    private enum class Verdict { PASS, FAIL, SYNCING, NOT_ENABLED }
 
     private data class EnvTestField(
         val title: String,
@@ -218,10 +220,26 @@ class SettingsFragment : Fragment() {
     private val gnssListener = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
             lastGnssStatus = status
+            lastGnssStatusAtMs = android.os.SystemClock.elapsedRealtime()
         }
     }
+    private val nmeaListener = if (Build.VERSION.SDK_INT >= 30) object : android.location.OnNmeaMessageListener {
+        override fun onNmeaMessage(message: String, timestamp: Long) {
+            lastNmeaText = message
+            lastNmeaAtMs = android.os.SystemClock.elapsedRealtime()
+        }
+    } else null
     @Volatile
     private var lastGnssStatus: GnssStatus? = null
+    @Volatile
+    private var lastGnssStatusAtMs: Long = 0L
+    @Volatile
+    private var lastNmeaText: String = ""
+    @Volatile
+    private var lastNmeaAtMs: Long = 0L
+    private val SYNC_TIMEOUT_MS = 8000L
+    @Volatile
+    private var detectorStartedAtMs: Long = 0L
     private val stepListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             if (event.sensor.type == Sensor.TYPE_STEP_COUNTER && event.values.isNotEmpty()) {
@@ -1349,6 +1367,11 @@ class SettingsFragment : Fragment() {
         synchronized(bleFound) { bleFound.clear() }
         lastStepCount = -1L
         lastStepTickMs = 0L
+        detectorStartedAtMs = android.os.SystemClock.elapsedRealtime()
+        lastGnssStatus = null
+        lastGnssStatusAtMs = 0L
+        lastNmeaText = ""
+        lastNmeaAtMs = 0L
 
         // 传感器：计步器监听（步频注入会表现为持续/加快的 step counter）
         try {
@@ -1387,6 +1410,7 @@ class SettingsFragment : Fragment() {
                     Executors.newSingleThreadExecutor(),
                     gnssListener
                 )
+                nmeaListener?.let { locationManager?.addNmeaListener(it) }
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "env test gnss register failed", t)
@@ -1553,12 +1577,14 @@ class SettingsFragment : Fragment() {
                             status = when (v) {
                                 Verdict.PASS -> getString(R.string.settings_env_test_pass)
                                 Verdict.FAIL -> getString(R.string.settings_env_test_fail)
+                                Verdict.SYNCING -> "同步中"
                                 Verdict.NOT_ENABLED -> getString(R.string.settings_env_test_not_enabled)
                                 null -> field.status
                             },
                             statusColor = when (v) {
                                 Verdict.PASS -> Color(0xFF34C759)
                                 Verdict.FAIL -> Color(0xFFFF3B30)
+                                Verdict.SYNCING -> Color(0xFFFF9500)
                                 Verdict.NOT_ENABLED -> Color.Unspecified
                                 null -> field.statusColor
                             }
@@ -1723,8 +1749,18 @@ class SettingsFragment : Fragment() {
         val data = envData("gnss") ?: return Verdict.NOT_ENABLED
         val expectSat = data.optInt("satelliteCount", 0)
         val expectUsed = data.optInt("usedInFix", 0)
-        if (expectSat <= 0 && expectUsed <= 0) return Verdict.NOT_ENABLED
-        val status = lastGnssStatus ?: return Verdict.FAIL
+        val expectNmea = data.optBoolean("nmeaEnabled", false)
+        if (expectSat <= 0 && expectUsed <= 0 && !expectNmea) return Verdict.NOT_ENABLED
+        if (expectNmea && !lastNmeaText.contains("\$GPRMC")) {
+            val age = SystemClock.elapsedRealtime() - detectorStartedAtMs
+            if (age > SYNC_TIMEOUT_MS) return Verdict.FAIL
+            return Verdict.SYNCING
+        }
+        val status = lastGnssStatus ?: run {
+            val age = SystemClock.elapsedRealtime() - detectorStartedAtMs
+            return if (age > SYNC_TIMEOUT_MS) Verdict.FAIL else Verdict.SYNCING
+        }
+        if (lastGnssStatusAtMs == 0L || SystemClock.elapsedRealtime() - lastGnssStatusAtMs > SYNC_TIMEOUT_MS) return Verdict.FAIL
         val used = (0 until status.satelliteCount).count { status.usedInFix(it) }
         // 允许小误差：卫星数 >= 期望 80%，使用数 >= 期望 80%
         val satOk = expectSat <= 0 || status.satelliteCount >= (expectSat * 0.8).toInt()
@@ -1971,11 +2007,15 @@ class SettingsFragment : Fragment() {
         val sb = StringBuilder()
         val status = lastGnssStatus
         if (status != null) {
+            val now = SystemClock.elapsedRealtime()
             val used = (0 until status.satelliteCount).count { status.usedInFix(it) }
             sb.append("卫星: ").append(status.satelliteCount)
-                .append(" 使用: ").append(used).append("\n")
-            // 原始卫星明细（星座/编号/载噪比），最多 12 颗
-            val maxShow = minOf(status.satelliteCount, 12)
+                .append(" 使用: ").append(used)
+                .append(" statusAgeMs=").append(if (lastGnssStatusAtMs == 0L) "-" else now - lastGnssStatusAtMs)
+                .append(" nmeaAgeMs=").append(if (lastNmeaAtMs == 0L) "-" else now - lastNmeaAtMs)
+                .append("\n")
+            // 当前帧只展示摘要，下面列出完整字段，便于定位信号弱/混入真实卫星问题。
+            val maxShow = status.satelliteCount
             for (i in 0 until maxShow) {
                 val cn0 = status.getCn0DbHz(i)
                 val const = when {
@@ -1988,10 +2028,20 @@ class SettingsFragment : Fragment() {
                     else -> "?"
                 }
                 val usedMark = if (status.usedInFix(i)) "U" else "-"
+                val frequency = if (Build.VERSION.SDK_INT >= 26 && status.hasCarrierFrequencyHz(i)) {
+                    String.format(Locale.US, "%.2fMHz", status.getCarrierFrequencyHz(i) / 1_000_000f)
+                } else "f=-"
+                val flags = buildString {
+                    if (status.hasAlmanacData(i)) append("A")
+                    if (status.hasEphemerisData(i)) append("E")
+                }.ifEmpty { "-" }
                 sb.append("  ").append(const)
                     .append(" sv").append(status.getSvid(i))
-                    .append(" cn0=").append(String.format("%.1f", cn0))
-                    .append(" ").append(usedMark).append("\n")
+                    .append(" az=").append(String.format(Locale.US, "%.1f", status.getAzimuthDegrees(i)))
+                    .append(" el=").append(String.format(Locale.US, "%.1f", status.getElevationDegrees(i)))
+                    .append(" cn0=").append(String.format(Locale.US, "%.1f", cn0))
+                    .append(" ").append(frequency)
+                    .append(" ").append(flags).append(usedMark).append("\n")
             }
         } else {
             sb.append("GNSS 回调未收到数据\n")
@@ -2179,6 +2229,7 @@ class SettingsFragment : Fragment() {
         try {
             if (Build.VERSION.SDK_INT >= 30) {
                 locationManager?.unregisterGnssStatusCallback(gnssListener)
+                nmeaListener?.let { locationManager?.removeNmeaListener(it) }
             }
         } catch (_: Throwable) {
         }
