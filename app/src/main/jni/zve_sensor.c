@@ -86,6 +86,8 @@ typedef struct {
     volatile int last_error;
     volatile uint64_t events_rewritten;
     volatile int delivery_verified; /* 启用期间确实改写过事件（供 App 侧抑制 LEGACY） */
+    volatile uint64_t rewrite_calls; /* rewrite 入口调用次数（enabled 检查前） */
+    volatile int last_type;          /* 循环内最后一个事件 type（诊断） */
 } zve_stats_t;
 
 static zve_config_t g_cfg;
@@ -289,6 +291,7 @@ static void zve_gen_magnetic(zve_sensor_event_t *ev) {
 
 __attribute__((used, noinline))
 void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
+    g_stats.rewrite_calls++;
     if (events == NULL || count == 0 || !g_cfg.enabled) return;
     pthread_mutex_lock(&g_mutex);
     zve_motion_advance();
@@ -297,6 +300,7 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
     size_t rewritten = 0;
     for (size_t i = 0; i < count; i++) {
         zve_sensor_event_t *ev = (zve_sensor_event_t *)&events[i];
+        g_stats.last_type = ev->type;
         switch (ev->type) {
             case TYPE_STEP_COUNTER:
                 ev->data64 = g_motion.step_count;
@@ -827,14 +831,16 @@ static jint JNICALL nativeSetConfig(
 static jstring JNICALL nativeGetStatus(JNIEnv *env, jclass clazz) {
     (void)clazz;
     pthread_mutex_lock(&g_mutex);
-    char buf[384];
+    char buf[512];
     snprintf(buf, sizeof(buf),
              "{\"hooked\":%d,\"enabled\":%d,\"writeAddr\":\"%p\",\"helperAddr\":\"%p\","
-             "\"eventsRewritten\":%llu,\"stepCount\":%llu,\"lastError\":%d,\"deliveryVerified\":%d}",
+             "\"eventsRewritten\":%llu,\"stepCount\":%llu,\"lastError\":%d,\"deliveryVerified\":%d,"
+             "\"rewriteCalls\":%llu,\"lastType\":%d}",
              g_stats.hooked, g_cfg.enabled, g_write_addr, g_write_helper_addr,
              (unsigned long long)g_stats.events_rewritten,
              (unsigned long long)g_motion.step_count,
-             g_stats.last_error, g_stats.delivery_verified);
+             g_stats.last_error, g_stats.delivery_verified,
+             (unsigned long long)g_stats.rewrite_calls, g_stats.last_type);
     pthread_mutex_unlock(&g_mutex);
     return (*env)->NewStringUTF(env, buf);
 }
