@@ -390,37 +390,68 @@ static int zve_build_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t helper
     return ZVE_STUB_SIZE;
 }
 
-/* 在目标库加载地址附近分配可执行页（±128MB 内保证 B 可达） */
+/* 在目标库加载地址附近分配可执行页（±96MB 内保证 B 可达）。
+ * system_server 库区密集，固定偏移候选几乎全被占用（EEXIST），
+ * 因此直接扫描 /proc/self/maps 在 [lib_base-96MB, lib_base+96MB]
+ * 区间内找未映射空洞，取空洞起始页 mmap。 */
 static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr, uintptr_t lib_base) {
     long page = sysconf(_SC_PAGESIZE);
-    /* 多候选区：+64MB / -64MB / +96MB / -96MB / +112MB / -112MB，
-     * 每区尝试 128 页（MAP_FIXED_NOREPLACE，被占用自动跳过） */
-    static const int64_t kOffsets[] = {
-        0x4000000LL, -0x4000000LL,
-        0x6000000LL, -0x6000000LL,
-        0x7000000LL, -0x7000000LL,
-    };
+    uintptr_t lo = (lib_base > 0x6000000u) ? lib_base - 0x6000000u : (uintptr_t)page;
+    uintptr_t hi = lib_base + 0x6000000u;
+    FILE *f = fopen("/proc/self/maps", "r");
     uint8_t *mem = NULL;
-    for (size_t k = 0; k < sizeof(kOffsets) / sizeof(kOffsets[0]) && mem == NULL; k++) {
-        uintptr_t base_hint = (uintptr_t)((int64_t)lib_base + kOffsets[k]);
-        base_hint &= ~((uintptr_t)page - 1);
-        for (int i = 0; i < 128; i++) {
-            void *p = mmap((void *)(base_hint + (uintptr_t)i * (uintptr_t)page), (size_t)page,
-                           PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (p != MAP_FAILED) {
-                mem = (uint8_t *)p;
-                break;
+    if (f != NULL) {
+        char line[512];
+        uintptr_t prev_end = lo;
+        while (fgets(line, sizeof(line), f) != NULL) {
+            uintptr_t s = 0, e = 0;
+            if (sscanf(line, "%zx-%zx", (size_t *)&s, (size_t *)&e) != 2) continue;
+            if (e <= lo) continue;
+            if (s >= hi) break;
+            if (s > prev_end && (s - prev_end) >= (uintptr_t)page) {
+                void *p = mmap((void *)prev_end, (size_t)page, PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+                if (p != MAP_FAILED) {
+                    mem = (uint8_t *)p;
+                    break;
+                }
             }
+            if (e > prev_end) prev_end = e;
         }
+        if (mem == NULL && hi - prev_end >= (uintptr_t)page) {
+            void *p = mmap((void *)prev_end, (size_t)page, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+            if (p != MAP_FAILED) mem = (uint8_t *)p;
+        }
+        fclose(f);
     }
     if (mem == NULL) {
-        /* 退化：普通匿名映射（距离可能不达标，由 patch 校验） */
-        LOGW("stub mmap candidates failed: %s", strerror(errno));
-        void *p = mmap(NULL, (size_t)page, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (p == MAP_FAILED) return NULL;
-        mem = (uint8_t *)p;
+        /* 兜底：多候选区 + 普通匿名映射（距离可能不达标，由 patch 校验） */
+        static const int64_t kOffsets[] = {
+            0x4000000LL, -0x4000000LL,
+            0x6000000LL, -0x6000000LL,
+            0x7000000LL, -0x7000000LL,
+        };
+        for (size_t k = 0; k < sizeof(kOffsets) / sizeof(kOffsets[0]) && mem == NULL; k++) {
+            uintptr_t base_hint = (uintptr_t)((int64_t)lib_base + kOffsets[k]);
+            base_hint &= ~((uintptr_t)page - 1);
+            for (int i = 0; i < 128; i++) {
+                void *p = mmap((void *)(base_hint + (uintptr_t)i * (uintptr_t)page), (size_t)page,
+                               PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+                if (p != MAP_FAILED) {
+                    mem = (uint8_t *)p;
+                    break;
+                }
+            }
+        }
+        if (mem == NULL) {
+            LOGW("stub mmap gap scan failed, fallback random: %s", strerror(errno));
+            void *p = mmap(NULL, (size_t)page, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (p == MAP_FAILED) return NULL;
+            mem = (uint8_t *)p;
+        }
     }
     zve_build_stub(mem, rewrite_addr, helper_addr);
     if (mprotect(mem, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
@@ -428,6 +459,7 @@ static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr,
         munmap(mem, (size_t)page);
         return NULL;
     }
+    LOGI("stub mem allocated at %p (lib_base=%p)", mem, (void *)lib_base);
     return mem;
 }
 
