@@ -3,6 +3,7 @@ package io.github.fairyxh.VirtualEnv.core.sensor
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
 
 /**
@@ -81,10 +82,50 @@ object NativeSensorBridge {
                 zip.close()
             }
             dest.setExecutable(true, false)
-            tryLoad(dest.absolutePath)
+            val ok = tryLoad(dest.absolutePath)
+            if (!ok) {
+                // 常见原因：SELinux 拒绝 system_server 映射 system_data_file 的 .so
+                // （dlopen "couldn't map segment ... Permission denied"）。best-effort
+                // 将文件 context 改为 system_file；失败则提示手动执行。
+                tryChconSystemFile(dest.absolutePath)
+                tryLoad(dest.absolutePath)
+            } else {
+                true
+            }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "extract lib from apk failed", t)
             false
+        }
+    }
+
+    /** 将模块 .so 的 SELinux context 改为 system_file（system_server 可执行映射）。
+     *  关闭模拟删除文件后即恢复，不残留策略改动。 */
+    private fun tryChconSystemFile(path: String) {
+        try {
+            val p = ProcessBuilder("su", "-c", "chcon u:object_r:system_file:s0 $path")
+                .redirectErrorStream(true)
+                .start()
+            val done = p.waitFor(3, TimeUnit.SECONDS)
+            if (done && p.exitValue() == 0) {
+                ZLog.i(TAG_SCOPE, "chcon system_file OK: $path")
+            } else {
+                ZLog.w(TAG_SCOPE, "chcon failed exit=${if (done) p.exitValue() else -1}; manual: su -c 'chcon u:object_r:system_file:s0 $path'")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "chcon exec failed", t)
+        }
+    }
+
+    /** 关闭模拟时清理提取的 .so（删除文件 = 释放 SELinux context 规则）。 */
+    fun cleanup() {
+        try {
+            val f = File("/data/system/zve/libzvesensor.so")
+            if (f.exists()) {
+                val ok = f.delete()
+                ZLog.i(TAG_SCOPE, "native lib cleanup delete=$ok (selinux file context released)")
+            }
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "native lib cleanup failed", t)
         }
     }
 
@@ -101,7 +142,8 @@ object NativeSensorBridge {
         amplitude: Float,
         randomNoise: Boolean,
         headingDeg: Float,
-        initialStepCount: Long
+        initialStepCount: Long,
+        stepHandle: Int
     ): Int
     private external fun nativeGetStatus(): String
     private external fun nativeGetStepCount(): Long
@@ -140,11 +182,12 @@ object NativeSensorBridge {
         amplitude: Float,
         randomNoise: Boolean,
         headingDeg: Float,
-        initialStepCount: Long
+        initialStepCount: Long,
+        stepHandle: Int
     ) {
         if (!loaded) return
         try {
-            nativeSetConfig(enabled, mode, stepFrequency, speedKmh, amplitude, randomNoise, headingDeg, initialStepCount)
+            nativeSetConfig(enabled, mode, stepFrequency, speedKmh, amplitude, randomNoise, headingDeg, initialStepCount, stepHandle)
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "nativeSetConfig failed", t)
         }

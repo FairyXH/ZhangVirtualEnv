@@ -316,7 +316,7 @@ class SystemSensorBackend(
         }
     }
 
-    /** 同步配置到 Native 引擎（模式/步频/速度/幅度/噪声）。 */
+    /** 同步配置到 Native 引擎（模式/步频/速度/幅度/噪声 + STEP_COUNTER handle）。 */
     private fun applyNativeConfig(config: VirtualSensorConfig?) {
         val cfg = config ?: VirtualSensorConfig()
         val profile = cfg.toMotionProfile()
@@ -325,6 +325,9 @@ class SystemSensorBackend(
             ActivityMode.RUN -> 2
             else -> 1
         }
+        // 主动注入 STEP_COUNTER 需要真实 handle（sensors_event_t.sensor 是 handle 不是 type）。
+        // system_server 中反射 Sensor.getHandle() 获取；native 首次遇到真实事件时也会学习兜底。
+        val stepHandle = resolveStepCounterHandle()
         NativeSensorBridge.setConfig(
             enabled = cfg.enabled,
             mode = mode,
@@ -334,8 +337,22 @@ class SystemSensorBackend(
             randomNoise = profile.randomNoise,
             headingDeg = 0f,
             initialStepCount = cfg.stepCount,
+            stepHandle = stepHandle,
         )
-        ZLog.d(TAG_SCOPE, "native config: enabled=${cfg.enabled} mode=$mode steps=${profile.stepFrequency} speed=${profile.effectiveSpeedKmh} amp=${profile.amplitudeOverride ?: -1f} noise=${profile.randomNoise}")
+        ZLog.d(TAG_SCOPE, "native config: enabled=${cfg.enabled} mode=$mode steps=${profile.stepFrequency} speed=${profile.effectiveSpeedKmh} amp=${profile.amplitudeOverride ?: -1f} noise=${profile.randomNoise} stepHandle=$stepHandle")
+    }
+
+    /** system_server 中反射解析 STEP_COUNTER 的 handle；失败返回 0（native 学习兜底）。 */
+    private fun resolveStepCounterHandle(): Int {
+        return try {
+            val sm = sensorManagerProvider() ?: return 0
+            val sensor = findSensor(sm, VirtualSensorConfig.TYPE_STEP_COUNTER) ?: return 0
+            val h = sensor.javaClass.getMethod("getHandle").invoke(sensor) as? Int
+            h ?: 0
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "resolve STEP_COUNTER handle failed", t)
+            0
+        }
     }
 
     /** 探测 Data Injection 可用性：优先 mode=4，失败回退 mode=1；均失败返回 -1。 */

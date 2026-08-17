@@ -88,15 +88,16 @@ typedef struct {
     volatile int delivery_verified; /* 启用期间确实改写过事件（供 App 侧抑制 LEGACY） */
     volatile uint64_t rewrite_calls; /* rewrite 入口调用次数（enabled 检查前） */
     volatile int last_type;          /* 循环内最后一个事件 type（诊断） */
+    volatile uint64_t inject_count;  /* 主动注入 STEP_COUNTER 事件次数（计步器稳定） */
 } zve_stats_t;
 
 static zve_config_t g_cfg;
 static zve_motion_t g_motion;
 static zve_stats_t g_stats;
 
-/* 双 hook（sendEvents + write）可能先后改写同一事件批，用批指纹幂等去重 */
+/* 多 hook（sendEventsToAllClients + write + sendObjects）可能先后处理同一事件批，
+ * 用批首事件 timestamp 幂等去重（count 不参与：主动注入会改变 count）。 */
 static uint64_t g_last_batch_ts;
-static size_t g_last_batch_count;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Hook 状态 */
@@ -114,6 +115,15 @@ static void *g_se_stub_mem;
 static void *g_so_addr;
 static uint32_t g_so_orig_insn; /* sendObjects 入口原始指令（paciasp） */
 static void *g_so_stub_mem;
+
+/* SensorService::sendEventsToAllClients 入口 hook 状态（g_stats.hooked=4 时生效） */
+static void *g_batch_addr;
+static uint32_t g_batch_orig_insn; /* 入口原始指令（paciasp） */
+static void *g_batch_stub_mem;
+
+/* STEP_COUNTER handle：Java 传入优先，真实事件学习兜底 */
+static volatile int g_step_handle;
+static volatile int64_t g_last_inject_ns;
 
 static uint64_t g_rng_state = 0x9E3779B97F4A7C15ULL;
 
@@ -304,16 +314,16 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
     if (events == NULL || count == 0 || !g_cfg.enabled) return;
     pthread_mutex_lock(&g_mutex);
 
-    /* 幂等：同一事件批（首事件 timestamp + count）已被另一 hook 改写则跳过，
-     * 避免 sendEvents 与 write 双 hook 时 advance 两次导致步数翻倍。
+    /* 幂等：同一事件批（首事件 timestamp）已被另一 hook 改写则跳过，
+     * 避免 sendEventsToAllClients / write / sendObjects 三 hook 时重复推进。
+     * 只比较 timestamp：主动注入会追加事件改变 count，(ts,count) 指纹会误判。
      * timestamp==0 的批（meta/flush 等）不做指纹去重，避免误跳真实事件。 */
     uint64_t batch_ts = events[0].timestamp;
-    if (batch_ts != 0 && batch_ts == g_last_batch_ts && count == g_last_batch_count) {
+    if (batch_ts != 0 && batch_ts == g_last_batch_ts) {
         pthread_mutex_unlock(&g_mutex);
         return;
     }
     g_last_batch_ts = batch_ts;
-    g_last_batch_count = count;
 
     zve_motion_advance();
     zve_phone_update();
@@ -324,6 +334,7 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
         g_stats.last_type = ev->type;
         switch (ev->type) {
             case TYPE_STEP_COUNTER:
+                if (g_step_handle == 0) g_step_handle = ev->sensor; /* 学习真实 handle */
                 ev->data64 = g_motion.step_count;
                 rewritten++;
                 break;
@@ -364,6 +375,123 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
         g_stats.delivery_verified = 1;
     }
     pthread_mutex_unlock(&g_mutex);
+}
+
+/*
+ * sendEventsToAllClients 入口处理（zve_process_batch）：
+ * 1. 改写真实事件批（含 count==0 时推进运动）；
+ * 2. 主动注入 STEP_COUNTER 事件：设备静止时 SensorService 不产生计步事件，
+ *    被动改写无事可做导致计步器回 0；此处按步频周期构造虚拟 STEP_COUNTER
+ *    事件追加到缓冲尾部，返回新 count 让原函数分发给所有连接。
+ * 返回处理后的 count（可能 +1）；trampoline 用返回值覆盖原 x2。
+ */
+#define ZVE_INJECT_MAX_COUNT 128 /* 缓冲 this+0x270 容量至少 256 槽，保守上限 */
+#define ZVE_INJECT_MIN_PERIOD_NS 100000000LL /* 100ms */
+
+__attribute__((used, noinline))
+size_t zve_process_batch(const zve_sensor_event_t *events, size_t count) {
+    if (events == NULL) return count;
+    pthread_mutex_lock(&g_mutex);
+    if (!g_cfg.enabled || g_motion.step_freq_eff <= 0) {
+        pthread_mutex_unlock(&g_mutex);
+        return count;
+    }
+
+    /* 1) 推进运动 + 改写真实批（count==0 也推进：时间流逝步数增长） */
+    g_stats.rewrite_calls++;
+    zve_motion_advance();
+    zve_phone_update();
+    if (count > 0) {
+        uint64_t batch_ts = events[0].timestamp;
+        if (batch_ts != 0 && batch_ts == g_last_batch_ts) {
+            /* 已被其它 hook 处理：直接返回原 count（不重复注入） */
+            pthread_mutex_unlock(&g_mutex);
+            return count;
+        }
+        g_last_batch_ts = batch_ts;
+        size_t rewritten = 0;
+        for (size_t i = 0; i < count; i++) {
+            zve_sensor_event_t *ev = (zve_sensor_event_t *)&events[i];
+            g_stats.last_type = ev->type;
+            switch (ev->type) {
+                case TYPE_STEP_COUNTER:
+                    if (g_step_handle == 0) g_step_handle = ev->sensor;
+                    ev->data64 = g_motion.step_count;
+                    rewritten++;
+                    break;
+                case TYPE_STEP_DETECTOR:
+                    if (g_motion.steps_pending > 0) {
+                        ev->data[0] = 1.0f;
+                        g_motion.steps_pending--;
+                        rewritten++;
+                    }
+                    break;
+                case TYPE_ACCELEROMETER:
+                    zve_gen_accel(ev);
+                    rewritten++;
+                    break;
+                case TYPE_LINEAR_ACCELERATION:
+                    zve_gen_accel(ev);
+                    zve_gen_linear_accel(ev);
+                    rewritten++;
+                    break;
+                case TYPE_GRAVITY:
+                    zve_gen_gravity(ev);
+                    rewritten++;
+                    break;
+                case TYPE_GYROSCOPE:
+                    zve_gen_gyro(ev);
+                    rewritten++;
+                    break;
+                case TYPE_MAGNETIC_FIELD:
+                    zve_gen_magnetic(ev);
+                    rewritten++;
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (rewritten > 0) {
+            g_stats.events_rewritten += rewritten;
+            g_stats.delivery_verified = 1;
+        }
+    }
+
+    /* 2) 主动注入 STEP_COUNTER（若批内已有 STEP_COUNTER 则跳过，避免重复） */
+    int has_step = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (((const zve_sensor_event_t *)&events[i])->type == TYPE_STEP_COUNTER) {
+            has_step = 1;
+            break;
+        }
+    }
+    if (!has_step && count < ZVE_INJECT_MAX_COUNT && g_step_handle > 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        int64_t now_ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+        double step_hz = g_motion.step_freq_eff / 60.0;
+        int64_t period_ns = (step_hz > 0.0)
+            ? (int64_t)(1000000000.0 / step_hz)
+            : ZVE_INJECT_MIN_PERIOD_NS;
+        if (period_ns < ZVE_INJECT_MIN_PERIOD_NS) period_ns = ZVE_INJECT_MIN_PERIOD_NS;
+        if (g_last_inject_ns == 0 || (now_ns - g_last_inject_ns) >= period_ns) {
+            zve_sensor_event_t *ev = (zve_sensor_event_t *)&events[count];
+            memset(ev, 0, sizeof(*ev));
+            ev->version = sizeof(zve_sensor_event_t); /* 0x68 */
+            ev->sensor = g_step_handle;
+            ev->type = TYPE_STEP_COUNTER;
+            ev->timestamp = now_ns;
+            ev->data64 = g_motion.step_count;
+            g_last_inject_ns = now_ns;
+            g_last_batch_ts = (uint64_t)now_ns; /* 后续 write/sendObjects 同批跳过 */
+            g_stats.inject_count++;
+            g_stats.events_rewritten++;
+            g_stats.delivery_verified = 1;
+            count++;
+        }
+    }
+    pthread_mutex_unlock(&g_mutex);
+    return count;
 }
 
 /*
@@ -465,6 +593,63 @@ static int zve_build_sendevents_stub(uint8_t *out, uintptr_t rewrite_addr, uintp
     *(uint64_t *)(out + 0x50) = (uint64_t)rewrite_addr; /* 0x50-0x57 */
     *(uint64_t *)(out + 0x58) = (uint64_t)ret_addr;     /* 0x58-0x5f */
     return ZVE_SE_STUB_SIZE;
+}
+
+/*
+ * sendEventsToAllClients 入口 trampoline（0x58 字节）。
+ * sendEventsToAllClients(this=x0, connections=x1, count=x2)；
+ * events 不在参数里，事件缓冲 = *(void**)(this + 0x270)（threadLoop 每轮 poll 填充）。
+ * 原入口为 paciasp（PAC 签名），SP 恢复原值后再 paciasp，跳回 +4 继续原函数体。
+ * 调用 zve_process_batch(events, count) 改写 + 主动注入，返回新 count 覆盖 x2。
+ *   0x00 sub sp, sp, #0x40
+ *   0x04 stp x0, x1, [sp]            （this, connections）
+ *   0x08 stp x2, x3, [sp, #0x10]     （count, x3）
+ *   0x0c str x30, [sp, #0x20]        （LR）
+ *   0x10 ldr x0, [x0, #0x270]        （events = this->0x270）
+ *   0x14 mov x1, x2                  （count）
+ *   0x18 ldr x16, [pc, #0xc]  -> 0x24 process_batch 字面量
+ *   0x1c blr x16
+ *   0x20 b 0x2c                      跳过字面量
+ *   0x24 <quad zve_process_batch>
+ *   0x2c str x0, [sp, #0x28]         （暂存 new_count）
+ *   0x30 ldp x0, x1, [sp]
+ *   0x34 ldp x2, x3, [sp, #0x10]
+ *   0x38 ldr x2, [sp, #0x28]         （count = new_count）
+ *   0x3c ldr x30, [sp, #0x20]
+ *   0x40 add sp, sp, #0x40
+ *   0x44 paciasp                     （SP=原值，签名原 LR）
+ *   0x48 ldr x17, [pc, #0x8]  -> 0x50 返回地址字面量
+ *   0x4c br x17
+ *   0x50 <quad sendEventsToAllClients+4>
+ */
+#define ZVE_BATCH_STUB_SIZE 0x58
+
+static int zve_build_batch_stub(uint8_t *out, uintptr_t process_addr, uintptr_t ret_addr) {
+    static const uint32_t kBatch[] = {
+        0xD10103FFu, /* 0x00 sub sp, sp, #0x40 */
+        0xA90007E0u, /* 0x04 stp x0, x1, [sp] */
+        0xA9010FE2u, /* 0x08 stp x2, x3, [sp, #0x10] */
+        0xF90013FEu, /* 0x0c str x30, [sp, #0x20] */
+        0xF9413800u, /* 0x10 ldr x0, [x0, #0x270] */
+        0xAA0203E1u, /* 0x14 mov x1, x2 */
+        0x58000070u, /* 0x18 ldr x16, [pc, #0xc] -> 0x24 */
+        0xD63F0200u, /* 0x1c blr x16 */
+        0x14000003u, /* 0x20 b 0x2c */
+        0xF90017E0u, /* 0x2c str x0, [sp, #0x28] */
+        0xA94007E0u, /* 0x30 ldp x0, x1, [sp] */
+        0xA9410FE2u, /* 0x34 ldp x2, x3, [sp, #0x10] */
+        0xF94017E2u, /* 0x38 ldr x2, [sp, #0x28] */
+        0xF94013FEu, /* 0x3c ldr x30, [sp, #0x20] */
+        0x910103FFu, /* 0x40 add sp, sp, #0x40 */
+        0xD503233Fu, /* 0x44 paciasp */
+        0x58000051u, /* 0x48 ldr x17, [pc, #0x8] -> 0x50 */
+        0xD61F0220u, /* 0x4c br x17 */
+    };
+    memset(out, 0, ZVE_BATCH_STUB_SIZE);
+    memcpy(out, kBatch, sizeof(kBatch));               /* 0x00-0x4f */
+    *(uint64_t *)(out + 0x24) = (uint64_t)process_addr; /* 0x24-0x2b */
+    *(uint64_t *)(out + 0x50) = (uint64_t)ret_addr;     /* 0x50-0x57 */
+    return ZVE_BATCH_STUB_SIZE;
 }
 
 /* 在目标库加载地址附近分配可执行页（±96MB 内保证 B 可达）。
@@ -619,6 +804,12 @@ static uintptr_t zve_lib_base_from_maps(const char *libname) {
  * 在其入口改写 events 缓冲区即全局生效；Oplus15 实证字节：paciasp。 */
 #define SENDEVENTS_VADDR_OPLUS15 0x29944u
 
+/* libsensorservice.so 中 SensorService::sendEventsToAllClients 的 vaddr。
+ * threadLoop 每轮 poll 后把 this+0x270 事件缓冲统一分发给所有连接
+ * （BitTube + SharedMem + wakeup 直写均经此函数），入口改写即全局生效；
+ * count==0 时仍被调用，可主动追加 STEP_COUNTER 事件。 */
+#define SENDEVENTS_TOALL_VADDR_OPLUS15 0x28784u
+
 static int zve_sendevents_hook_install(void) {
     uintptr_t base = zve_lib_base_from_maps("libsensorservice.so");
     if (base == 0) {
@@ -666,6 +857,63 @@ static int zve_sendevents_hook_uninstall(void) {
     }
     g_se_addr = NULL;
     LOGI("sendEvents hook uninstalled (original restored)");
+    return 0;
+}
+
+/*
+ * SensorService::sendEventsToAllClients 入口 hook（全局汇聚点）：
+ * threadLoop 每轮 poll 后把 this+0x270 的事件缓冲分发给所有连接
+ * （BitTube + SharedMem + wakeup 直写），在入口改写缓冲即所有通道生效；
+ * count==0 时也会被调用，可主动追加 STEP_COUNTER 事件稳定计步器。
+ * 入口为 paciasp（PAC），trampoline 布局见 zve_build_batch_stub。
+ */
+static int zve_sendevents_toall_hook_install(void) {
+    uintptr_t base = zve_lib_base_from_maps("libsensorservice.so");
+    if (base == 0) {
+        LOGW("libsensorservice.so not found for sendEventsToAllClients");
+        return -40;
+    }
+    void *fn = (void *)(base + SENDEVENTS_TOALL_VADDR_OPLUS15);
+    const uint32_t *insn = (const uint32_t *)fn;
+    if (insn[0] != 0xD503233Fu) { /* paciasp */
+        LOGW("unexpected sendEventsToAllClients prologue word0=%08x", insn[0]);
+        return -41;
+    }
+    uint8_t *stub = zve_alloc_exec_page(base);
+    if (stub == NULL) return -8;
+    zve_build_batch_stub(stub, (uintptr_t)&zve_process_batch, (uintptr_t)fn + 4);
+    long page = sysconf(_SC_PAGESIZE);
+    if (mprotect(stub, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
+        LOGW("sendEventsToAllClients stub mprotect RX failed: %s", strerror(errno));
+        munmap(stub, (size_t)page);
+        return -42;
+    }
+    g_batch_orig_insn = insn[0];
+    int rc = zve_patch_branch((uintptr_t)fn, (uintptr_t)stub);
+    if (rc != 0) {
+        LOGW("sendEventsToAllClients patch failed rc=%d fn=%p stub=%p", rc, fn, stub);
+        munmap(stub, (size_t)page);
+        return rc;
+    }
+    g_batch_addr = fn;
+    g_batch_stub_mem = stub;
+    LOGI("sendEventsToAllClients hook installed: fn=%p stub=%p", fn, stub);
+    return 0;
+}
+
+static int zve_sendevents_toall_hook_uninstall(void) {
+    if (g_batch_addr == NULL) return 0;
+    int rc = zve_patch_restore((uintptr_t)g_batch_addr, g_batch_orig_insn);
+    if (rc != 0) {
+        LOGW("sendEventsToAllClients restore failed rc=%d", rc);
+        return rc;
+    }
+    if (g_batch_stub_mem != NULL) {
+        munmap(g_batch_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
+        g_batch_stub_mem = NULL;
+    }
+    g_batch_addr = NULL;
+    LOGI("sendEventsToAllClients hook uninstalled (original restored)");
     return 0;
 }
 
@@ -837,29 +1085,37 @@ static int zve_write_hook_uninstall(void) {
 }
 
 /*
- * 安装策略（最稳定方案）：
- *   - write hook：SensorEventQueue::write（BitTube 直写路径，计步器累加依赖此路径）
- *   - sendObjects hook：BitTube::sendObjects（所有 BitTube 写入的最终汇聚，
- *     覆盖 Oplus 绕过 write 直调 sendObjects 的路径）
- * 同一事件批由 rewrite 批指纹去重，保证只推进一次。
- * g_stats.hooked: 3=双装（write+sendObjects）, 1=仅 write。
+ * 安装策略（第八轮最稳定方案）：
+ *   - sendEventsToAllClients hook：libsensorservice.so 全局汇聚点，
+ *     覆盖 BitTube + SharedMem（Android 15 gralloc 通道）+ wakeup 直写；
+ *     同时主动追加 STEP_COUNTER 事件稳定计步器（count==0 也调用）。
+ *   - write hook：SensorEventQueue::write（BitTube 直写路径兜底）
+ *   - sendObjects hook：BitTube::sendObjects（BitTube 最终汇聚兜底）
+ * 同一事件批由 process_batch/rewrite 的批首 timestamp 去重，保证只推进一次。
+ * g_stats.hooked: 4=三装（sendEventsToAllClients+write+sendObjects）,
+ *                 3=write+sendObjects, 1=仅 write。
  */
 static int zve_hook_install(void) {
     if (g_stats.hooked) return 1;
     g_stats.last_error = 0;
+    int b_rc = zve_sendevents_toall_hook_install();
     int w_rc = zve_write_hook_install();
     int so_rc = zve_sendobjects_hook_install();
-    if (w_rc != 0 && so_rc != 0) {
-        g_stats.last_error = (w_rc != 0) ? w_rc : so_rc;
-        LOGW("both hooks failed write=%d sendObjects=%d", w_rc, so_rc);
+    if (b_rc != 0 && w_rc != 0 && so_rc != 0) {
+        g_stats.last_error = (b_rc != 0) ? b_rc : w_rc;
+        LOGW("all hooks failed batch=%d write=%d sendObjects=%d", b_rc, w_rc, so_rc);
         return g_stats.last_error;
     }
-    if (w_rc == 0 && so_rc == 0) {
+    int count = (b_rc == 0) + (w_rc == 0) + (so_rc == 0);
+    if (count == 3) {
+        g_stats.hooked = 4;
+        LOGI("[✓] native hook installed via sendEventsToAllClients + write + sendObjects (hooked=4)");
+    } else if (count == 2 && w_rc == 0 && so_rc == 0) {
         g_stats.hooked = 3;
-        LOGI("[✓] native hook installed via write + sendObjects (hooked=3)");
+        LOGW("[✓] native hook installed via write + sendObjects (hooked=3, batch failed=%d)", b_rc);
     } else {
         g_stats.hooked = 1;
-        LOGI("[✓] native hook installed via write (hooked=1)");
+        LOGW("[✓] native hook installed via write only (hooked=1, batch=%d so=%d)", b_rc, so_rc);
     }
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
@@ -870,10 +1126,11 @@ static int zve_hook_uninstall(void) {
     if (!g_stats.hooked) return 0;
     int rc1 = zve_write_hook_uninstall();
     int rc2 = zve_sendobjects_hook_uninstall();
+    int rc3 = zve_sendevents_toall_hook_uninstall();
     g_stats.hooked = 0;
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
-    return (rc1 != 0) ? rc1 : rc2;
+    return (rc1 != 0) ? rc1 : ((rc2 != 0) ? rc2 : rc3);
 }
 
 /* ---------- JNI ---------- */
@@ -899,7 +1156,8 @@ static jint JNICALL nativeHookUninstall(JNIEnv *env, jclass clazz) {
 static jint JNICALL nativeSetConfig(
     JNIEnv *env, jclass clazz,
     jboolean enabled, jint mode, jfloat stepFrequency, jfloat speedKmh,
-    jfloat amplitude, jboolean randomNoise, jfloat headingDeg, jlong initialStepCount) {
+    jfloat amplitude, jboolean randomNoise, jfloat headingDeg, jlong initialStepCount,
+    jint stepHandle) {
     (void)env;
     (void)clazz;
     pthread_mutex_lock(&g_mutex);
@@ -912,6 +1170,7 @@ static jint JNICALL nativeSetConfig(
     g_cfg.amplitude = amplitude;
     g_cfg.random_noise = randomNoise != 0;
     g_cfg.heading_deg = headingDeg;
+    if (stepHandle > 0) g_step_handle = (int)stepHandle; /* Java 传入 STEP_COUNTER handle */
     if (enabled != 0) {
         if (first_enable && initialStepCount > 0) {
             g_motion.step_count = (uint64_t)initialStepCount;
@@ -919,9 +1178,11 @@ static jint JNICALL nativeSetConfig(
         zve_motion_apply_profile();
         /* 启用时重置时间基准：避免用旧基准算出超大 dt 导致跳步 */
         if (first_enable) g_motion.last_tick_ns = 0;
+        g_last_inject_ns = 0;
     } else {
         /* 禁用时同样重置基准，下次启用从新起点开始 */
         g_motion.last_tick_ns = 0;
+        g_last_inject_ns = 0;
     }
     pthread_mutex_unlock(&g_mutex);
     return 0;
@@ -930,16 +1191,19 @@ static jint JNICALL nativeSetConfig(
 static jstring JNICALL nativeGetStatus(JNIEnv *env, jclass clazz) {
     (void)clazz;
     pthread_mutex_lock(&g_mutex);
-    char buf[512];
+    char buf[640];
     snprintf(buf, sizeof(buf),
              "{\"hooked\":%d,\"enabled\":%d,\"writeAddr\":\"%p\",\"helperAddr\":\"%p\","
+             "\"batchAddr\":\"%p\",\"sendObjectsAddr\":\"%p\","
              "\"eventsRewritten\":%llu,\"stepCount\":%llu,\"lastError\":%d,\"deliveryVerified\":%d,"
-             "\"rewriteCalls\":%llu,\"lastType\":%d}",
+             "\"rewriteCalls\":%llu,\"lastType\":%d,\"injectCount\":%llu,\"stepHandle\":%d}",
              g_stats.hooked, g_cfg.enabled, g_write_addr, g_write_helper_addr,
+             g_batch_addr, g_so_addr,
              (unsigned long long)g_stats.events_rewritten,
              (unsigned long long)g_motion.step_count,
              g_stats.last_error, g_stats.delivery_verified,
-             (unsigned long long)g_stats.rewrite_calls, g_stats.last_type);
+             (unsigned long long)g_stats.rewrite_calls, g_stats.last_type,
+             (unsigned long long)g_stats.inject_count, g_step_handle);
     pthread_mutex_unlock(&g_mutex);
     return (*env)->NewStringUTF(env, buf);
 }
@@ -954,7 +1218,7 @@ static const JNINativeMethod kMethods[] = {
     {"nativeInit", "()I", (void *)nativeInit},
     {"nativeHookInstall", "()I", (void *)nativeHookInstall},
     {"nativeHookUninstall", "()I", (void *)nativeHookUninstall},
-    {"nativeSetConfig", "(ZIFFFZFJ)I", (void *)nativeSetConfig},
+    {"nativeSetConfig", "(ZIFFFZFJJ)I", (void *)nativeSetConfig},
     {"nativeGetStatus", "()Ljava/lang/String;", (void *)nativeGetStatus},
     {"nativeGetStepCount", "()J", (void *)nativeGetStepCount},
 };
