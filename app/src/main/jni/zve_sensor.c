@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <pthread.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -358,51 +359,64 @@ void zve_rewrite_events(const zve_sensor_event_t *events, size_t count) {
  *   0x3c br x17
  *   0x40 <quad helper_addr>
  */
-#define ZVE_STUB_SIZE 0x48
+#define ZVE_STUB_SIZE 0x4c
 
 static int zve_build_stub(uint8_t *out, uintptr_t rewrite_addr, uintptr_t helper_addr) {
-    /* 0x00-0x1f：保存现场 + 调用 rewrite */
+    /* 0x00-0x23：保存现场 + 调用 rewrite（blr 返回地址=0x20，必须跳过字面量区） */
     static const uint32_t kStubHead[] = {
-        0xD100C3FFu, /* sub sp, sp, #0x30 */
-        0xA90007E0u, /* stp x0, x1, [sp] */
-        0xA9010FE2u, /* stp x2, x3, [sp, #0x10] */
-        0xF90013FEu, /* str x30, [sp, #0x20] */
-        0xAA0103E0u, /* mov x0, x1 */
-        0xAA0203E1u, /* mov x1, x2 */
-        0x58000050u, /* ldr x16, [pc, #8] */
-        0xD63F0200u, /* blr x16 */
+        0xD100C3FFu, /* 0x00 sub sp, sp, #0x30 */
+        0xA90007E0u, /* 0x04 stp x0, x1, [sp] */
+        0xA9010FE2u, /* 0x08 stp x2, x3, [sp, #0x10] */
+        0xF90013FEu, /* 0x0c str x30, [sp, #0x20] */
+        0xAA0103E0u, /* 0x10 mov x0, x1 */
+        0xAA0203E1u, /* 0x14 mov x1, x2 */
+        0x58000070u, /* 0x18 ldr x16, [pc, #12] -> 0x24 字面量 */
+        0xD63F0200u, /* 0x1c blr x16（返回地址 0x20） */
+        0x14000003u, /* 0x20 b 0x2c（跳过 0x24 字面量到恢复现场） */
     };
-    /* 0x28-0x3f：恢复现场 + 尾跳 helper */
+    /* 0x2c-0x43：恢复现场 + 尾跳 helper */
     static const uint32_t kStubTail[] = {
-        0xA94007E0u, /* ldp x0, x1, [sp] */
-        0xA9410FE2u, /* ldp x2, x3, [sp, #0x10] */
-        0xF94013FEu, /* ldr x30, [sp, #0x20] */
-        0x9100C3FFu, /* add sp, sp, #0x30 */
-        0x58000051u, /* ldr x17, [pc, #8] */
-        0xD61F0220u, /* br x17 */
+        0xA94007E0u, /* 0x2c ldp x0, x1, [sp] */
+        0xA9410FE2u, /* 0x30 ldp x2, x3, [sp, #0x10] */
+        0xF94013FEu, /* 0x34 ldr x30, [sp, #0x20] */
+        0x9100C3FFu, /* 0x38 add sp, sp, #0x30 */
+        0x58000051u, /* 0x3c ldr x17, [pc, #8] -> 0x44 字面量 */
+        0xD61F0220u, /* 0x40 br x17 */
     };
-    memcpy(out, kStubHead, sizeof(kStubHead));                 /* 0x00-0x1f */
-    *(uint64_t *)(out + 0x20) = (uint64_t)rewrite_addr;        /* 0x20-0x27 字面量 */
-    memcpy(out + 0x28, kStubTail, sizeof(kStubTail));          /* 0x28-0x3f */
-    *(uint64_t *)(out + 0x40) = (uint64_t)helper_addr;         /* 0x40-0x47 字面量 */
+    memcpy(out, kStubHead, sizeof(kStubHead));             /* 0x00-0x23 */
+    *(uint64_t *)(out + 0x24) = (uint64_t)rewrite_addr;    /* 0x24-0x2b 字面量 */
+    memcpy(out + 0x2c, kStubTail, sizeof(kStubTail));      /* 0x2c-0x43 */
+    *(uint64_t *)(out + 0x44) = (uint64_t)helper_addr;     /* 0x44-0x4b 字面量 */
     return ZVE_STUB_SIZE;
 }
 
 /* 在目标库加载地址附近分配可执行页（±128MB 内保证 B 可达） */
 static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr, uintptr_t lib_base) {
     long page = sysconf(_SC_PAGESIZE);
-    uintptr_t hint = (lib_base & ~((uintptr_t)page - 1)) + 0x4000000u; /* +64MB */
+    /* 多候选区：+64MB / -64MB / +96MB / -96MB / +112MB / -112MB，
+     * 每区尝试 128 页（MAP_FIXED_NOREPLACE，被占用自动跳过） */
+    static const int64_t kOffsets[] = {
+        0x4000000LL, -0x4000000LL,
+        0x6000000LL, -0x6000000LL,
+        0x7000000LL, -0x7000000LL,
+    };
     uint8_t *mem = NULL;
-    for (int i = 0; i < 256; i++) {
-        void *p = mmap((void *)(hint + (uintptr_t)i * (uintptr_t)page), (size_t)page,
-                       PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-        if (p == MAP_FAILED) continue;
-        mem = (uint8_t *)p;
-        break;
+    for (size_t k = 0; k < sizeof(kOffsets) / sizeof(kOffsets[0]) && mem == NULL; k++) {
+        uintptr_t base_hint = (uintptr_t)((int64_t)lib_base + kOffsets[k]);
+        base_hint &= ~((uintptr_t)page - 1);
+        for (int i = 0; i < 128; i++) {
+            void *p = mmap((void *)(base_hint + (uintptr_t)i * (uintptr_t)page), (size_t)page,
+                           PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+            if (p != MAP_FAILED) {
+                mem = (uint8_t *)p;
+                break;
+            }
+        }
     }
     if (mem == NULL) {
-        /* 低版本内核无 MAP_FIXED_NOREPLACE：退化为普通匿名映射（距离可能不达标，由 patch 校验） */
+        /* 退化：普通匿名映射（距离可能不达标，由 patch 校验） */
+        LOGW("stub mmap candidates failed: %s", strerror(errno));
         void *p = mmap(NULL, (size_t)page, PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (p == MAP_FAILED) return NULL;
@@ -410,6 +424,7 @@ static void *zve_prepare_stub_mem(uintptr_t rewrite_addr, uintptr_t helper_addr,
     }
     zve_build_stub(mem, rewrite_addr, helper_addr);
     if (mprotect(mem, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
+        LOGW("stub mprotect RX failed: %s", strerror(errno));
         munmap(mem, (size_t)page);
         return NULL;
     }
@@ -453,20 +468,70 @@ static int zve_patch_restore(uintptr_t from, uint32_t insn) {
 
 #define WRITE_SYMBOL "_ZN7android16SensorEventQueue5writeERKNS_2spINS_7BitTubeEEEPK12ASensorEventm"
 
+/*
+ * 定位 libsensor.so 句柄：短名 dlopen 受 linker namespace 隔离限制
+ * （Oplus15 system_server 实测 "library not found"），依次尝试：
+ *   1) 短名（标准 namespace 可用时）
+ *   2) /system/lib64 完整路径
+ *   3) /proc/self/maps 解析加载基址 + 已知 vaddr 锚点（绕过 namespace）
+ */
+static void *zve_lib_handle(void) {
+    static const char *kNames[] = {
+        "libsensor.so",
+        "/system/lib64/libsensor.so",
+    };
+    for (size_t i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++) {
+        void *h = dlopen(kNames[i], RTLD_NOLOAD);
+        if (h == NULL) h = dlopen(kNames[i], RTLD_NOW | RTLD_LOCAL);
+        if (h != NULL) return h;
+    }
+    return NULL;
+}
+
+/* 解析 maps 中 libsensor.so 加载基址（第一个匹配映射的起始地址） */
+static uintptr_t zve_lib_base_from_maps(const char *libname) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f == NULL) return 0;
+    char line[512];
+    uintptr_t base = 0;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (strstr(line, libname) == NULL) continue;
+        unsigned long long start = 0;
+        if (sscanf(line, "%llx-", &start) == 1) {
+            base = (uintptr_t)start;
+            break;
+        }
+    }
+    fclose(f);
+    return base;
+}
+
+/* libsensor.so 中 SensorEventQueue::write 的 vaddr（Oplus15 静态分析锚点；
+ * 加载后实际地址 = base + vaddr，且必须通过下方字节校验才生效） */
+#define WRITE_VADDR_OPLUS15 0x11660u
+
 static int zve_hook_install(void) {
     if (g_stats.hooked) return 1;
-    void *h = dlopen("libsensor.so", RTLD_NOLOAD);
-    if (h == NULL) h = dlopen("libsensor.so", RTLD_NOW | RTLD_LOCAL);
-    if (h == NULL) {
-        g_stats.last_error = -1;
+    void *write_fn = NULL;
+    void *h = zve_lib_handle();
+    if (h != NULL) {
+        write_fn = dlsym(h, WRITE_SYMBOL);
+        if (write_fn != NULL) {
+            LOGI("resolved %s via dlopen (%p)", WRITE_SYMBOL, write_fn);
+        }
+    } else {
         LOGW("dlopen libsensor.so failed: %s", dlerror());
-        return -1;
     }
-    void *write_fn = dlsym(h, WRITE_SYMBOL);
     if (write_fn == NULL) {
-        g_stats.last_error = -2;
-        LOGW("dlsym %s failed: %s", WRITE_SYMBOL, dlerror());
-        return -2;
+        /* 兜底：maps 基址 + vaddr 锚点 */
+        uintptr_t base = zve_lib_base_from_maps("libsensor.so");
+        if (base == 0) {
+            g_stats.last_error = -9;
+            LOGW("libsensor.so not found in /proc/self/maps");
+            return -9;
+        }
+        write_fn = (void *)(base + WRITE_VADDR_OPLUS15);
+        LOGI("resolved %s via maps base=%p vaddr=0x%x", WRITE_SYMBOL, (void *)base, WRITE_VADDR_OPLUS15);
     }
     const uint32_t *insn = (const uint32_t *)write_fn;
     if (insn[0] != 0xD503245Fu) { /* bti c */
@@ -502,9 +567,10 @@ static int zve_hook_install(void) {
     int rc = zve_patch_branch((uintptr_t)write_fn + 8, (uintptr_t)g_stub_mem);
     if (rc != 0) {
         g_stats.last_error = rc;
+        int64_t d = (int64_t)g_stub_mem - (int64_t)((uintptr_t)write_fn + 8);
+        LOGW("patch branch failed rc=%d write=%p stub=%p delta=%lld bytes", rc, write_fn, g_stub_mem, (long long)d);
         munmap(g_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
         g_stub_mem = NULL;
-        LOGW("patch branch failed rc=%d", rc);
         return rc;
     }
     g_write_addr = write_fn;
