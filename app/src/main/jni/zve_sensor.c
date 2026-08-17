@@ -1222,7 +1222,7 @@ static const JNINativeMethod kMethods[] = {
     {"nativeInit", "()I", (void *)nativeInit},
     {"nativeHookInstall", "()I", (void *)nativeHookInstall},
     {"nativeHookUninstall", "()I", (void *)nativeHookUninstall},
-    {"nativeSetConfig", "(ZIFFFZFJJ)I", (void *)nativeSetConfig},
+    {"nativeSetConfig", "(ZIFFFZFJI)I", (void *)nativeSetConfig},
     {"nativeGetStatus", "()Ljava/lang/String;", (void *)nativeGetStatus},
     {"nativeGetStepCount", "()J", (void *)nativeGetStepCount},
 };
