@@ -105,10 +105,15 @@ static void *g_write_helper_addr;
 static uint32_t g_orig_b_insn; /* write+8 原始指令 */
 static void *g_stub_mem;       /* 手工构建的 arm64 重写桩页 */
 
-/* sendEvents 入口 hook 状态（g_stats.hooked=2 时生效） */
+/* sendEvents 入口 hook 状态（g_stats.hooked=2 时生效，当前未启用） */
 static void *g_se_addr;
 static uint32_t g_se_orig_insn; /* sendEvents 入口原始指令（paciasp） */
 static void *g_se_stub_mem;
+
+/* BitTube::sendObjects 入口 hook 状态（g_stats.hooked=3 时生效） */
+static void *g_so_addr;
+static uint32_t g_so_orig_insn; /* sendObjects 入口原始指令（paciasp） */
+static void *g_so_stub_mem;
 
 static uint64_t g_rng_state = 0x9E3779B97F4A7C15ULL;
 
@@ -664,6 +669,80 @@ static int zve_sendevents_hook_uninstall(void) {
     return 0;
 }
 
+#define SENDOBJECTS_SYMBOL "_ZN7android7BitTube11sendObjectsERKNS_2spIS0_EEPKvmm"
+#define SENDOBJECTS_VADDR_OPLUS15 0xc478u
+
+/*
+ * BitTube::sendObjects 入口 hook：所有 BitTube 写入的最终汇聚点。
+ * Oplus 的 SensorService 可能绕过 SensorEventQueue::write 直接调用它，
+ * hook 此入口可覆盖 write 路径 + Oplus 直调路径。
+ * 入口为 paciasp（PAC），trampoline 复用 sendEvents 模板（x0=tube, x1=events, x2=count）。
+ */
+static int zve_sendobjects_hook_install(void) {
+    void *fn = NULL;
+    void *h = zve_lib_handle();
+    if (h != NULL) {
+        fn = dlsym(h, SENDOBJECTS_SYMBOL);
+        if (fn != NULL) LOGI("resolved %s via dlopen (%p)", SENDOBJECTS_SYMBOL, fn);
+    }
+    uintptr_t lib_base = 0;
+    if (fn == NULL) {
+        lib_base = zve_lib_base_from_maps("libsensor.so");
+        if (lib_base == 0) {
+            LOGW("libsensor.so not found for sendObjects");
+            return -30;
+        }
+        fn = (void *)(lib_base + SENDOBJECTS_VADDR_OPLUS15);
+        LOGI("resolved %s via maps base=%p vaddr=0x%x", SENDOBJECTS_SYMBOL,
+             (void *)lib_base, SENDOBJECTS_VADDR_OPLUS15);
+    }
+    const uint32_t *insn = (const uint32_t *)fn;
+    if (insn[0] != 0xD503233Fu) { /* paciasp */
+        LOGW("unexpected sendObjects prologue word0=%08x", insn[0]);
+        return -31;
+    }
+    if (lib_base == 0) {
+        Dl_info di;
+        if (dladdr(fn, &di) != 0) lib_base = (uintptr_t)di.dli_fbase;
+    }
+    uint8_t *stub = zve_alloc_exec_page(lib_base);
+    if (stub == NULL) return -8;
+    zve_build_sendevents_stub(stub, (uintptr_t)&zve_rewrite_events, (uintptr_t)fn + 4);
+    long page = sysconf(_SC_PAGESIZE);
+    if (mprotect(stub, (size_t)page, PROT_READ | PROT_EXEC) != 0) {
+        LOGW("sendobjects stub mprotect RX failed: %s", strerror(errno));
+        munmap(stub, (size_t)page);
+        return -32;
+    }
+    g_so_orig_insn = insn[0];
+    int rc = zve_patch_branch((uintptr_t)fn, (uintptr_t)stub);
+    if (rc != 0) {
+        LOGW("sendobjects patch failed rc=%d fn=%p stub=%p", rc, fn, stub);
+        munmap(stub, (size_t)page);
+        return rc;
+    }
+    g_so_addr = fn;
+    g_so_stub_mem = stub;
+    LOGI("sendObjects hook installed: fn=%p stub=%p", fn, stub);
+    return 0;
+}
+
+static int zve_sendobjects_hook_uninstall(void) {
+    if (g_so_addr == NULL) return 0;
+    int rc = zve_patch_restore((uintptr_t)g_so_addr, g_so_orig_insn);
+    if (rc != 0) {
+        LOGW("sendobjects restore failed rc=%d", rc);
+        return rc;
+    }
+    if (g_so_stub_mem != NULL) {
+        munmap(g_so_stub_mem, (size_t)sysconf(_SC_PAGESIZE));
+        g_so_stub_mem = NULL;
+    }
+    g_so_addr = NULL;
+    LOGI("sendObjects hook uninstalled (original restored)");
+    return 0;
+}
+
 static int zve_write_hook_install(void) {
     void *write_fn = NULL;
     void *h = zve_lib_handle();
@@ -758,31 +837,43 @@ static int zve_write_hook_uninstall(void) {
 }
 
 /*
- * 回退 59c8742 验证策略：write hook 单装（BitTube 路径全覆盖），
- * sendEvents hook 经实证为名存实亡（Oplus vtable 不指向 AOSP 实现），
- * 保留在代码中但不再安装，避免双 hook 干扰。
- * g_stats.hooked: 1=write 单装（59c8742 模式）
+ * 安装策略（最稳定方案）：
+ *   - write hook：SensorEventQueue::write（BitTube 直写路径，计步器累加依赖此路径）
+ *   - sendObjects hook：BitTube::sendObjects（所有 BitTube 写入的最终汇聚，
+ *     覆盖 Oplus 绕过 write 直调 sendObjects 的路径）
+ * 同一事件批由 rewrite 批指纹去重，保证只推进一次。
+ * g_stats.hooked: 3=双装（write+sendObjects）, 1=仅 write。
  */
 static int zve_hook_install(void) {
     if (g_stats.hooked) return 1;
     g_stats.last_error = 0;
-    int rc = zve_write_hook_install();
-    if (rc == 0) {
-        g_stats.hooked = 1;
-        g_stats.events_rewritten = 0;
-        g_stats.delivery_verified = 0;
-        LOGI("[✓] native hook installed via write (hooked=1, 59c8742 mode)");
+    int w_rc = zve_write_hook_install();
+    int so_rc = zve_sendobjects_hook_install();
+    if (w_rc != 0 && so_rc != 0) {
+        g_stats.last_error = (w_rc != 0) ? w_rc : so_rc;
+        LOGW("both hooks failed write=%d sendObjects=%d", w_rc, so_rc);
+        return g_stats.last_error;
     }
-    return rc;
+    if (w_rc == 0 && so_rc == 0) {
+        g_stats.hooked = 3;
+        LOGI("[✓] native hook installed via write + sendObjects (hooked=3)");
+    } else {
+        g_stats.hooked = 1;
+        LOGI("[✓] native hook installed via write (hooked=1)");
+    }
+    g_stats.events_rewritten = 0;
+    g_stats.delivery_verified = 0;
+    return 0;
 }
 
 static int zve_hook_uninstall(void) {
     if (!g_stats.hooked) return 0;
-    int rc = zve_write_hook_uninstall();
+    int rc1 = zve_write_hook_uninstall();
+    int rc2 = zve_sendobjects_hook_uninstall();
     g_stats.hooked = 0;
     g_stats.events_rewritten = 0;
     g_stats.delivery_verified = 0;
-    return rc;
+    return (rc1 != 0) ? rc1 : rc2;
 }
 
 /* ---------- JNI ---------- */
