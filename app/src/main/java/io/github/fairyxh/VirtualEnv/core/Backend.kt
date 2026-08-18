@@ -98,6 +98,8 @@ class Backend private constructor(private val dataDir: File) {
     lateinit var recordingEngine: RecordingEngine
         private set
 
+    private var systemEnvironmentSampler: SystemEnvironmentSampler? = null
+
     @Volatile
     var apiServer: ApiServer? = null
         private set
@@ -1561,6 +1563,12 @@ class Backend private constructor(private val dataDir: File) {
         val id = recordingEngine.startRecording(name, remark)
         beginHookObserve()
         suspendAll()
+        systemEnvironmentSampler?.stop()
+        systemEnvironmentSampler = runCatching {
+            SystemEnvironmentSampler(systemContext()).also { it.start(intervalMs) }
+        }.onFailure {
+            ZLog.w(TAG_SCOPE, "system sampler init failed; recording will keep hook observations", it)
+        }.getOrNull()
         recordingEngine.startCoreSampling(intervalMs)
         ZLog.i(TAG_SCOPE, "core recording started id=$id intervalMs=${intervalMs.coerceIn(100L, 300_000L)}")
         return id
@@ -1574,7 +1582,17 @@ class Backend private constructor(private val dataDir: File) {
         if (id <= 0) return false
         endHookObserve()
         resumeAll()
+        systemEnvironmentSampler?.stop()
+        systemEnvironmentSampler = null
         return recordingEngine.stopRecording()
+    }
+
+    /** Resolve the system context without depending on the control App process. */
+    private fun systemContext(): android.content.Context {
+        val thread = Class.forName("android.app.ActivityThread")
+            .getMethod("currentActivityThread").invoke(null)
+        return Class.forName("android.app.ActivityThread")
+            .getMethod("getSystemContext").invoke(thread) as android.content.Context
     }
 
     fun listRecordings(): List<org.json.JSONObject> {

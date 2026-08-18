@@ -221,9 +221,21 @@ object HookObserver {
     /** Build a recording frame from the system-server observation plane. */
     fun recordingFrameJson(): JSONObject {
         val observed = snapshotJson()
+        val observedLocation = observed.optJSONObject("location")
+        val normalizedLocation = JSONObject()
+        if (observedLocation != null) {
+            val provider = observedLocation.optString("provider", "gps").ifBlank { "gps" }
+            normalizedLocation.put(provider, JSONObject(observedLocation.toString()))
+            observedLocation.optDouble("latitude", Double.NaN).takeUnless { it.isNaN() }?.let {
+                normalizedLocation.put("latitude", it)
+            }
+            observedLocation.optDouble("longitude", Double.NaN).takeUnless { it.isNaN() }?.let {
+                normalizedLocation.put("longitude", it)
+            }
+        }
         return JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
-            put("location", observed.optJSONObject("location") ?: JSONObject())
+            put("location", normalizedLocation)
             put("cell", JSONObject().apply {
                 put("cells", observed.optJSONArray("cells") ?: JSONArray())
             })

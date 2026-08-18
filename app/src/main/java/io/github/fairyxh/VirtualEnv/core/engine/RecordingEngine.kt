@@ -162,6 +162,8 @@ class RecordingEngine(
             recordingFrameSeq
         }
         databaseManager.insertRecordingFrame(id, seq, ts, data.toString())
+        // Keep the list/status view current while recording; do not wait for stop().
+        databaseManager.updateRecordingMeta(id, 0L, recordingFrameCount)
         return true
     }
 
@@ -564,6 +566,11 @@ class RecordingEngine(
                 put("durationMs", durationMs)
                 put("recording", isRecording())
                 put("recordingId", activeRecordingId)
+                put("recordingName", recordingName)
+                put("recordingFrameCount", recordingFrameCount)
+                put("recordingFirstTs", recordingFirstTs)
+                put("recordingLastTs", recordingLastTs)
+                put("lastRecording", databaseManager.queryRecordings().firstOrNull() ?: JSONObject())
                 put("smoothLocation", smoothLocation)
                 // 回放同步状态：路线/位置/环境开关与配置（App 展示用）
                 put("routeRunning", backend.routeEngine.isRunning())
