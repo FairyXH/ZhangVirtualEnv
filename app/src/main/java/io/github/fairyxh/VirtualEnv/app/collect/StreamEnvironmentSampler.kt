@@ -61,7 +61,11 @@ class StreamEnvironmentSampler(private val context: Context) {
     @Volatile
     private var lastStepCount = -1L
     private val sensorRaw = ConcurrentHashMap<Int, String>()
-    private val bleFound = LinkedHashMap<String, String>()
+    private val sensorEvents = java.util.concurrent.ConcurrentLinkedQueue<JSONObject>()
+    private val nmeaEvents = java.util.concurrent.ConcurrentLinkedQueue<JSONObject>()
+    private val bleFound = LinkedHashMap<String, JSONObject>()
+    @Volatile
+    private var wifiConnection: JSONObject = JSONObject()
 
     private var locationManager: LocationManager? = null
     private var telephonyManager: TelephonyManager? = null
@@ -94,8 +98,18 @@ class StreamEnvironmentSampler(private val context: Context) {
     }
     private val stepListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
-            if (event.sensor?.type == Sensor.TYPE_STEP_COUNTER && event.values.isNotEmpty()) {
-                lastStepCount = event.values[0].toLong()
+            val values = event.values.copyOf()
+            val eventJson = JSONObject().apply {
+                put("timestampNanos", event.timestamp)
+                put("sensorType", event.sensor?.type ?: -1)
+                put("sensorName", event.sensor?.name ?: "")
+                put("accuracy", event.accuracy)
+                put("values", JSONArray().apply { values.forEach { put(it) } })
+            }
+            sensorEvents.add(eventJson)
+            while (sensorEvents.size > 4000) sensorEvents.poll()
+            if (event.sensor?.type == Sensor.TYPE_STEP_COUNTER && values.isNotEmpty()) {
+                lastStepCount = values[0].toLong()
             }
         }
 
@@ -103,8 +117,18 @@ class StreamEnvironmentSampler(private val context: Context) {
     }
     private val rawSensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
-            val vals = event.values.joinToString(", ") { String.format("%.3f", it) }
+            val values = event.values.copyOf()
+            val vals = values.joinToString(", ") { String.format("%.3f", it) }
             sensorRaw[event.sensor.type] = "${event.sensor.name} [$vals]"
+            val eventJson = JSONObject().apply {
+                put("timestampNanos", event.timestamp)
+                put("sensorType", event.sensor.type)
+                put("sensorName", event.sensor.name ?: "")
+                put("accuracy", event.accuracy)
+                put("values", JSONArray().apply { values.forEach { put(it) } })
+            }
+            sensorEvents.add(eventJson)
+            while (sensorEvents.size > 4000) sensorEvents.poll()
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -112,10 +136,20 @@ class StreamEnvironmentSampler(private val context: Context) {
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: android.bluetooth.le.ScanResult) {
             val device = result.device
-            val name = result.scanRecord?.deviceName ?: device.name ?: "(no name)"
-            val line = "$name ${device.address} ${result.rssi}dBm"
+            val raw = result.scanRecord?.bytes ?: ByteArray(0)
+            val data = JSONObject().apply {
+                put("kind", "ble")
+                put("callbackType", callbackType)
+                put("address", device.address)
+                put("name", result.scanRecord?.deviceName ?: device.name ?: "(no name)")
+                put("rssi", result.rssi)
+                put("timestampNanos", result.timestampNanos)
+                put("txPower", result.txPower)
+                put("dataStatus", result.dataStatus)
+                put("raw", android.util.Base64.encodeToString(raw, android.util.Base64.NO_WRAP))
+            }
             synchronized(bleFound) {
-                bleFound[device.address] = line
+                bleFound[device.address] = data
                 while (bleFound.size > BLE_RESULTS_LIMIT) {
                     bleFound.keys.firstOrNull()?.let(bleFound::remove)
                 }
@@ -144,6 +178,9 @@ class StreamEnvironmentSampler(private val context: Context) {
         lastGnssStatus = null
         lastStepCount = -1L
         sensorRaw.clear()
+        sensorEvents.clear()
+        nmeaEvents.clear()
+        wifiConnection = JSONObject()
         synchronized(bleFound) { bleFound.clear() }
 
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
@@ -178,6 +215,13 @@ class StreamEnvironmentSampler(private val context: Context) {
                     Executors.newSingleThreadExecutor(),
                     gnssCallback
                 )
+                locationManager?.addNmeaListener(Executors.newSingleThreadExecutor()) { message, _ ->
+                    nmeaEvents.add(JSONObject().apply {
+                        put("timestamp", System.currentTimeMillis())
+                        put("sentence", message)
+                    })
+                    while (nmeaEvents.size > 1000) nmeaEvents.poll()
+                }
             } else {
                 @Suppress("DEPRECATION")
                 locationManager?.registerGnssStatusCallback(gnssCallback)
@@ -356,6 +400,20 @@ class StreamEnvironmentSampler(private val context: Context) {
             emptyList()
         }
         out.put("enabled", wm.isWifiEnabled)
+        runCatching {
+            val info = wm.connectionInfo
+            wifiConnection = JSONObject().apply {
+                put("ssid", info.ssid ?: "")
+                put("bssid", info.bssid ?: "")
+                put("rssi", info.rssi)
+                put("frequency", info.frequency)
+                put("linkSpeedMbps", info.linkSpeed)
+                put("rxLinkSpeedMbps", runCatching { info.rxLinkSpeedMbps }.getOrDefault(-1))
+                put("txLinkSpeedMbps", runCatching { info.txLinkSpeedMbps }.getOrDefault(-1))
+                put("networkId", info.networkId)
+                put("ipAddress", info.ipAddress)
+            }
+        }
         out.put(
             "networks",
             JSONArray().apply {
@@ -371,6 +429,7 @@ class StreamEnvironmentSampler(private val context: Context) {
                 }
             }
         )
+        out.put("connection", wifiConnection)
         return out
     }
 
@@ -397,19 +456,8 @@ class StreamEnvironmentSampler(private val context: Context) {
             "devices",
             JSONArray().apply {
                 synchronized(bleFound) {
-                    bleFound.values.take(20).forEach { line ->
-                        val parts = line.split(" ")
-                        if (parts.size >= 2) {
-                            val address = parts[parts.size - 2]
-                            val rssiStr = parts.last().removeSuffix("dBm")
-                            put(
-                                JSONObject().apply {
-                                    put("address", address)
-                                    put("name", line.substringBefore(" $address"))
-                                    put("rssi", rssiStr.toIntOrNull() ?: -70)
-                                }
-                            )
-                        }
+                    bleFound.values.take(20).forEach { data ->
+                        put(data)
                     }
                 }
             }
@@ -429,20 +477,37 @@ class StreamEnvironmentSampler(private val context: Context) {
             sats.put(
                 JSONObject().apply {
                     put("svid", status.getSvid(i))
-                    put("cn0", status.getCn0DbHz(i))
-                    put("elevation", status.getElevationDegrees(i))
-                    put("azimuth", status.getAzimuthDegrees(i))
-                    put("used", status.usedInFix(i))
+                    put("constellationType", runCatching { status.getConstellationType(i) }.getOrDefault(0))
+                    put("cn0DbHz", status.getCn0DbHz(i))
+                    put("elevationDegrees", status.getElevationDegrees(i))
+                    put("azimuthDegrees", status.getAzimuthDegrees(i))
+                    put("carrierFrequencyHz", runCatching { status.getCarrierFrequencyHz(i) }.getOrDefault(0f))
+                    put("basebandCn0DbHz", runCatching { status.getBasebandCn0DbHz(i) }.getOrDefault(0f))
+                    put("hasAlmanacData", runCatching { status.hasAlmanacData(i) }.getOrDefault(false))
+                    put("hasEphemerisData", runCatching { status.hasEphemerisData(i) }.getOrDefault(false))
+                    put("usedInFix", status.usedInFix(i))
                 }
             )
         }
         out.put("usedInFix", used)
         out.put("satellites", sats)
+        out.put("nmea", JSONArray().apply {
+            while (true) {
+                val item = nmeaEvents.poll() ?: break
+                put(item)
+            }
+        })
         return out
     }
 
     private fun snapshotSensor(): JSONObject {
         val out = JSONObject()
+        out.put("events", JSONArray().apply {
+            while (true) {
+                val event = sensorEvents.poll() ?: break
+                put(event)
+            }
+        })
         sensorRaw[Sensor.TYPE_ACCELEROMETER]?.let { raw ->
             val nums = raw.substringAfter('[').substringBefore(']').split(",")
             if (nums.size >= 3) {

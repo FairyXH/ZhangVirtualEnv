@@ -57,6 +57,8 @@ class RecordingEngine(
     private var recordingFrameSeq: Int = 0
     @Volatile
     private var recordingFrameCount: Int = 0
+    @Volatile
+    private var recordingIntervalMs: Long = 1000L
 
     // ---------- 回放状态 ----------
 
@@ -103,6 +105,7 @@ class RecordingEngine(
         synchronized(this) {
             activeRecordingId = id
             recordingName = name
+            recordingIntervalMs = 1000L
             recordingStartWall = System.currentTimeMillis()
             recordingFirstTs = 0L
             recordingLastTs = 0L
@@ -182,7 +185,7 @@ class RecordingEngine(
             } else if (recordingFirstTs > 0) {
                 (System.currentTimeMillis() - recordingFirstTs).coerceAtLeast(0L)
             } else 0L
-            databaseManager.updateRecordingMeta(id, duration, count)
+            databaseManager.updateRecordingMeta(id, duration, count, finalized = true)
             activeRecordingId = -1L
             recordingName = ""
             recordingFrameSeq = 0
@@ -192,6 +195,10 @@ class RecordingEngine(
         }
         ZLog.i(TAG_SCOPE, "recording stopped id=$id frames=$count duration=$duration")
         return true
+    }
+
+    fun setRecordingInterval(intervalMs: Long) {
+        recordingIntervalMs = intervalMs.coerceIn(100L, 300_000L)
     }
 
     fun isRecording(): Boolean = activeRecordingId > 0
@@ -212,7 +219,7 @@ class RecordingEngine(
                 val duration = if (range != null) {
                     (range.optLong("lastTs") - range.optLong("firstTs")).coerceAtLeast(0L)
                 } else 0L
-                databaseManager.updateRecordingMeta(id, duration, count)
+                databaseManager.updateRecordingMeta(id, duration, count, finalized = true)
                 databaseManager.markRecordingInterrupted(id)
                 recovered++
                 ZLog.w(
@@ -570,6 +577,7 @@ class RecordingEngine(
                 put("recordingFrameCount", recordingFrameCount)
                 put("recordingFirstTs", recordingFirstTs)
                 put("recordingLastTs", recordingLastTs)
+                put("intervalMs", recordingIntervalMs)
                 put("lastRecording", databaseManager.queryRecordings().firstOrNull() ?: JSONObject())
                 put("smoothLocation", smoothLocation)
                 // 回放同步状态：路线/位置/环境开关与配置（App 展示用）

@@ -1,8 +1,12 @@
 package io.github.fairyxh.VirtualEnv.app
 
 import android.app.Service
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -82,10 +86,37 @@ class FloatControlService : Service() {
     private var selectedRouteId = -1L
     private val routeIds = mutableListOf<Long>()
 
+    private fun startProtectionForeground() {
+        val channelId = "zve_protection"
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(
+                NotificationChannel(channelId, "测试环境服务", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(this, channelId)
+                .setSmallIcon(R.mipmap.logo)
+                .setContentTitle("测试环境服务运行中")
+                .setContentText("系统测试数据与录像控制已保持")
+                .setOngoing(true)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setSmallIcon(R.mipmap.logo)
+                .setContentTitle("测试环境服务运行中")
+                .setOngoing(true)
+                .build()
+        }
+        startForeground(0x5A5645, notification)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        startProtectionForeground()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         // 打开时默认悬浮球状态；点击悬浮球展开面板
         showBall()

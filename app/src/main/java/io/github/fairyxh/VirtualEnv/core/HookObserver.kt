@@ -46,6 +46,15 @@ object HookObserver {
     /** 最近真实 NMEA 句子（最多保留 3 条，按时间倒序）。 */
     private var nmea: JSONArray? = null
 
+    /** BLE 广播、经典发现和双模发现事件流。 */
+    private var bluetooth: JSONArray? = null
+
+    /** 传感器事件增量流。 */
+    private var sensorEvents: JSONArray? = null
+
+    /** 当前连接 WiFi 信息。 */
+    private var wifiConnection: JSONObject? = null
+
     /** 是否处于观测状态。 */
     fun isActive(): Boolean = active
 
@@ -57,6 +66,9 @@ object HookObserver {
             wifi = null
             gnss = null
             nmea = null
+            bluetooth = null
+            sensorEvents = null
+            wifiConnection = null
             active = true
         }
         ZLog.i(TAG_SCOPE, "hook observation started")
@@ -109,16 +121,41 @@ object HookObserver {
         }
     }
 
-    /** 从真实 GnssStatus 提取卫星摘要（GnssLocationProvider.onReportSvStatus 参数）。 */
+    /** 从真实 GnssStatus 提取完整卫星字段。 */
     fun recordGnssStatus(status: Any?) {
         if (!active || status == null) return
         try {
             val cls = status.javaClass
             val count = cls.getMethod("getSatelliteCount").invoke(status) as? Int ?: return
-            val used = (0 until count).count { i ->
-                (cls.getMethod("usedInFix", Int::class.javaPrimitiveType).invoke(status, i) as? Boolean) ?: false
+            val usedMethod = cls.getMethod("usedInFix", Int::class.javaPrimitiveType)
+            fun value(name: String, index: Int): Any? = runCatching {
+                cls.methods.firstOrNull { it.name == name && it.parameterCount == 1 }?.invoke(status, index)
+            }.getOrNull()
+            val sats = JSONArray()
+            var used = 0
+            for (i in 0 until count) {
+                val usedInFix = (usedMethod.invoke(status, i) as? Boolean) ?: false
+                if (usedInFix) used++
+                sats.put(JSONObject().apply {
+                    put("svid", value("getSvid", i) ?: -1)
+                    put("constellationType", value("getConstellationType", i) ?: 0)
+                    put("cn0DbHz", value("getCn0DbHz", i) ?: 0.0)
+                    put("elevationDegrees", value("getElevationDegrees", i) ?: 0.0)
+                    put("azimuthDegrees", value("getAzimuthDegrees", i) ?: 0.0)
+                    put("carrierFrequencyHz", value("getCarrierFrequencyHz", i) ?: 0.0)
+                    put("basebandCn0DbHz", value("getBasebandCn0DbHz", i) ?: 0.0)
+                    put("hasAlmanacData", value("hasAlmanacData", i) ?: false)
+                    put("hasEphemerisData", value("hasEphemerisData", i) ?: false)
+                    put("usedInFix", usedInFix)
+                })
             }
-            recordGnss(count, used)
+            synchronized(lock) {
+                gnss = JSONObject().apply {
+                    put("satelliteCount", count)
+                    put("usedInFix", used)
+                    put("satellites", sats)
+                }
+            }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "record gnss status failed: ${t.message}")
         }
@@ -131,21 +168,21 @@ object HookObserver {
             if (n == null) return@forEach
             try {
                 val cls = n.javaClass
-                fun str(name: String): String = try {
-                    cls.getMethod("get$name").invoke(n) as? String ?: ""
+                fun any(name: String): Any? = try {
+                    cls.methods.firstOrNull { it.name == "get$name" && it.parameterCount == 0 }?.invoke(n)
                 } catch (_: Throwable) {
-                    ""
-                }
-                fun intVal(name: String): Int = try {
-                    (cls.getMethod("get$name").invoke(n) as? Int) ?: -1
-                } catch (_: Throwable) {
-                    -1
+                    null
                 }
                 arr.put(JSONObject().apply {
-                    put("ssid", str("SSID"))
-                    put("bssid", str("BSSID"))
-                    put("rssi", intVal("Level"))
-                    put("frequency", intVal("Frequency"))
+                    put("ssid", any("SSID") ?: "")
+                    put("bssid", any("BSSID") ?: "")
+                    put("rssi", any("Level") ?: -1)
+                    put("frequency", any("Frequency") ?: -1)
+                    put("capabilities", any("Capabilities") ?: "")
+                    put("timestamp", any("Timestamp") ?: 0L)
+                    put("channelWidth", any("ChannelWidth") ?: -1)
+                    put("wifiStandard", any("WifiStandard") ?: -1)
+                    put("is80211McResponder", any("Is80211McResponder") ?: false)
                 })
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "record wifi item failed: ${t.message}")
@@ -167,6 +204,31 @@ object HookObserver {
         }
     }
 
+    fun recordWifiConnection(data: JSONObject) {
+        if (!active) return
+        synchronized(lock) { wifiConnection = data }
+    }
+
+    fun recordBleResult(data: JSONObject) {
+        if (!active) return
+        synchronized(lock) {
+            val arr = bluetooth ?: JSONArray()
+            arr.put(data)
+            while (arr.length() > 1000) arr.remove(0)
+            bluetooth = arr
+        }
+    }
+
+    fun recordSensorEvent(data: JSONObject) {
+        if (!active) return
+        synchronized(lock) {
+            val arr = sensorEvents ?: JSONArray()
+            arr.put(data)
+            while (arr.length() > 2000) arr.remove(0)
+            sensorEvents = arr
+        }
+    }
+
     /** 记录真实 NMEA 句子（GnssLocationProvider.onReportNmea 参数）。 */
     fun recordNmea(sentence: String?) {
         if (!active || sentence.isNullOrBlank()) return
@@ -176,10 +238,9 @@ object HookObserver {
                 put("time", System.currentTimeMillis())
                 put("sentence", sentence.trim().take(120))
             }
-            // 倒序：最新在前，最多 3 条
-            val next = JSONArray().put(item)
-            for (i in 0 until minOf(arr.length(), 2)) next.put(arr.opt(i))
-            nmea = next
+            arr.put(item)
+            while (arr.length() > 500) arr.remove(0)
+            nmea = arr
         }
     }
 
@@ -214,13 +275,28 @@ object HookObserver {
                 wifi?.let { put("wifi", it) }
                 gnss?.let { put("gnss", it) }
                 nmea?.let { put("nmea", it) }
+                bluetooth?.let { put("bluetooth", it) }
+                sensorEvents?.let { put("sensorEvents", it) }
+                wifiConnection?.let { put("wifiConnection", it) }
             }
         }
     }
 
     /** Build a recording frame from the system-server observation plane. */
     fun recordingFrameJson(): JSONObject {
-        val observed = snapshotJson()
+        val observed: JSONObject
+        val frameBluetooth: JSONArray
+        val frameSensorEvents: JSONArray
+        val frameNmea: JSONArray
+        synchronized(lock) {
+            observed = snapshotJson()
+            frameBluetooth = bluetooth ?: JSONArray()
+            frameSensorEvents = sensorEvents ?: JSONArray()
+            frameNmea = nmea ?: JSONArray()
+            bluetooth = JSONArray()
+            sensorEvents = JSONArray()
+            nmea = JSONArray()
+        }
         val observedLocation = observed.optJSONObject("location")
         val normalizedLocation = JSONObject()
         if (observedLocation != null) {
@@ -241,10 +317,12 @@ object HookObserver {
             })
             put("wifi", JSONObject().apply {
                 put("networks", observed.optJSONArray("wifi") ?: JSONArray())
+                put("connection", observed.optJSONObject("wifiConnection") ?: JSONObject())
             })
-            put("bluetooth", JSONObject())
+            put("bluetooth", JSONObject().apply { put("events", frameBluetooth) })
             put("gnss", observed.optJSONObject("gnss") ?: JSONObject())
-            put("sensor", JSONObject())
+            put("sensor", JSONObject().apply { put("events", frameSensorEvents) })
+            put("nmea", frameNmea)
             put("hookObserve", observed)
         }
     }

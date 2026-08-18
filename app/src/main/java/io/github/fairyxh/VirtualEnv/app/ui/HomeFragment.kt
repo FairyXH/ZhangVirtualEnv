@@ -42,6 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.RecordingCaptureManager
 import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
@@ -576,6 +577,14 @@ class HomeFragment : Fragment() {
                             getString(R.string.home_collect_title),
                             style = TextStyle(color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                         )
+                        if (recordingRunning || !collectButtonEnabled) {
+                            BasicText(
+                                if (recordingRunning) "录制中 · ${recordingNameBackend.ifBlank { recordingName }}"
+                                else "快照采集中",
+                                Modifier.padding(top = 4.dp),
+                                style = TextStyle(color = Color(0xFFFF5252), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
                         GlassSegmented(
                             backdrop = backdrop,
                             modifier = Modifier
@@ -1642,6 +1651,7 @@ class HomeFragment : Fragment() {
                     recordingFrames = 0
                     recordingNameBackend = name
                     saveUiState()
+                    RecordingCaptureManager.start(requireContext(), recordingId, interval)
                     Toast.makeText(
                         requireContext(),
                         R.string.home_recording_suspend_notice,
@@ -1656,7 +1666,43 @@ class HomeFragment : Fragment() {
         }
     }
 
+    private fun startSamplingLoop(intervalSec: Double) {
+        recordingScheduler?.shutdownNow()
+        val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "ZVE-Recorder").apply { isDaemon = true }
+        }
+        recordingScheduler = scheduler
+        val intervalMs = (intervalSec * 1000.0).toLong().coerceAtLeast(100L)
+        scheduler.scheduleWithFixedDelay({
+            if (recordingId <= 0 || !samplingBusy.compareAndSet(false, true)) return@scheduleWithFixedDelay
+            executor.execute {
+                try {
+                    val id = recordingId
+                    if (id > 0) {
+                        val frame = streamSampler?.snapshot() ?: JSONObject()
+                        val result = ApiClient.appendRecordingFrame(id, frame)
+                        if (result.code == ApiResult.CODE_OK) {
+                            recordingFrames++
+                            if (isAdded) requireActivity().runOnUiThread {
+                                if (isAdded) recordingStatus = getString(
+                                    R.string.home_recording_running,
+                                    recordingNameBackend,
+                                    recordingFrames
+                                )
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    ZLog.w(TAG_SCOPE, "app recording frame failed", t)
+                } finally {
+                    samplingBusy.set(false)
+                }
+            }
+        }, 0L, intervalMs, TimeUnit.MILLISECONDS)
+    }
+
     private fun stopRecording() {
+        RecordingCaptureManager.stop(recordingId)
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L

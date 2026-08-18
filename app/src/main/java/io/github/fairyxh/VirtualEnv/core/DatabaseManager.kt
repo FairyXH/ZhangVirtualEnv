@@ -50,6 +50,7 @@ class DatabaseManager(private val dbFile: File) {
         const val COL_SEQ = "seq"
         const val COL_TIMESTAMP_MS = "timestamp_ms"
         const val COL_INTERRUPTED = "interrupted"
+        const val COL_FINALIZED = "finalized"
 
         private const val SQL_CREATE_ROUTE =
             "CREATE TABLE IF NOT EXISTS $TABLE_ROUTE (" +
@@ -112,6 +113,7 @@ class DatabaseManager(private val dbFile: File) {
                 "$COL_DURATION_MS INTEGER NOT NULL DEFAULT 0," +
                 "$COL_FRAME_COUNT INTEGER NOT NULL DEFAULT 0," +
                 "$COL_INTERRUPTED INTEGER NOT NULL DEFAULT 0," +
+                "$COL_FINALIZED INTEGER NOT NULL DEFAULT 1," +
                 "$COL_CREATE_TIME INTEGER NOT NULL" +
                 ")"
 
@@ -181,6 +183,10 @@ class DatabaseManager(private val dbFile: File) {
             if (!recordingColumns.contains(COL_INTERRUPTED)) {
                 database.execSQL("ALTER TABLE $TABLE_RECORDING ADD COLUMN $COL_INTERRUPTED INTEGER NOT NULL DEFAULT 0")
                 ZLog.i(TAG_SCOPE, "migrated: recording add interrupted column")
+            }
+            if (!recordingColumns.contains(COL_FINALIZED)) {
+                database.execSQL("ALTER TABLE $TABLE_RECORDING ADD COLUMN $COL_FINALIZED INTEGER NOT NULL DEFAULT 1")
+                ZLog.i(TAG_SCOPE, "migrated: recording add finalized column")
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "migrate recording failed", t)
@@ -432,16 +438,18 @@ class DatabaseManager(private val dbFile: File) {
             put(COL_REMARK, remark)
             put(COL_DURATION_MS, 0L)
             put(COL_FRAME_COUNT, 0)
+            put(COL_FINALIZED, 0)
             put(COL_CREATE_TIME, System.currentTimeMillis())
         }
         return open().insert(TABLE_RECORDING, null, values)
     }
 
     /** 更新录像元信息（停止录制时写入时长与帧数）。 */
-    fun updateRecordingMeta(id: Long, durationMs: Long, frameCount: Int) {
+    fun updateRecordingMeta(id: Long, durationMs: Long, frameCount: Int, finalized: Boolean = false) {
         val values = android.content.ContentValues().apply {
             put(COL_DURATION_MS, durationMs)
             put(COL_FRAME_COUNT, frameCount)
+            put(COL_FINALIZED, if (finalized) 1 else 0)
         }
         open().update(TABLE_RECORDING, values, "$COL_ID=?", arrayOf(id.toString()))
     }
@@ -506,7 +514,7 @@ class DatabaseManager(private val dbFile: File) {
         val cursor = open().query(
             TABLE_RECORDING,
             arrayOf(COL_ID),
-            "$COL_FRAME_COUNT=? AND $COL_INTERRUPTED=?",
+            "$COL_FINALIZED=? AND $COL_INTERRUPTED=?",
             arrayOf("0", "0"),
             null,
             null,
