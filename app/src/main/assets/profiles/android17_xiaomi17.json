@@ -43,7 +43,8 @@
       "rilCellInfoSignature": "(android.os.Message,android.os.WorkSource)",
       "rilSignalMethod": "getSignalStrength",
       "rilSignalSignature": "(android.os.Message)",
-      "rilHookPolicy": "disabled_api37_preserve_radio_request_lifecycle"
+      "rilHookPolicy": "disabled_api37_preserve_radio_request_lifecycle",
+      "publishedStatePolicy": "telephony_registry_in_place_before_dispatch"
     },
     "sensor": {
       "systemServiceClass": "com.android.server.sensors.SensorService",

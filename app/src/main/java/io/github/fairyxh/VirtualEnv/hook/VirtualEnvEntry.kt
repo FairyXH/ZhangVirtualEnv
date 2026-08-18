@@ -302,6 +302,12 @@ class VirtualEnvEntry : XposedModule() {
             // 基站 Hook 层真实数据观测（TelephonyRegistry 推送 + 挂起时 Binder 拉取）
             val cellObserveHooked = CellObserveHookAdapter(registrar).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] cell observe hooks installed hooked=$cellObserveHooked")
+            // Android 17 Xiaomi: align registry cache and callbacks after RIL has completed.
+            val telephonyStateHooked = TelephonyRegistryStateHookAdapter(
+                { backend.simEngine.currentData() },
+                registrar
+            ).install(param.classLoader)
+            log(Log.INFO, TAG, "[$TAG_SCOPE] telephony registry state hooks installed hooked=$telephonyStateHooked")
 
             log(Log.INFO, TAG, "[$TAG_SCOPE] system server hook install done")
         } catch (t: Throwable) {
