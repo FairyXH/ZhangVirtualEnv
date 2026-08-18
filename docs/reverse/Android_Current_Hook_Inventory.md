@@ -23,11 +23,11 @@ VirEnvDetector；未发现第三方应用包名。scope 变更属于用户工作
 | J004 | WiFi test data | system_server / WiFi service | `com.android.server.wifi.WifiServiceImpl` | scan / connection / DHCP methods | AOSP_COMMON | Android 16 dynamic APEX note | REQUIRES_DEVICE |
 | J005 | Bluetooth identity | system_server | Bluetooth manager service | address/name/state/enabled | AOSP_COMMON | Android 16 report; Android 17 services search returned `BluetoothManagerServiceStub` only | PARTIAL_STATIC |
 | J006 | BLE scan and discovery | com.android.bluetooth | GATT/scan controller, AdapterService, RemoteDevices | startScan/startDiscovery/device callback/bonding | AOSP_COMMON + VERSION_SPECIFIC | Android 15/16 reports; Android 17 Bluetooth material not yet opened | MATERIAL_MISSING |
-| J007 | CellInfo Binder | com.android.phone | `PhoneInterfaceManager` | request/update/all/location/neighbors | AOSP_COMMON | Android 15/16 reports; Android 17 TeleService not yet queried | MATERIAL_MISSING |
-| J008 | SIM Binder/object | com.android.phone | PhoneSubInfo/Phone/GsmCdmaPhone | identity, operator and signal methods | VERSION_SPECIFIC | Android 16 telephony-common report | MATERIAL_MISSING |
+| J007 | CellInfo Binder | com.android.phone | `PhoneInterfaceManager` | request/update/all/location/neighbors | AOSP_COMMON | Android 17 TeleService JADX MCP: `sendRequest(60/62)` and `sendRequestAsync(66)` paths confirmed | VERIFIED_STATIC |
+| J008 | SIM Binder/object | com.android.phone | PhoneSubInfo/Phone/GsmCdmaPhone | identity, operator and signal methods | VERSION_SPECIFIC | Android 17 TeleService and telephony-common materials available; RIL lifecycle separately recorded | VERIFIED_STATIC / REQUIRES_DEVICE |
 | J009 | SIM system properties | com.android.phone | `android.internal.telephony.sysprop.TelephonyProperties` / `android.sysprop.TelephonyProperties` | List<String> setters | VERSION_SPECIFIC | Android 16 JADX confirmed `android.sysprop.TelephonyProperties`; Android 17 framework material opened | PARTIAL_STATIC |
 | J010 | Subscription data | system_server | SubscriptionManagerService/SubscriptionInfoInternal | subscription query and conversion | AOSP_COMMON | Android 16 telephony-common report | MATERIAL_MISSING |
-| J011 | RIL defensive path | com.android.phone | `com.android.internal.telephony.RIL` | CellInfo/SignalStrength Message methods | VERSION_SPECIFIC | Android 16 report; Android 17 TeleService/telephony-common absent from specified Adapt dir | MATERIAL_MISSING |
+| J011 | RIL defensive path | com.android.phone | `com.android.internal.telephony.RIL` | CellInfo/SignalStrength Message methods | VERSION_SPECIFIC | Android 17 JADX MCP confirms `getCellInfoList(Message, WorkSource)` and `getSignalStrength(Message)` create serial-tracked `RILRequest` objects; API 37 entry short-circuit disabled | VERIFIED_STATIC / REQUIRES_DEVICE |
 | J012 | Sensor compatibility fallback | scoped app processes | `android.hardware.SensorManager` | register/unregister listener | AOSP_COMMON | Android 17 framework JADX confirmed public APIs and injection APIs | VERIFIED_STATIC |
 | J013 | Framework API fallback | scoped app processes | TelephonyManager/LocationManager/WifiManager/BluetoothLeScanner | client API methods | AOSP_COMMON | Android 16 report; Android 17 framework material requires per-class method audit | PARTIAL_STATIC |
 
@@ -56,9 +56,7 @@ architecture, library, symbol, prologue or instruction layout checks fail.
 
 ## 5. Immediate gaps
 
-1. Android 17 `TeleService.apk` and telephony-common material are not present in the specified
-   Android 17 adaptation directory; SIM/Cell/RIL claims cannot be upgraded from `MATERIAL_MISSING`.
-2. Android 17 `Bluetooth.apk` exists but has not yet been opened and queried through JADX MCP;
+1. Android 17 `Bluetooth.apk` exists but has not yet been opened and queried through JADX MCP;
    BLE claims remain `MATERIAL_MISSING`.
-3. WiFi APEX service implementation and all native Android 17 sensor libraries are absent from
+2. WiFi APEX service implementation and all native Android 17 sensor libraries are absent from
    the specified adaptation directory; these require device extraction or explicit material import.
