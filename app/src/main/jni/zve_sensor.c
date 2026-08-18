@@ -801,7 +801,12 @@ static uintptr_t zve_lib_base_from_maps(const char *libname) {
 
 /* libsensor.so 中 SensorEventQueue::write 的 vaddr（Oplus15 静态分析锚点；
  * 加载后实际地址 = base + vaddr，且必须通过下方字节校验才生效） */
+/* Android 15/Oplus static anchor retained for historical materials. */
 #define WRITE_VADDR_OPLUS15 0x11660u
+
+/* Xiaomi17 ROM: libsensor.so exports SensorEventQueue::write at .text+0x14e00,
+ * with bti c / mov w3,#0x68 / b <helper>. */
+#define WRITE_VADDR_XIAOMI17 0x14e00u
 
 /* libsensorservice.so 中 SensorEventConnection::sendEvents 的 vaddr。
  * sendEvents 是所有连接事件发送的汇聚点（含 Android 15 共享内存通道），
@@ -995,6 +1000,8 @@ static int zve_sendobjects_hook_uninstall(void) {
     return 0;
 }
 
+/* 目标 ROM 已确认 libsensor.so 的导出符号入口，优先 dlsym；只在符号缺失时使用
+ * 经过字节特征校验的同库回退。 */
 static int zve_write_hook_install(void) {
     void *write_fn = NULL;
     void *h = zve_lib_handle();
@@ -1007,15 +1014,33 @@ static int zve_write_hook_install(void) {
         LOGW("dlopen libsensor.so failed: %s", dlerror());
     }
     if (write_fn == NULL) {
-        /* 兜底：maps 基址 + vaddr 锚点 */
         uintptr_t base = zve_lib_base_from_maps("libsensor.so");
         if (base == 0) {
             g_stats.last_error = -9;
             LOGW("libsensor.so not found in /proc/self/maps");
             return -9;
         }
-        write_fn = (void *)(base + WRITE_VADDR_OPLUS15);
-        LOGI("resolved %s via maps base=%p vaddr=0x%x", WRITE_SYMBOL, (void *)base, WRITE_VADDR_OPLUS15);
+        static const uintptr_t kAnchors[] = {
+            WRITE_VADDR_XIAOMI17,
+            WRITE_VADDR_OPLUS15,
+        };
+        for (size_t i = 0; i < sizeof(kAnchors) / sizeof(kAnchors[0]); i++) {
+            void *candidate = (void *)(base + kAnchors[i]);
+            const uint32_t *candidate_insn = (const uint32_t *)candidate;
+            if (candidate_insn[0] == 0xD503245Fu &&
+                candidate_insn[1] == 0x52800D03u &&
+                (candidate_insn[2] & 0xFC000000u) == 0x14000000u) {
+                write_fn = candidate;
+                LOGI("resolved %s via maps anchor=%p vaddr=0x%zx", WRITE_SYMBOL,
+                     write_fn, (size_t)kAnchors[i]);
+                break;
+            }
+        }
+        if (write_fn == NULL) {
+            g_stats.last_error = -10;
+            LOGW("no known libsensor.so write anchor passed prologue validation");
+            return -10;
+        }
     }
     const uint32_t *insn = (const uint32_t *)write_fn;
     if (insn[0] != 0xD503245Fu) { /* bti c */
