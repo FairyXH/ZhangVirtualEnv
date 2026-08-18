@@ -53,6 +53,7 @@
         <activity
             android:name=".app.MainActivity"
             android:exported="true"
+            android:excludeFromRecents="true"
             android:configChanges="uiMode|orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <!-- 模块设置入口：LSPosed 通过 MODULE_SETTINGS 打开；桌面图标由 Launcher 别名控制 -->
@@ -68,7 +69,8 @@
             android:name=".Launcher"
             android:targetActivity=".app.MainActivity"
             android:exported="true"
-            android:enabled="true">
+            android:enabled="true"
+            android:excludeFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

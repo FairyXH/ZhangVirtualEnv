@@ -10,6 +10,8 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -42,6 +44,7 @@ class VirtualEnvEntry : XposedModule() {
     private val appHooksInstalled = AtomicBoolean(false)
     private val phoneHooksInstalled = AtomicBoolean(false)
     private val bleHooksInstalled = AtomicBoolean(false)
+    private val appServiceGuardianStarted = AtomicBoolean(false)
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onModuleLoaded process=${param.processName} systemServer=${param.isSystemServer}")
@@ -216,6 +219,37 @@ class VirtualEnvEntry : XposedModule() {
         }.start()
     }
 
+    /**
+     * system_server 侧后台守护模块 App：只拉起前台后台服务，不拉起 Activity。
+     * Root 环境下通过 am 启动可绕过普通后台启动限制；服务自身会恢复录像并写入 oom_score_adj。
+     */
+    private fun startModuleAppServiceGuardian() {
+        if (!appServiceGuardianStarted.compareAndSet(false, true)) return
+        Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "ZVE-AppServiceGuardian").apply { isDaemon = true }
+        }.scheduleWithFixedDelay({
+            try {
+                val command = "pidof io.github.fairyxh.VirtualEnv >/dev/null 2>&1 || " +
+                    "am start-foreground-service --user 0 -n " +
+                    "io.github.fairyxh.VirtualEnv/.app.AppKeepAliveService >/dev/null 2>&1"
+                val process = ProcessBuilder("su", "-c", command)
+                    .redirectErrorStream(true)
+                    .start()
+                val output = process.inputStream.bufferedReader().use { it.readText() }
+                val finished = process.waitFor(5, TimeUnit.SECONDS)
+                if (!finished) process.destroyForcibly()
+                log(
+                    if (finished && process.exitValue() == 0) Log.INFO else Log.WARN,
+                    TAG,
+                    "[$TAG_SCOPE] app service guardian checked finished=$finished output=${output.take(160)}"
+                )
+            } catch (t: Throwable) {
+                log(Log.WARN, TAG, "[$TAG_SCOPE] app service guardian failed", t)
+            }
+        }, 0L, 15L, TimeUnit.SECONDS)
+        log(Log.INFO, TAG, "[$TAG_SCOPE] app service guardian started")
+    }
+
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
         log(Log.INFO, TAG, "[$TAG_SCOPE] onSystemServerStarting")
         try {
@@ -243,6 +277,7 @@ class VirtualEnvEntry : XposedModule() {
             if (apiToken.isBlank()) {
                 log(Log.WARN, TAG, "[$TAG_SCOPE] api token missing/blank, ApiServer will reject all requests")
             }
+            startModuleAppServiceGuardian()
 
             // 传感器多级后端：system_server 侧初始化全局模式（SensorService Data Injection）。
             // 注意：不能在 onSystemServerStarting 早期立即 start()——sensorservice native
