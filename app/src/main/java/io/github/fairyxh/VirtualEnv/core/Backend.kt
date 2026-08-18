@@ -960,14 +960,21 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 一键使用已保存地点：设置坐标并启用虚拟定位。 */
     fun useLocationPoint(id: Long): org.json.JSONObject? {
-        val point = databaseManager.getLocationPoint(id) ?: return null
+        val point = databaseManager.getLocationPoint(id)
+        if (point == null) {
+            ZLog.w(TAG_SCOPE, "useLocationPoint rejected id=$id: location point missing")
+            return null
+        }
         if (!moduleEnabled) {
-            ZLog.w(TAG_SCOPE, "useLocationPoint ignored id=$id: module master OFF")
+            ZLog.w(TAG_SCOPE, "useLocationPoint rejected id=$id: module master OFF")
             return null
         }
         val latitude = point.optDouble("latitude", Double.NaN)
         val longitude = point.optDouble("longitude", Double.NaN)
-        if (latitude.isNaN() || longitude.isNaN()) return null
+        if (!latitude.isFinite() || !longitude.isFinite()) {
+            ZLog.w(TAG_SCOPE, "useLocationPoint rejected id=$id: invalid coordinates")
+            return null
+        }
         setLocationPoint(latitude, longitude, 0f, 0f)
         setLocationEnabled(true)
         return point

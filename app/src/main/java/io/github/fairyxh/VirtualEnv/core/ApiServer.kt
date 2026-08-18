@@ -438,8 +438,13 @@ class ApiServer(
     private fun locationPointUse(body: String): ApiResult {
         val json = JSONObject(body)
         val id = json.optLong("id", -1)
-        val point = backend.useLocationPoint(id)
-            ?: return ApiResult.error("location point not found: $id")
+        val point = backend.getLocationPoint(id)
+            ?: return ApiResult.error("location point not found: $id", 404)
+        if (!backend.isModuleEnabled()) {
+            return ApiResult.error("module disabled: enable module master switch first", 409)
+        }
+        backend.useLocationPoint(id)
+            ?: return ApiResult.error("location point invalid: $id", 422)
         ZLog.i(TAG_SCOPE, "location point used id=$id name=${point.optString("name")}")
         return ApiResult.ok("applied", point)
     }
