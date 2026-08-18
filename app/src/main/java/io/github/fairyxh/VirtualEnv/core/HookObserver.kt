@@ -218,6 +218,25 @@ object HookObserver {
         }
     }
 
+    /** Build a recording frame from the system-server observation plane. */
+    fun recordingFrameJson(): JSONObject {
+        val observed = snapshotJson()
+        return JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("location", observed.optJSONObject("location") ?: JSONObject())
+            put("cell", JSONObject().apply {
+                put("cells", observed.optJSONArray("cells") ?: JSONArray())
+            })
+            put("wifi", JSONObject().apply {
+                put("networks", observed.optJSONArray("wifi") ?: JSONArray())
+            })
+            put("bluetooth", JSONObject())
+            put("gnss", observed.optJSONObject("gnss") ?: JSONObject())
+            put("sensor", JSONObject())
+            put("hookObserve", observed)
+        }
+    }
+
     /** 是否有任一真实数据。 */
     fun hasAny(): Boolean = synchronized(lock) {
         location != null || (cells?.length() ?: 0) > 0 || (wifi?.length() ?: 0) > 0 || gnss != null || (nmea?.length() ?: 0) > 0

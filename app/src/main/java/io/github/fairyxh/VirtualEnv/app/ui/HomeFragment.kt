@@ -285,15 +285,7 @@ class HomeFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        recordingScheduler?.shutdownNow()
-        recordingScheduler = null
-        sensorRecorder?.stop()
-        streamSampler?.stop()
-        if (recordingId > 0) {
-            val id = recordingId
-            recordingId = -1L
-            executor.execute { ApiClient.stopRecording(id) }
-        }
+        // Recording is owned by system_server; destroying the UI must not stop it.
         playbackPollHandler.removeCallbacks(playbackPoll)
         featurePollHandler.removeCallbacks(featurePoll)
         executor.shutdown()
@@ -1618,11 +1610,7 @@ class HomeFragment : Fragment() {
         val interval = (recordingInterval.toDoubleOrNull() ?: 1.0).coerceIn(0.1, 300.0)
         recordingInterval = if (interval % 1.0 == 0.0) interval.toInt().toString() else interval.toString()
         executor.execute {
-            val result = ApiClient.startRecording(name, "")
-            // 采集真实环境前先临时停用虚拟环境；必须在后台线程（主线程禁止网络）
-            if (result.code == ApiResult.CODE_OK) {
-                ApiClient.suspendEnv()
-            }
+            val result = ApiClient.startRecording(name, "", interval)
             requireActivity().runOnUiThread {
                 if (result.code == ApiResult.CODE_OK) {
                     recordingId = result.data?.optLong("id", -1L) ?: -1L
@@ -1631,16 +1619,11 @@ class HomeFragment : Fragment() {
                     recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(
                         getString(R.string.home_recording_title)
                     )
-                    // 启动流式监听（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询）
-                    streamSampler?.start()
-                    // 连续传感器事件流（加速度/陀螺仪/计步）随录像启动
-                    if (recordingId > 0) sensorRecorder?.start(recordingId)
                     Toast.makeText(
                         requireContext(),
                         R.string.home_recording_suspend_notice,
                         Toast.LENGTH_LONG
                     ).show()
-                    startSamplingLoop(interval)
                     recordingRunning = true
                     recordingStatus = getString(R.string.home_recording_running, name, recordingFrames)
                 } else {
@@ -1650,84 +1633,22 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun startSamplingLoop(intervalSec: Double) {
-        recordingScheduler?.shutdownNow()
-        val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "ZVE-Recorder").apply { isDaemon = true }
-        }
-        recordingScheduler = scheduler
-        val intervalMs = (intervalSec * 1000.0).toLong().coerceAtLeast(100L)
-        scheduler.scheduleWithFixedDelay(
-            {
-                try {
-                    if (recordingId <= 0) return@scheduleWithFixedDelay
-                    // 流式截帧：直接从最新快照取当前状态（不再每次重新注册监听）
-                    if (!samplingBusy.compareAndSet(false, true)) return@scheduleWithFixedDelay
-                    executor.execute {
-                        try {
-                            val id = recordingId
-                            if (id > 0) {
-                                val frame = streamSampler?.snapshot() ?: JSONObject()
-                                // OpenCellID 贡献：录像期间挂起虚拟环境，帧内 location/cell 均为真实观测；
-                                // 出现新基站（会话级去重）时实时上传
-                                if (io.github.fairyxh.VirtualEnv.app.cell.OpenCellIdSettings.isContributeEnabled(requireContext())) {
-                                    contributeNewCellsFromFrame(frame)
-                                }
-                                val result = ApiClient.appendRecordingFrame(id, frame)
-                                if (result.code == ApiResult.CODE_OK) {
-                                    recordingFrames++
-                                    requireActivity().runOnUiThread {
-                                        if (isAdded) {
-                                            recordingStatus = getString(
-                                                R.string.home_recording_running,
-                                                recordingNameBackend,
-                                                recordingFrames
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    ZLog.w(TAG_SCOPE, "append frame rejected: ${result.message}")
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            ZLog.w(TAG_SCOPE, "append frame failed", t)
-                        } finally {
-                            samplingBusy.set(false)
-                        }
-                    }
-                } catch (t: Throwable) {
-                    samplingBusy.set(false)
-                    ZLog.w(TAG_SCOPE, "recording sample failed", t)
-                }
-            },
-            0,
-            intervalMs,
-            TimeUnit.MILLISECONDS
-        )
-    }
-
     private fun stopRecording() {
-        recordingScheduler?.shutdownNow()
-        recordingScheduler = null
-        sensorRecorder?.stop()
-        streamSampler?.stop()
-        contributedCellKeys.clear()
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L
+        contributedCellKeys.clear()
         executor.execute {
-            ApiClient.resumeEnv()
             val result = ApiClient.stopRecording(id)
             if (result.code == ApiResult.CODE_OK) {
                 saveRecordingAsRoute(id, recordingNameBackend)
             }
             requireActivity().runOnUiThread {
+                if (!isAdded) return@runOnUiThread
                 Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()
                 recordingRunning = false
                 recordingStatus = getString(R.string.home_recording_idle)
-                if (result.code == ApiResult.CODE_OK) {
-                    refreshSavedItems()
-                }
+                if (result.code == ApiResult.CODE_OK) refreshSavedItems()
             }
         }
     }

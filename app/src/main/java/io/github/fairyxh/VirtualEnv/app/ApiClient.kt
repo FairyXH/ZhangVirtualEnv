@@ -308,10 +308,11 @@ object ApiClient {
 
     // ---------- Recording ----------
 
-    fun startRecording(name: String, remark: String = ""): ApiResult {
+    fun startRecording(name: String, remark: String = "", intervalSec: Double = 1.0): ApiResult {
         val body = JSONObject().apply {
             put("name", name)
             put("remark", remark)
+            put("intervalSec", intervalSec)
         }
         return post("/api/recording/start", body)
     }

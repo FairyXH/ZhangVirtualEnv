@@ -664,7 +664,9 @@ class ApiServer(
         val name = json.optString("name", "")
         if (name.isBlank()) return ApiResult.error("name required")
         val remark = json.optString("remark", "")
-        val id = backend.startRecording(name, remark)
+        val intervalMs = (json.optDouble("intervalSec", 1.0) * 1000.0).toLong()
+            .coerceIn(100L, 300_000L)
+        val id = backend.startRecording(name, remark, intervalMs)
         ZLog.i(TAG_SCOPE, "recording start id=$id name=$name")
         val data = JSONObject().apply { put("id", id) }
         return ApiResult.ok("ok", data)

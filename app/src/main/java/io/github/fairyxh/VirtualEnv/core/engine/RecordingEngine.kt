@@ -5,9 +5,14 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import io.github.fairyxh.VirtualEnv.core.Backend
 import io.github.fairyxh.VirtualEnv.core.DatabaseManager
+import io.github.fairyxh.VirtualEnv.core.HookObserver
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * 环境录制与回放引擎（Phase 4）。
@@ -69,6 +74,11 @@ class RecordingEngine(
     private var pausedElapsed = 0L
     private var lastAppliedIdx = -1
     private val tickerRunning = AtomicBoolean(false)
+    private val coreRecorder: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-CoreRecorder").apply { isDaemon = true }
+    }
+    @Volatile
+    private var coreSamplingFuture: ScheduledFuture<*>? = null
 
     /** 回放帧间平滑过渡：位置按时间插值生成中间段并叠加小随机抖动。 */
     @Volatile
@@ -101,6 +111,28 @@ class RecordingEngine(
         }
         ZLog.i(TAG_SCOPE, "recording started id=$id name=$name")
         return id
+    }
+
+    /** Keep recording in system_server; the control app only sends commands. */
+    fun startCoreSampling(intervalMs: Long) {
+        coreSamplingFuture?.cancel(false)
+        val interval = intervalMs.coerceIn(100L, 300_000L)
+        val task = Runnable {
+            if (!isRecording()) return@Runnable
+            try {
+                appendFrame(HookObserver.recordingFrameJson())
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "core recording sample failed", t)
+            }
+        }
+        task.run()
+        coreSamplingFuture = coreRecorder.scheduleWithFixedDelay(task, interval, interval, TimeUnit.MILLISECONDS)
+        ZLog.i(TAG_SCOPE, "core recording sampler started intervalMs=$interval")
+    }
+
+    private fun stopCoreSampling() {
+        coreSamplingFuture?.cancel(false)
+        coreSamplingFuture = null
     }
 
     /** 追加一帧；无活动录像时返回 false。 */
@@ -137,6 +169,7 @@ class RecordingEngine(
     fun stopRecording(): Boolean {
         val id = activeRecordingId
         if (id <= 0) return false
+        stopCoreSampling()
         backend.clearRecordingBaseState()
         var count = 0
         var duration = 0L

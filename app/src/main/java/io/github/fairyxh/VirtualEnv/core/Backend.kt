@@ -1557,8 +1557,13 @@ class Backend private constructor(private val dataDir: File) {
 
     // ---------- Recording API（App 控制端调用） ----------
 
-    fun startRecording(name: String, remark: String): Long {
-        return recordingEngine.startRecording(name, remark)
+    fun startRecording(name: String, remark: String, intervalMs: Long = 1000L): Long {
+        val id = recordingEngine.startRecording(name, remark)
+        beginHookObserve()
+        suspendAll()
+        recordingEngine.startCoreSampling(intervalMs)
+        ZLog.i(TAG_SCOPE, "core recording started id=$id intervalMs=${intervalMs.coerceIn(100L, 300_000L)}")
+        return id
     }
 
     fun appendRecordingFrame(id: Long, frame: org.json.JSONObject): Boolean {
@@ -1566,7 +1571,10 @@ class Backend private constructor(private val dataDir: File) {
     }
 
     fun stopRecording(id: Long): Boolean {
-        return if (id > 0) recordingEngine.stopRecording() else false
+        if (id <= 0) return false
+        endHookObserve()
+        resumeAll()
+        return recordingEngine.stopRecording()
     }
 
     fun listRecordings(): List<org.json.JSONObject> {
