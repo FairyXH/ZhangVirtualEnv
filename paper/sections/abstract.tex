@@ -1,0 +1,5 @@
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.25em}
+\justifying
+本项目面向 Android 应用开发、自动化测试和系统兼容性验证中的环境复现问题。实际开发过程中，单独修改位置坐标往往不能解释应用对卫星状态、NMEA、蜂窝小区、WiFi、BLE、SIM 和传感器数据的联合读取，测试结果因此难以复现，也难以判断问题究竟来自应用逻辑、Framework 接口还是厂商 ROM。针对这一问题，我在 ZhangVirtualEnv 中采用控制端、Backend Core、系统测试适配层和版本 Profile 分层的设计，将测试状态集中在统一的环境数据模型中，再根据 Android 版本和 ROM 差异把数据转换为 Framework 对象、Binder 返回值或传感器事件。本文以当前源码和 Android 15/Oplus 系统分析记录为基础，重点讨论路线位置的时间推进与插值、速度和方向计算、GNSS 卫星状态的几何生成、仰角与距离计算、C/N0 平滑模型，以及统一步态相位驱动的加速度、陀螺仪和计步器数据生成。同时，本文说明 CellInfo、WiFi、BLE 和 SIM 测试数据在系统服务边界的构造方式，并分析 SensorService Java 通道与 Native 事件分发通道之间的实际差异。现有实现已经形成单点和路线位置、GNSS 数据路径、CellInfo、WiFi、BLE、SIM 以及多级传感器测试后端；其中 Native 传感器通道是否在目标 ROM 上稳定送达，仍须通过独立检测器、Hook 日志和系统调用结果确认。已有验证表明，软件层测试链路能够提供连续、可观测的多源 API 数据，但它不等同于真实射频 GNSS、真实传感器硬件或物理无线环境。
+\paragraph{关键词：} Android 环境测试；GNSS 模拟；系统服务适配；LSPosed；传感器仿真；位置服务；ROM 兼容性

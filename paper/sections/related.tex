@@ -1,0 +1,13 @@
+\section{相关技术与问题分析}
+\subsection{Android 感知数据通路}
+Android 的位置接口由应用层 \texttt{LocationManager}、系统位置服务和 GNSS provider 共同完成；GNSS 状态、NMEA、导航消息和测量数据具有独立的注册与回调链~\citep{androidlocation}。蜂窝信息经 \texttt{TelephonyManager}、电话 Binder 服务和 \texttt{Phone} 对象层返回，CellIdentity 与 CellSignalStrength 共同构成可供上层解析的结构。WiFi 扫描结果由 WiFi 服务封装为 \texttt{ScanResult}，BLE 扫描则经蓝牙 Binder 与蓝牙栈回调 \texttt{ScanResult}。传感器事件通常经过 SensorService 的 native 事件队列，再进入应用的 \texttt{SensorEventListener}~\citep{androidsensor}。
+
+\subsection{单一位置修改的不足}
+设应用接收到的位置为 $L$，但同时观测到的卫星状态、无线环境和运动数据仍为真实值 $G,W,M$。应用的融合结果可表示为
+\[
+  \hat{P}=F(L,G,W,M).
+\]
+仅修改 $L$ 而保持 $G,W,M$ 不变，会使 $F$ 在不同数据源之间产生残差。例如，虚拟位置的 NMEA 坐标与真实卫星状态不一致，或虚拟速度与真实加速度、步频不一致。框架因此采用统一 Backend 状态，并让各适配器从同一测试 Profile 或时间轴读取数据。
+
+\subsection{工程约束}
+系统服务 Hook 具有高风险：错误的反射签名、错误的构造器字段或不兼容的 ROM 偏移可能影响 system\_server。项目采用候选类/方法匹配、版本 Profile、异常隔离和 fail-open 策略；适配失败时继续原始调用。scope.list 只包含必要系统组件、项目自身控制端和独立检测器，不把第三方应用作为实现依赖。

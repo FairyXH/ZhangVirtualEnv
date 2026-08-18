@@ -1,0 +1,31 @@
+\contentsline {paragraph}{关键词：}{1}{paragraph*.1}%
+\contentsline {section}{\numberline {一、}引言}{4}{section.1}%
+\contentsline {section}{\numberline {二、}相关技术与问题分析}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Android 感知数据通路}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}单一位置修改的不足}{4}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}工程约束}{5}{subsection.2.3}%
+\contentsline {section}{\numberline {三、}系统总体架构设计}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}状态与数据流}{6}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}版本 Profile}{6}{subsection.3.2}%
+\contentsline {section}{\numberline {四、}核心算法设计}{6}{section.4}%
+\contentsline {subsection}{\numberline {4.1}虚拟轨迹模型}{6}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}GNSS 卫星状态模型}{6}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}LLA、ECEF 与 ENU}{7}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}C/N0 信号模型}{7}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}统一运动与传感器模型}{7}{subsection.4.5}%
+\contentsline {section}{\numberline {五、}Android 实现方法}{7}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Location 与 GNSS 适配}{7}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Cellular 与 SIM}{8}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}WiFi 与 Bluetooth}{8}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Sensor Native 适配}{9}{subsection.5.4}%
+\contentsline {section}{\numberline {六、}实验与结果}{9}{section.6}%
+\contentsline {subsection}{\numberline {6.1}实验方法}{9}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}源码与静态证据}{10}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}已有运行时结论}{10}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}兼容性结论}{10}{subsection.6.4}%
+\contentsline {section}{\numberline {七、}讨论与限制}{10}{section.7}%
+\contentsline {subsection}{\numberline {7.1}软件层边界}{10}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}厂商 ROM 差异}{10}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}数据一致性与可观测性}{11}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}后续方向}{11}{subsection.7.4}%
+\contentsline {section}{\numberline {八、}总结}{11}{section.8}%

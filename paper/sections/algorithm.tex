@@ -1,0 +1,76 @@
+\section{核心算法设计}
+\subsection{虚拟轨迹模型}
+我把位置生成分成单点和路线两种模式，但两者都只维护一份位置状态。单点模式保存经纬度、速度、方向和更新时间；路线模式保存折线点列、段索引和段内进度。对相邻点 $P_i=(\phi_i,\lambda_i)$ 与 $P_{i+1}$，先用 Haversine 近似计算段长
+\[
+ d_i=2R\arcsin\sqrt{\sin^2\frac{\Delta\phi}{2}+\cos\phi_i\cos\phi_{i+1}\sin^2\frac{\Delta\lambda}{2}}.
+\]
+在时间间隔 $\Delta t$ 内按 $v\Delta t$ 消耗路段长度；若未跨段，进度更新为 $q'=q+v\Delta t/d_i$，位置以线性插值给出
+\[
+ P(t)=(1-q)P_i+qP_{i+1}.
+\]
+路线引擎采用惰性推进：只有收到 \texttt{currentLocation()} 请求时才根据 monotonic 时钟推进，因此没有请求时不会由后台线程产生无观测数据。方向由相邻点的球面方位角计算，速度直接写入 \texttt{Location.speed}。循环路线可直接跳回起点，也可沿终点到起点的连线平滑返回。可选的小幅抖动只作用于输出坐标，不改变轨迹游标。
+
+\subsection{GNSS 卫星状态模型}
+GNSS 引擎以位置快照和时间戳为输入，对固定卫星目录逐颗计算状态：
+\[
+ S_k=\{\mathrm{SVID},\mathrm{constellation},\mathbf{r}_k, e_k, a_k, \rho_k, C/N_{0,k}, u_k\}.
+\]
+目录包含 GPS、BeiDou、Galileo、GLONASS 和 QZSS 测试卫星及主测试频段。轨道部分使用连续时间驱动的圆轨道 Kepler 近似。对模型参数 $\theta_k$，相位为
+\[
+ \alpha_k(t)=\alpha_{0,k}+2\pi (t\bmod T_k)/T_k,
+\]
+再按倾角和升交点将轨道平面坐标旋转到 ECEF。该算法提供 API 数据路径的连续几何，不包含星历、伪距、导航电文或射频波形。
+
+\subsection{LLA、ECEF 与 ENU}
+观测点的 WGS-84 LLA~\citep{wgs84} 为 $(\varphi,\lambda,h)$。令长半轴为 $a$、第一偏心率平方为 $e^2$，曲率半径
+\[
+ N=\frac{a}{\sqrt{1-e^2\sin^2\varphi}}.
+\]
+则
+\[
+ \mathbf{r}_{ecef}=\begin{bmatrix}(N+h)\cos\varphi\cos\lambda\\(N+h)\cos\varphi\sin\lambda\\(N(1-e^2)+h)\sin\varphi\end{bmatrix}.
+\]
+卫星与观测点的 ECEF 差向量经过局部 ENU 旋转得到 $(E,N,U)$。距离、仰角和方位角分别为
+\[
+ \rho=\sqrt{E^2+N^2+U^2},\quad e=\operatorname{atan2}(U,\sqrt{E^2+N^2}),
+\]
+\[
+ a=\left(\operatorname{atan2}(E,N)\frac{180}{\pi}+360\right)\bmod 360.
+\]
+源码将仰角不低于 $5^\circ$ 的卫星视为可见，并要求仰角不低于 $15^\circ$ 且 $C/N_0\geq25$ dB-Hz 才标记为 UsedInFix。不可见行保留在诊断 JSON 中，但不伪造为公开 \texttt{GnssStatus} 行。
+
+\subsection{C/N0 信号模型}
+信号模型采用基准项、仰角增益、距离损耗和慢变化项：
+\[
+ C/N_0=\operatorname{clip}\left(C_0+G(e)-L(\rho)+n(t,k),18,52\right).
+\]
+其中 $G(e)$ 在低仰角为负、在高仰角趋于正增益，距离损耗为
+\[
+ L(\rho)=3\log_2\left(\max\left(\rho/r_k,0.5\right)\right),
+\]
+慢变化项由时间和卫星相位的正弦函数生成，而不是每次刷新独立抽样。这样可以保持 SVID、数量和几何连续，适用于解析器和状态机回归。
+
+\subsection{统一运动与传感器模型}
+\texttt{VirtualMotionEngine} 以单一 monotonic 时钟推进全局步态相位：
+\[
+ p_{t+\Delta t}=p_t+\frac{f\Delta t}{60}\pmod 1,
+\]
+其中 $f$ 为 steps/min。相位跨越 1 时，步数增加 1、距离增加一个步长，并产生一个待消费的 STEP\_DETECTOR 事件。四段步态波形模拟着地冲击、保持、摆动和恢复；加速度、重力、线性加速度、陀螺仪和计步器都由同一状态生成。手机姿态用低频 pitch/roll 漂移叠加步频摆臂，保证不同传感器之间具有时间相关性。Native C 实现复用了相同的相位、步数和姿态思想，并在传感器事件分发前重写数据。
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.88\linewidth}{!}{%
+\begin{tikzpicture}[font=\small, node distance=12mm and 15mm, box/.style={draw, rounded corners=2pt, align=center, minimum width=36mm, minimum height=11mm, fill=orange!10}, line/.style={-Latex, thick}]
+\node[box] (pos) {统一 Location 快照\\路线/单点引擎};
+\node[box, right=of pos] (orbit) {卫星目录与时间\\圆轨道近似};
+\node[box, below=of pos] (coord) {LLA $\rightarrow$ ECEF\\ECEF $\rightarrow$ ENU};
+\node[box, right=of coord] (signal) {仰角、距离\\可见性、C/N0};
+\node[box, below=of coord] (status) {GnssStatus / NMEA\\诊断 JSON};
+\draw[line] (pos) -- (coord);
+\draw[line] (orbit) -- (signal);
+\draw[line] (coord) -- (signal);
+\draw[line] (signal) -- (status);
+\end{tikzpicture}}
+\caption{GNSS 状态生成过程}
+\label{fig:gnss}
+\end{figure}

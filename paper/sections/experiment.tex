@@ -1,0 +1,14 @@
+\section{实验与结果}
+\subsection{实验方法}
+本文不重新执行真机测试，而复用项目已有的源码、逆向记录和 VirEnvDetector~\citep{virenvdetector} 设计作为实验材料。验证原则是独立检测器优先，并结合模块 Hook 状态、logcat、系统调用结果和检测器报告；截图不作为主要证据。检测器从普通应用视角注册位置、GNSS Status/NMEA、传感器、BLE、WiFi 和电话读取，并通过本地 API 获取期望配置，形成 PASS、FAIL、SYNCING 或 NOT\_ENABLED 判定。结果解释区分“接口回调到达”“数据字段一致”和“Native 全局通道实际送达”三个层级。
+
+\subsection{源码与静态证据}
+源码确认以下能力已形成明确实现链路：单点位置由 \texttt{SinglePointLocationEngine} 管理，路线由惰性时间推进的 \texttt{RouteEngine} 管理；GNSS 由 \texttt{GNSSSimulationEngine}、\texttt{OrbitCalculator}、\texttt{CoordinateTransform} 和 \texttt{SignalModel} 组合生成；CellInfo、WiFi、BLE、SIM 由对应工厂和系统服务适配器构造。运动数据由 \texttt{VirtualMotionEngine} 统一生成，传感器注入层仅负责投递~\citep{zhangvirtualenv}.
+
+\subsection{已有运行时结论}
+项目记录显示，目标 Android 15/Oplus 设备上的应用兼容传感器链路能够使 VirEnvDetector 观察到步数递增，以及由统一运动模型产生的加速度、重力和磁场测试值；注册真实传感器的路径在模拟激活时被屏蔽，避免测试值与真实事件叠加。GNSS 记录显示，虚拟状态包含卫星数量、星座、SVID、角度、CN0、星历和 UsedInFix 字段，且 NMEA 与虚拟位置使用同一 Backend 位置源。
+
+对系统级 SensorService Java 通道，已有记录明确指出 Oplus 15 的 Runtime Sensor 事件调用可以返回成功并更新缓存，但对真实传感器 handle 未进入普通应用连接；因此不能将该返回值当作全局送达证据。Native 汇聚点方案提供了更接近真实分发路径的实现，但必须用 detector 的 \texttt{events received} 增长、\texttt{dumpsys sensorservice}、Hook 计数和 logcat 共同确认。该证据边界使论文不把设计预留写成已经完成的全局能力。
+
+\subsection{兼容性结论}
+兼容矩阵将 Android 15 多项能力标记为 VERIFIED，将 Android 16 多项类和方法签名标记为 STATIC\_VERIFIED，并将 WiFi 动态类、前台服务规则及运行时 SIM 链路保留为 REQUIRES\_DEVICE。Android 17 及以上为 NOT\_ADAPTED。由此，当前结论是：在已验证的软件测试环境中表现稳定；跨版本可通过 Profile 维持候选匹配和回退，但不能由静态签名推导真机运行成功。

@@ -1,0 +1,24 @@
+\section{系统总体架构设计}
+我在实现过程中没有把各类 Hook 写成彼此独立的功能集合，而是先确定了一条统一的数据链路：控制端只负责提出测试场景，Backend Core 负责保存状态并推进时间，系统测试适配层负责把状态翻译成 Android 能够理解的接口数据。这样做的直接好处是，位置、卫星、无线环境和运动数据可以共享同一个时间基准，某一个 ROM 的类名或方法签名变化也不会反过来污染核心模型。系统结构如图~\ref{fig:architecture} 所示。
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.88\linewidth}{!}{%
+\begin{tikzpicture}[font=\small, node distance=10mm, box/.style={draw, rounded corners=2pt, align=center, minimum width=82mm, minimum height=11mm, fill=blue!7}, line/.style={-Latex, thick}]
+  \node[box] (ui) {控制端 App\\测试参数、路线、Profile 与环境包};
+  \node[box, below=of ui] (core) {Backend Core\\统一环境状态、时间轴、数据引擎与本地 API};
+  \node[box, below=of core] (adapter) {系统测试适配层\\Location / GNSS / Cellular / WiFi / BLE / SIM / Sensor};
+  \node[box, below=of adapter] (android) {Android Framework 与系统服务\\Binder、Java Framework、SensorService Native};
+  \draw[line] (ui) -- node[right]{配置请求} (core);
+  \draw[line] (core) -- node[right]{环境快照} (adapter);
+  \draw[line] (adapter) -- node[right]{系统接口数据} (android);
+\end{tikzpicture}}
+\caption{系统总体架构与数据边界}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{状态与数据流}
+配置请求沿“控制端 $\rightarrow$ 本地 API $\rightarrow$ Backend $\rightarrow$ 引擎”流动。适配器按周期或回调请求当前快照，生成具有当前时间戳的数据对象。位置是 GNSS 与部分环境生成器的共同参考，但 GNSS 引擎不持有第二份位置状态；路线引擎和单点引擎是位置的唯一所有者。环境采集器则把位置、CellInfo、WiFi、BLE、GNSS 和传感器事件按时间戳写入环境包，回放时由时间轴统一选择帧。
+
+\subsection{版本 Profile}
+Profile 按 SDK、设备指纹和 ROM 差异选择候选类名、方法名、参数数量和边界策略。Android 15 的蓝牙扫描入口与 Android 16 的 \texttt{ScanController.startScan} 存在差异，项目通过版本门控保持已验证版本行为不变。未匹配到目标类或方法时，适配器跳过该能力并放行系统原始路径，而不是以默认值覆盖未知 ROM。

@@ -461,10 +461,10 @@ class GnssDataBlockHookAdapter(
                     satellite.hasEphemerisData,
                     satellite.hasAlmanacData,
                     satellite.usedInFix,
-                    false, // hasBasebandCn0
-                    satellite.cn0DbHz,
+                    true, // hasCarrierFrequencyHz on this Oplus 12-arg Builder
+                    model.carrierFrequencyHz, // carrierFrequencyHz: the first Float after the 4 booleans
                     false, // isBasebandInFix
-                    model.carrierFrequencyHz
+                    satellite.cn0DbHz // basebandCn0 / legacy trailing Float
                 )
             }
             builderClass.getMethod("build").invoke(builder)

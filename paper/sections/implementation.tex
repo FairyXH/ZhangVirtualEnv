@@ -1,0 +1,35 @@
+\section{Android 实现方法}
+\subsection{Location 与 GNSS 适配}
+Location 适配器在系统位置服务边界接收注册、上报和监听器相关调用，并从 Backend 取得当前测试位置。GNSS 适配器覆盖状态和 NMEA 注册及注销路径；启用测试位置时，不注册真实回调，而是周期投递由同一位置快照生成的 \texttt{GnssStatus} 和 NMEA。导航消息与原始测量属于更低层数据面，当前实现对其采用阻断或预留策略，关闭测试时恢复原始路径。\texttt{GnssLocationProvider.onReportSvStatus(GnssStatus)} 与 \texttt{onReportNmea(long,String)} 同时用于观察真实系统数据和替换测试数据，所有异常均回退到原始调用。
+
+\subsection{Cellular 与 SIM}
+CellInfo 测试数据按 LTE、NR、GSM、WCDMA 和 CDMA 组织。构造器使用 Profile 提供的 MCC/MNC、TAC/LAC、CI/NCI、PCI、ARFCN 和信号强度，并对字段位宽和不可用哨兵进行归一化。Android 15 的 MCC/MNC 字符串字段与旧 int getter 存在差异，读取器优先使用字符串并安全解析。CDMA 位置字段需要按定点量化方式写入 CellIdentity，故其是特定 ROM 的兼容构造路径，而不是通用蜂窝定位模型。
+
+SIM 适配位于电话 Binder 服务端和 Phone 对象层，覆盖订阅、运营商、设备标识、号码、网络类型、SIM 状态和信号强度等返回值。实现对无后缀、ForSubscriber、WithFeature 等方法名建立候选集合；目标不存在或返回值构造失败时调用原始方法。该设计强调接口抽象和兼容性测试，不表示对真实基带或 SIM 卡物理状态的重建。
+
+\subsection{WiFi 与 Bluetooth}
+WiFi 服务由 ServiceManager 动态发现，以应对 WiFi APEX 中类不在 boot classloader 的情况。\texttt{getScanResults} 返回由 SSID、BSSID、RSSI、频率和 capabilities 构造的 \texttt{ScanResult} 列表；\texttt{getConnectionInfo} 返回对应连接信息。对 Oplus 扩展字段如 information elements 做非空初始化，避免系统消费者对空数组解引用。BLE 测试数据按地址去重，使用 \texttt{ScanResult(BluetoothDevice, ScanRecord, rssi, timestamp)} 构造广播结果，原始广播字节优先，否则按名称生成最小广播记录。蓝牙栈 Hook 根据 Android 15/16 的扫描入口差异选择候选方法，并在无法解析回调时放行真实扫描。
+
+\subsection{Sensor Native 适配}
+JADX 结果显示目标 ROM 的传感器 Java 外壳为 \texttt{com.android.server.sensors.SensorService}，持有 native 指针 \texttt{mPtr}，通过 \texttt{SensorManagerInternal.LocalService} 暴露 Runtime Sensor 的创建、删除和事件发送接口。其 \texttt{sendRuntimeSensorEventNative(long,int,int,long,float[])} 只对服务注册的 runtime handle 有效；对真实传感器 handle 调用成功并不等价于事件已进入普通应用连接。项目已有记录据此将 Java 通道作为探测/回退路径，并把全局研究重点放在 \texttt{libsensorservice.so} 的分发汇聚点。
+
+Native 方案在编译期按目标 ROM 的函数特征校验入口，在 \texttt{SensorService::sendEventsToAllClients} 处读取服务事件缓冲，重写事件值并尾跳原函数；\texttt{SensorEventQueue::write} 和 \texttt{BitTube::sendObjects} 是保留的兜底入口。该路径需要严格的 ARM64 指令、PAC、内存保护和容量边界处理，安装失败时不修改原代码。论文将其作为系统级测试适配的实现路径；其是否对未配置作用域的测试进程稳定送达，仍应以 VirEnvDetector 的事件计数和系统日志进行运行时确认。
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.88\linewidth}{!}{%
+\begin{tikzpicture}[font=\small, node distance=11mm and 17mm, box/.style={draw, rounded corners=2pt, align=center, minimum width=39mm, minimum height=11mm, fill=purple!8}, line/.style={-Latex, thick}]
+\node[box] (cfg) {Profile 与本地 API\\测试参数};
+\node[box, below=of cfg] (backend) {Backend\\Environment State};
+\node[box, below left=12mm and 2mm of backend] (java) {Java 适配器\\Binder / Framework};
+\node[box, below right=12mm and 2mm of backend] (native) {Native 适配器\\Sensor 分发边界};
+\node[box] (app) at ($(java.south)!0.5!(native.south)+(0,-18mm)$) {测试目标通过正常 Android API\\接收测试数据};
+\draw[line] (cfg) -- (backend);
+\draw[line] (backend) -- (java);
+\draw[line] (backend) -- (native);
+\draw[line] (java.south) -- (app.north west);
+\draw[line] (native.south) -- (app.north east);
+\end{tikzpicture}}
+\caption{测试数据的系统适配流程}
+\label{fig:dataflow}
+\end{figure}

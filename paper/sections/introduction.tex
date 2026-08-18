@@ -1,0 +1,14 @@
+\section{引言}
+移动应用的行为越来越依赖设备所处的综合环境，而不仅是单个位置坐标。地图、运动、物联网和企业应用可能同时读取位置更新、卫星状态、NMEA、CellInfo、WiFi 扫描、BLE 广播、SIM 订阅信息以及加速度和计步事件。对应用开发者而言，真实外场测试成本高、环境难以复现，且 Android 不同版本和厂商 ROM 会改变类名、Binder 参数、服务拆分和事件分发路径。因此，需要一个能够保存测试数据、按时间回放并从系统接口边界提供可控返回值的测试框架。
+
+仅修改\texttt{LocationManager} 或回调中的经纬度并不能形成一致测试环境。应用可以通过 \texttt{GnssStatus} 判断卫星是否可见，通过 NMEA 解析另一组坐标，通过 CellInfo/WiFi 估计网络位置，也可以通过传感器事件推断运动状态。若这些数据仍来自真实设备，应用内部的融合算法会得到相互矛盾的输入。本文将问题定义为：在不修改被测应用源码、也不向第三方应用进程安装测试适配的前提下，如何在 Android 系统服务与 Framework 边界提供可控、可回退、可观测的多源测试数据。
+
+本文贡献如下：
+\begin{enumerate}
+  \item 总结 ZhangVirtualEnv 的分层架构和环境状态数据流，区分业务引擎、接口适配和版本 Profile 的职责。
+  \item 从源码给出路线轨迹、GNSS 几何、信号强度和统一运动模型的数学描述。
+  \item 结合 JADX 对 Android 15 \texttt{SensorService} 的结果，说明 Java Runtime Sensor 通道与 Native 分发通道的边界。
+  \item 基于 VirEnvDetector 与既有记录，给出不夸大功能的验证结论和适用限制。
+\end{enumerate}
+
+本文将“模拟”限定为软件层测试数据生成与系统 API 适配，不将其表述为真实卫星射频、GNSS 芯片输入或物理网络环境重建。

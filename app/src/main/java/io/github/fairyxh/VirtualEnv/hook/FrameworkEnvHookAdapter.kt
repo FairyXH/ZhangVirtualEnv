@@ -347,10 +347,10 @@ class FrameworkEnvHookAdapter(
                     true, // hasEphemeris
                     true, // hasAlmanac
                     usedInFix,
-                    false, // hasBasebandCn0
-                    cn0,  // basebandCn0（与 cn0 一致）
+                    true, // hasCarrierFrequencyHz on this Oplus 12-arg Builder
+                    1_575_420_000f, // carrierFrequencyHz: the first Float after the 4 booleans
                     false, // isBasebandInFix
-                    1_575_420_000f // carrierFrequencyHz (L1), unit is Hz
+                    cn0 // basebandCn0 / legacy trailing Float
                 )
             }
             builderClass.getMethod("build").invoke(builder)

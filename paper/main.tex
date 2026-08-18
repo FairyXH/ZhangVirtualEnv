@@ -1,0 +1,53 @@
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage[a4paper,left=25mm,right=25mm,top=25mm,bottom=25mm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{ragged2e}
+\usepackage{listings}
+\usepackage[numbers,sort&compress]{natbib}
+
+% 按中文学术论文习惯设置三级标题编号：一、/1.1/1.1.1。
+\ctexset{
+  section = {name={,、},number=\chinese{section},format=\zihao{-4}\bfseries,beforeskip=1.0em,afterskip=0.5em},
+  subsection = {name={,},number=\thesection.\arabic{subsection},format=\zihao{5}\bfseries,beforeskip=0.8em,afterskip=0.35em},
+  subsubsection = {name={,},number=\thesubsection.\arabic{subsubsection},format=\zihao{5}\bfseries,beforeskip=0.6em,afterskip=0.25em}
+}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.25em}
+\setlength{\emergencystretch}{3em}
+\hypersetup{pdftitle={面向 Android 应用测试的多源感知虚拟环境仿真框架设计与实现}}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,columns=fullflexible}
+
+\title{面向 Android 应用测试的多源感知虚拟环境仿真框架设计与实现}
+\author{ZhangVirtualEnv 项目开发者}
+\date{2026 年 8 月}
+
+\begin{document}
+\maketitle
+\thispagestyle{plain}
+\begin{center}
+  {\zihao{-4}\bfseries 摘要}
+\end{center}
+\input{sections/abstract}
+\clearpage
+
+\tableofcontents
+\clearpage
+\input{sections/introduction}
+\input{sections/related}
+\input{sections/architecture}
+\input{sections/algorithm}
+\input{sections/implementation}
+\input{sections/experiment}
+\input{sections/conclusion}
+
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}
