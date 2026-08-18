@@ -117,8 +117,7 @@ class StreamEnvironmentSampler(private val context: Context) {
             synchronized(bleFound) {
                 bleFound[device.address] = line
                 while (bleFound.size > BLE_RESULTS_LIMIT) {
-                    val it = bleFound.entries.iterator()
-                    if (it.hasNext()) it.remove()
+                    bleFound.keys.firstOrNull()?.let(bleFound::remove)
                 }
             }
         }
