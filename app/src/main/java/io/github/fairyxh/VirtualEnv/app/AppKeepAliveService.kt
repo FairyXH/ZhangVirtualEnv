@@ -14,6 +14,7 @@ import java.util.concurrent.Executors
 class AppKeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
+        RootProcessProtector.protectNow()
         val channelId = "zve_app_keepalive"
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -45,6 +46,9 @@ class AppKeepAliveService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        RootProcessProtector.protectNow()
+        return START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 }
