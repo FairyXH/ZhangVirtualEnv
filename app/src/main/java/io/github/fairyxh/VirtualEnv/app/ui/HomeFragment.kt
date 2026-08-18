@@ -81,6 +81,8 @@ class HomeFragment : Fragment() {
         private const val UI_STATE_PREFS = "home_ui_state"
         private const val KEY_RECORDING_NAME = "recording_name"
         private const val KEY_RECORDING_INTERVAL = "recording_interval"
+        private const val KEY_PLAYBACK_KIND = "playback_selected_kind"
+        private const val KEY_PLAYBACK_ID = "playback_selected_id"
         private const val KEY_COLLECT_NAME = "collect_name"
         private const val KEY_COLLECT_REMARK = "collect_remark"
         private const val REQ_PERMISSIONS = 1001
@@ -247,11 +249,11 @@ class HomeFragment : Fragment() {
 
         // 输入框默认值：从本地 UI 状态恢复，不能因页面重建而重置
         val prefs = requireContext().getSharedPreferences(UI_STATE_PREFS, android.content.Context.MODE_PRIVATE)
-        recordingName = prefs.getString(KEY_RECORDING_NAME, null)
-            ?: io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
+        recordingName = prefs.getString(KEY_RECORDING_NAME, null)?.trim().orEmpty()
+            .ifBlank { io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title)) }
         recordingInterval = prefs.getString(KEY_RECORDING_INTERVAL, "3") ?: "3"
-        collectName = prefs.getString(KEY_COLLECT_NAME, null)
-            ?: io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        collectName = prefs.getString(KEY_COLLECT_NAME, null)?.trim().orEmpty()
+            .ifBlank { io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title)) }
         collectRemark = prefs.getString(KEY_COLLECT_REMARK, "") ?: ""
         playbackStatus = getString(R.string.home_playback_idle)
         collectRecordingMode = false
@@ -314,6 +316,8 @@ class HomeFragment : Fragment() {
             .edit()
             .putString(KEY_RECORDING_NAME, recordingName)
             .putString(KEY_RECORDING_INTERVAL, recordingInterval)
+            .putString(KEY_PLAYBACK_KIND, selectedItem?.kind ?: "")
+            .putLong(KEY_PLAYBACK_ID, selectedItem?.id ?: -1L)
             .putString(KEY_COLLECT_NAME, collectName)
             .putString(KEY_COLLECT_REMARK, collectRemark)
             .apply()
@@ -1922,6 +1926,9 @@ class HomeFragment : Fragment() {
             val snapshots = ApiClient.listEnvSnapshots().data?.optJSONArray("snapshots")
             val recordings = ApiClient.listRecordings().data?.optJSONArray("recordings")
             requireActivity().runOnUiThread {
+                val prefs = requireContext().getSharedPreferences(UI_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+                val savedPlaybackKind = prefs.getString(KEY_PLAYBACK_KIND, "").orEmpty()
+                val savedPlaybackId = prefs.getLong(KEY_PLAYBACK_ID, -1L)
                 savedItems.clear()
                 snapshots?.let { arr ->
                     for (i in 0 until arr.length()) {
@@ -1966,6 +1973,21 @@ class HomeFragment : Fragment() {
                         )
                     }
                 }
+                val restored = savedItems.firstOrNull {
+                    it.kind == savedPlaybackKind && it.id == savedPlaybackId
+                }
+                if (restored != null) {
+                    selectItem(restored)
+                } else if (savedPlaybackKind.isNotBlank() || savedPlaybackId > 0L) {
+                    prefs.edit()
+                        .remove(KEY_PLAYBACK_KIND)
+                        .remove(KEY_PLAYBACK_ID)
+                        .apply()
+                    selectedItem = null
+                    playbackSelected = ""
+                    playbackControlsVisible = false
+                    playbackSpeedRowVisible = false
+                }
             }
         }
     }
@@ -1976,6 +1998,7 @@ class HomeFragment : Fragment() {
         val isRecording = item.kind == "recording"
         playbackControlsVisible = isRecording
         playbackSpeedRowVisible = isRecording
+        saveUiState()
     }
 
     private fun kindLabel(kind: String): String {
