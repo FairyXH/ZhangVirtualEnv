@@ -1,0 +1,37 @@
+== D:\Files\Develop\Android\TIK-5-169-win\TI_Xiaomi17\system\system\lib64\libsensorservice.so (DYN AARCH64) ==
+sections:
+  .note.android.ident      0x2e0 size=0x18 flags=2
+  .note.android.pad_segment 0x2f8 size=0x18 flags=2
+  .note.gnu.build-id       0x310 size=0x20 flags=2
+  .note.gnu.property       0x330 size=0x20 flags=2
+  .dynsym                  0x350 size=0x8010 flags=2
+  .gnu.version             0x8360 size=0xaac flags=2
+  .gnu.version_r           0x8e0c size=0x130 flags=2
+  .gnu.hash                0x8f40 size=0x18f0 flags=2
+  .dynstr                  0xa830 size=0x134c3 flags=2
+  .rela.dyn                0x1dcf8 size=0x1dcd flags=2
+  .relr.dyn                0x1fac8 size=0x180 flags=2
+  .rela.plt                0x1fc48 size=0x4068 flags=66
+  .bolt.org.eh_frame       0x23cb0 size=0x1054c flags=2
+  .rodata                  0x34200 size=0x4dc1 flags=2097202
+  .bolt.org.eh_frame_hdr   0x38fc4 size=0x2d1c flags=2
+  .bolt.org.text           0x3c000 size=0x40320 flags=6
+  .plt                     0x7c320 size=0x4088 flags=536870918
+  .data.rel.ro             0x84000 size=0x5fa0 flags=3
+  .fini_array              0x89fa0 size=0x10 flags=3
+  .init_array              0x89fb0 size=0x58 flags=3
+  .dynamic                 0x8a008 size=0x380 flags=3
+  .got                     0x8a388 size=0x470 flags=3
+  .got.plt                 0x8a7f8 size=0x1590 flags=3
+  .relro_padding           0x8bd88 size=0x278 flags=3
+  .data                    0x8c000 size=0x128 flags=3
+  .bss                     0x8c128 size=0x3a0 flags=2097155
+  .text                    0x94000 size=0x86a0 flags=6
+  .text.cold               0x9c6c0 size=0x3aa74 flags=6
+  .eh_frame                0xd7138 size=0x229dc flags=2
+  .eh_frame_hdr            0xf9b14 size=0x5bb4 flags=2
+  .shstrtab                0x0 size=0x164 flags=0
+  .gnu_debugdata           0x0 size=0x518 flags=0
+
+-- symbols containing 'sendEvents' --
+     0x95754 size=1328   bind=GLOBAL   _ZN7android13SensorService21SensorEventConnection10sendEventsEPK15sensors_event_tmPS2_PKNS_2wpIKS1_EE [.text]

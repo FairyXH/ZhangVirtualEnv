@@ -1,0 +1,53 @@
+== D:\Files\Develop\Android\TIK-5-169-win\TI_Xiaomi17\system\system\lib64\libsensor.so (DYN AARCH64) ==
+sections:
+  .note.android.ident      0x2e0 size=0x18 flags=2
+  .note.android.pad_segment 0x2f8 size=0x18 flags=2
+  .note.gnu.build-id       0x310 size=0x20 flags=2
+  .note.gnu.property       0x330 size=0x20 flags=2
+  .dynsym                  0x350 size=0x26a0 flags=2
+  .gnu.version             0x29f0 size=0x338 flags=2
+  .gnu.version_r           0x2d28 size=0x60 flags=2
+  .gnu.hash                0x2d88 size=0x688 flags=2
+  .dynstr                  0x3410 size=0x4665 flags=2
+  .rela.dyn                0x7a78 size=0xc70 flags=2
+  .relr.dyn                0x86e8 size=0xc8 flags=2
+  .rela.plt                0x87b0 size=0xf48 flags=66
+  .rodata                  0x96f8 size=0xd07 flags=50
+  .eh_frame_hdr            0xa400 size=0x80c flags=2
+  .eh_frame                0xac10 size=0x2a10 flags=2
+  .text                    0x10000 size=0x94ec flags=6
+  .plt                     0x194f0 size=0xf68 flags=536870918
+  .data.rel.ro             0x1c000 size=0x3220 flags=3
+  .fini_array              0x1f220 size=0x10 flags=3
+  .init_array              0x1f230 size=0x20 flags=3
+  .dynamic                 0x1f250 size=0x280 flags=3
+  .got                     0x1f4d0 size=0xd8 flags=3
+  .got.plt                 0x1f5a8 size=0x530 flags=3
+  .relro_padding           0x1fad8 size=0x528 flags=3
+  .bss                     0x20000 size=0x58 flags=3
+  .shstrtab                0x0 size=0x138 flags=0
+  .gnu_debugdata           0x0 size=0x8b8 flags=0
+
+-- symbols containing 'SensorEventQueue' --
+     0x15350 size=168    bind=GLOBAL   _ZN7android16SensorEventQueue17injectSensorEventERK12ASensorEvent [.text]
+     0x153f8 size=180    bind=GLOBAL   _ZN7android16SensorEventQueue7sendAckEPK12ASensorEventi [.text]
+     0x152d8 size=40     bind=GLOBAL   _ZNK7android16SensorEventQueue12enableSensorEiili [.text]
+     0x14c24 size=168    bind=GLOBAL   _ZN7android16SensorEventQueueC1ERKNS_2spINS_22ISensorEventConnectionEEERNS_13SensorManagerENS_7String8E [.text]
+     0x15210 size=72     bind=GLOBAL   _ZNK7android16SensorEventQueue4wakeEv [.text]
+     0x14df0 size=16     bind=GLOBAL   _ZNK7android16SensorEventQueue5getFdEv [.text]
+     0x15338 size=24     bind=GLOBAL   _ZNK7android16SensorEventQueue12setEventRateEPKNS_6SensorEl [.text]
+     0x14e00 size=12     bind=GLOBAL   _ZN7android16SensorEventQueue5writeERKNS_2spINS_7BitTubeEEEPK12ASensorEventm [.text]
+     0x152b0 size=40     bind=GLOBAL   _ZNK7android16SensorEventQueue13disableSensorEPKNS_6SensorE [.text]
+     0x15284 size=44     bind=GLOBAL   _ZNK7android16SensorEventQueue12enableSensorEPKNS_6SensorEi [.text]
+     0x15134 size=220    bind=GLOBAL   _ZNK7android16SensorEventQueue12waitForEventEv [.text]
+     0x14d84 size=108    bind=GLOBAL   _ZN7android16SensorEventQueue10onFirstRefEv [.text]
+     0x15314 size=36     bind=GLOBAL   _ZNK7android16SensorEventQueue13disableSensorEi [.text]
+     0x15060 size=212    bind=GLOBAL   _ZNK7android16SensorEventQueue9getLooperEv [.text]
+     0x15300 size=20     bind=GLOBAL   _ZNK7android16SensorEventQueue5flushEv [.text]
+     0x14d54 size=48     bind=GLOBAL   _ZN7android16SensorEventQueueD0Ev [.text]
+     0x154ac size=232    bind=GLOBAL   _ZNK7android16SensorEventQueue12filterEventsEP12ASensorEventm [.text]
+     0x14ccc size=136    bind=GLOBAL   _ZN7android16SensorEventQueueD1Ev [.text]
+     0x14e0c size=464    bind=GLOBAL   _ZN7android16SensorEventQueue4readEP12ASensorEventm [.text]
+     0x14c24 size=168    bind=GLOBAL   _ZN7android16SensorEventQueueC2ERKNS_2spINS_22ISensorEventConnectionEEERNS_13SensorManagerENS_7String8E [.text]
+     0x14ccc size=136    bind=GLOBAL   _ZN7android16SensorEventQueueD2Ev [.text]
+     0x15258 size=44     bind=GLOBAL   _ZNK7android16SensorEventQueue12enableSensorEPKNS_6SensorE [.text]

@@ -1,0 +1,34 @@
+== D:\Files\Develop\Android\TIK-5-169-win\TI_Xiaomi17\system\system\lib64\libandroid_servers.so (DYN AARCH64) ==
+sections:
+  .note.android.ident      0x318 size=0x18 flags=2
+  .note.android.pad_segment 0x330 size=0x18 flags=2
+  .note.gnu.build-id       0x348 size=0x20 flags=2
+  .note.gnu.property       0x368 size=0x20 flags=2
+  .dynsym                  0x388 size=0x8da8 flags=2
+  .gnu.version             0x9130 size=0xbce flags=2
+  .gnu.version_r           0x9d00 size=0x180 flags=2
+  .gnu.hash                0x9e80 size=0x15d0 flags=2
+  .dynstr                  0xb450 size=0x184e6 flags=2
+  .rela.dyn                0x23938 size=0x1bcc flags=2
+  .relr.dyn                0x25508 size=0x228 flags=2
+  .rela.plt                0x25730 size=0x4dd0 flags=66
+  .rodata                  0x2a500 size=0xf0c9 flags=50
+  .eh_frame_hdr            0x395cc size=0x355c flags=2
+  .eh_frame                0x3cb28 size=0x147d0 flags=2
+  .text                    0x54000 size=0x7a8e8 flags=6
+  .plt                     0xce8f0 size=0x4df0 flags=536870918
+  .tbss                    0xd36e0 size=0x39 flags=1027
+  .data.rel.ro             0xd4000 size=0x7818 flags=3
+  .fini_array              0xdb818 size=0x10 flags=3
+  .init_array              0xdb828 size=0x250 flags=3
+  .dynamic                 0xdba78 size=0x810 flags=3
+  .got                     0xdc288 size=0x948 flags=3
+  .got.plt                 0xdcbd0 size=0x1a08 flags=3
+  .relro_padding           0xde5d8 size=0xa28 flags=3
+  .data                    0xe0000 size=0x5c0 flags=3
+  .bss                     0xe05c0 size=0x2400 flags=2097155
+  .shstrtab                0x0 size=0x144 flags=0
+  .gnu_debugdata           0x0 size=0x69f8 flags=0
+
+-- .gnu_debugdata recovered symbols matching 'SensorService' --
+     0xbdbd0 _ZN7androidL24startSensorServiceNativeEP7_JNIEnvP7_jclassP8_jobject

@@ -1,0 +1,43 @@
+== D:\Files\Develop\Android\TIK-5-169-win\TI_Xiaomi17\system\system\lib64\libsensor.so (DYN AARCH64) ==
+sections:
+  .note.android.ident      0x2e0 size=0x18 flags=2
+  .note.android.pad_segment 0x2f8 size=0x18 flags=2
+  .note.gnu.build-id       0x310 size=0x20 flags=2
+  .note.gnu.property       0x330 size=0x20 flags=2
+  .dynsym                  0x350 size=0x26a0 flags=2
+  .gnu.version             0x29f0 size=0x338 flags=2
+  .gnu.version_r           0x2d28 size=0x60 flags=2
+  .gnu.hash                0x2d88 size=0x688 flags=2
+  .dynstr                  0x3410 size=0x4665 flags=2
+  .rela.dyn                0x7a78 size=0xc70 flags=2
+  .relr.dyn                0x86e8 size=0xc8 flags=2
+  .rela.plt                0x87b0 size=0xf48 flags=66
+  .rodata                  0x96f8 size=0xd07 flags=50
+  .eh_frame_hdr            0xa400 size=0x80c flags=2
+  .eh_frame                0xac10 size=0x2a10 flags=2
+  .text                    0x10000 size=0x94ec flags=6
+  .plt                     0x194f0 size=0xf68 flags=536870918
+  .data.rel.ro             0x1c000 size=0x3220 flags=3
+  .fini_array              0x1f220 size=0x10 flags=3
+  .init_array              0x1f230 size=0x20 flags=3
+  .dynamic                 0x1f250 size=0x280 flags=3
+  .got                     0x1f4d0 size=0xd8 flags=3
+  .got.plt                 0x1f5a8 size=0x530 flags=3
+  .relro_padding           0x1fad8 size=0x528 flags=3
+  .bss                     0x20000 size=0x58 flags=3
+  .shstrtab                0x0 size=0x138 flags=0
+  .gnu_debugdata           0x0 size=0x8b8 flags=0
+
+-- disasm 0x14e00 (0x30) --
+  0x14e00: bti      c
+  0x14e04: mov      w3, #0x68
+  0x14e08: b        #0x19570   ; -> 0x19570
+  0x14e0c: paciasp  
+  0x14e10: sub      sp, sp, #0x170
+  0x14e14: stp      x29, x30, [sp, #0x130]
+  0x14e18: stp      x28, x23, [sp, #0x140]
+  0x14e1c: stp      x22, x21, [sp, #0x150]
+  0x14e20: stp      x20, x19, [sp, #0x160]
+  0x14e24: add      x29, sp, #0x130
+  0x14e28: ldr      x8, [x0, #0x6870]
+  0x14e2c: mov      x19, x0
