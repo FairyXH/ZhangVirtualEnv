@@ -2292,7 +2292,12 @@ class HomeFragment : Fragment() {
         val playing = data.optBoolean("playing", false)
         val paused = data.optBoolean("paused", false)
         if (!playing) {
-            playbackStatus = getString(R.string.home_playback_idle)
+            val currentUsing = data.optString("currentUsing", "").trim()
+            playbackStatus = if (currentUsing.isNotEmpty()) {
+                "当前正在使用：$currentUsing"
+            } else {
+                getString(R.string.home_playback_idle)
+            }
             return
         }
         val playIndex = data.optInt("playIndex", 0) + 1

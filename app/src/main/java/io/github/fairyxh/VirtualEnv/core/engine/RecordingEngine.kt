@@ -543,6 +543,7 @@ class RecordingEngine(
                     put("gnss", backend.gnssEngine.isEnabled())
                     put("sensor", backend.sensorEngine.isEnabled())
                 })
+                put("currentUsing", backend.currentUsingName())
             }
         }
     }

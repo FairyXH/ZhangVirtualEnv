@@ -206,8 +206,8 @@ class SettingsFragment : Fragment() {
             synchronized(bleFound) {
                 classicFound[device.address] = line
                 while (classicFound.size > BLE_RESULTS_LIMIT) {
-                    val it = classicFound.entries.iterator()
-                    if (it.hasNext()) it.remove()
+                    val firstKey = classicFound.keys.firstOrNull()
+                    if (firstKey != null) classicFound.remove(firstKey)
                 }
             }
         }
@@ -292,8 +292,8 @@ class SettingsFragment : Fragment() {
             synchronized(bleFound) {
                 bleFound[device.address] = line
                 while (bleFound.size > BLE_RESULTS_LIMIT) {
-                    val it = bleFound.entries.iterator()
-                    if (it.hasNext()) it.remove()
+                    val firstKey = bleFound.keys.firstOrNull()
+                    if (firstKey != null) bleFound.remove(firstKey)
                 }
             }
         }
@@ -2029,7 +2029,8 @@ class SettingsFragment : Fragment() {
                 }
                 val usedMark = if (status.usedInFix(i)) "U" else "-"
                 val frequency = if (Build.VERSION.SDK_INT >= 26 && status.hasCarrierFrequencyHz(i)) {
-                    String.format(Locale.US, "%.2fMHz", status.getCarrierFrequencyHz(i) / 1_000_000f)
+                    val hz = status.getCarrierFrequencyHz(i)
+                    if (hz > 0f) String.format(Locale.US, "%.2fMHz", hz / 1_000_000f) else "f=-"
                 } else "f=-"
                 val flags = buildString {
                     if (status.hasAlmanacData(i)) append("A")

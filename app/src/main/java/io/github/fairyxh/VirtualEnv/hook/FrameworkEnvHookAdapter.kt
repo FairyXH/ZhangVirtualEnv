@@ -350,7 +350,7 @@ class FrameworkEnvHookAdapter(
                     false, // hasBasebandCn0
                     cn0,  // basebandCn0（与 cn0 一致）
                     false, // isBasebandInFix
-                    1575.42f // carrierFrequencyHz (L1)
+                    1_575_420_000f // carrierFrequencyHz (L1), unit is Hz
                 )
             }
             builderClass.getMethod("build").invoke(builder)

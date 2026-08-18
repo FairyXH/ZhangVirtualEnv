@@ -540,6 +540,7 @@ class Backend private constructor(private val dataDir: File) {
             activeEnvSnapshotIds.keys.removeAll(
                 setOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
             )
+            activeCollectSnapshotName = ""
             ZLog.i(TAG_SCOPE, "recording playback env stopped (location + env cleared)")
         }
     }
@@ -995,6 +996,9 @@ class Backend private constructor(private val dataDir: File) {
     /** 当前正在使用的环境快照 id（按类型），供 App 子页面标识“使用中”配置。 */
     private val activeEnvSnapshotIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    @Volatile
+    private var activeCollectSnapshotName = ""
+
     /** 一键使用环境快照：把已保存的 env_snapshot 数据加载到对应模拟引擎。 */
     fun useEnvSnapshot(id: Long): org.json.JSONObject? {
         if (!moduleEnabled) {
@@ -1034,6 +1038,7 @@ class Backend private constructor(private val dataDir: File) {
                  persistSimConfig(data)
              }
              "collect" -> {
+                 activeCollectSnapshotName = snapshot.optString("name", "")
                  loadCollectSnapshot(data)
                  // 轨道化回放：同名+来源标记的轨道快照存在则用轨道数据覆盖，
                  // 不存在（被单独删除）则清空该轨道 = 留空轨（真实信息）
@@ -1264,6 +1269,21 @@ class Backend private constructor(private val dataDir: File) {
             }
         }
         return status
+    }
+
+    /** 当前生效测试配置名称，供主页状态卡显示。 */
+    fun currentUsingName(): String {
+        val collectName = activeCollectSnapshotName.trim()
+        if (collectName.isNotEmpty()) return collectName
+        return listOf("wifi", "cell", "ble", "gnss", "sensor", "sim")
+            .mapNotNull { type ->
+                val status = envStatus(type)
+                status?.takeIf { it.optBoolean("enabled", false) }
+                    ?.optString("snapshotName", "")
+                    ?.takeIf { it.isNotBlank() }
+            }
+            .distinct()
+            .joinToString("、")
     }
 
     /**
