@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import java.util.concurrent.Executors
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.WindowInsetsCompat
 import io.github.fairyxh.VirtualEnv.util.ZLog
@@ -71,11 +72,16 @@ object AppBackground {
     var wallpaperDrawable by mutableStateOf<android.graphics.drawable.Drawable?>(null)
         private set
 
+    private val loader = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ZVE-WallpaperLoader").apply { isDaemon = true }
+    }
+
+    /** 仅同步读取开关；壁纸 Drawable/Bitmap 在后台线程加载。 */
     fun load(context: Context) {
         val app = context.applicationContext
         useWallpaper = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_USE_WALLPAPER, false)
-        if (useWallpaper) refreshWallpaper(app)
+        if (useWallpaper) loader.execute { refreshWallpaper(app) }
     }
 
     fun setUseWallpaper(context: Context, enabled: Boolean) {
@@ -85,7 +91,7 @@ object AppBackground {
             .putBoolean(KEY_USE_WALLPAPER, enabled)
             .apply()
         useWallpaper = enabled
-        if (enabled) refreshWallpaper(app)
+        if (enabled) loader.execute { refreshWallpaper(app) }
     }
 
     /** 权限授予或开关开启后重新读取壁纸。 */

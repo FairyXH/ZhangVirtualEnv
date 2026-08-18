@@ -12,9 +12,15 @@ import java.util.concurrent.Executors
 
 /** 控制端进程保活入口；录像内容仍由 App 采样链和后端数据库维护。 */
 class AppKeepAliveService : Service() {
+    companion object {
+        private val recoveryExecutor = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "ZVE-Recovery").apply { isDaemon = true }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
-        RootProcessProtector.protectNow()
+        RootProcessProtector.start()
         val channelId = "zve_app_keepalive"
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -31,7 +37,7 @@ class AppKeepAliveService : Service() {
                 .setContentTitle("测试框架服务运行中").setOngoing(true).build()
         }
         startForeground(0x5A5646, notification)
-        Executors.newSingleThreadExecutor().execute {
+        recoveryExecutor.execute {
             runCatching {
                 val result = ApiClient.getRecordingStatus()
                 val data = result.data ?: return@runCatching
@@ -47,7 +53,7 @@ class AppKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        RootProcessProtector.protectNow()
+        RootProcessProtector.start()
         return START_STICKY
     }
     override fun onBind(intent: Intent?): IBinder? = null

@@ -1,5 +1,7 @@
 package io.github.fairyxh.VirtualEnv.hook
 
+import android.content.Intent
+import android.os.UserHandle
 import android.util.Log
 import io.github.fairyxh.VirtualEnv.core.Backend
 import io.github.fairyxh.VirtualEnv.core.HookStatusRegistry
@@ -37,6 +39,7 @@ class VirtualEnvEntry : XposedModule() {
 
     private var backend: Backend? = null
     private var appCache: io.github.fairyxh.VirtualEnv.core.EnvStateCache? = null
+    private var systemContext: android.content.Context? = null
 
     @Volatile
     private var processName: String = ""
@@ -229,20 +232,27 @@ class VirtualEnvEntry : XposedModule() {
             Thread(r, "ZVE-AppServiceGuardian").apply { isDaemon = true }
         }.scheduleWithFixedDelay({
             try {
-                val command = "pidof io.github.fairyxh.VirtualEnv >/dev/null 2>&1 || " +
-                    "am start-foreground-service --user 0 -n " +
-                    "io.github.fairyxh.VirtualEnv/.app.AppKeepAliveService >/dev/null 2>&1"
-                val process = ProcessBuilder("su", "-c", command)
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().use { it.readText() }
-                val finished = process.waitFor(5, TimeUnit.SECONDS)
-                if (!finished) process.destroyForcibly()
-                log(
-                    if (finished && process.exitValue() == 0) Log.INFO else Log.WARN,
-                    TAG,
-                    "[$TAG_SCOPE] app service guardian checked finished=$finished output=${output.take(160)}"
+                val context = systemContext
+                if (context == null) {
+                    log(Log.WARN, TAG, "[$TAG_SCOPE] app service guardian skipped: no system context")
+                    return@scheduleWithFixedDelay
+                }
+                val intent = Intent().setClassName(
+                    "io.github.fairyxh.VirtualEnv",
+                    "io.github.fairyxh.VirtualEnv.app.AppKeepAliveService"
                 )
+                val user = UserHandle::class.java.getDeclaredConstructor(Int::class.javaPrimitiveType)
+                    .apply { isAccessible = true }.newInstance(0) as UserHandle
+                try {
+                    context.javaClass.getMethod(
+                        "startForegroundServiceAsUser", Intent::class.java, UserHandle::class.java
+                    ).invoke(context, intent, user)
+                } catch (_: NoSuchMethodException) {
+                    context.javaClass.getMethod(
+                        "startServiceAsUser", Intent::class.java, UserHandle::class.java
+                    ).invoke(context, intent, user)
+                }
+                log(Log.INFO, TAG, "[$TAG_SCOPE] app service guardian requested foreground service")
             } catch (t: Throwable) {
                 log(Log.WARN, TAG, "[$TAG_SCOPE] app service guardian failed", t)
             }
@@ -259,6 +269,17 @@ class VirtualEnvEntry : XposedModule() {
             // Backend 数据目录：system_server 可写目录 /data/system
             val backend = Backend.initialize(File("/data/system"))
             this.backend = backend
+            systemContext = try {
+                Class.forName("android.app.ActivityThread")
+                    .getMethod("currentActivityThread").invoke(null)
+                    .let { thread ->
+                        Class.forName("android.app.ActivityThread")
+                            .getMethod("getSystemContext").invoke(thread) as? android.content.Context
+                    }
+            } catch (t: Throwable) {
+                ZLog.w(TAG_SCOPE, "system context unavailable for app guardian", t)
+                null
+            }
             backend.setModuleApkPath(moduleApplicationInfo.sourceDir)
             // BuildConfig 可能未生成（AGP 9 默认关闭），用反射读取模块版本
             backend.setModuleVersion(

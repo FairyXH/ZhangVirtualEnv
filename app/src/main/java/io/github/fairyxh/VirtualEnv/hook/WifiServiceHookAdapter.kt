@@ -257,8 +257,9 @@ class WifiServiceHookAdapter(
                     ssidField.set(info, emptySsid)
                 }
             }
-        } catch (t: Throwable) {
-            ZLog.w(TAG_SCOPE, "empty wifi info ssid init failed", t)
+        } catch (_: Throwable) {
+            // Android 15 WifiSsid has no public zero-argument constructor. Keep the
+            // original WifiInfo shell and let the caller's fail-open path handle it.
         }
         return info
     }
