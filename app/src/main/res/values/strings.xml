@@ -608,7 +608,7 @@
     <string name="crash_report_exported_fallback">已导出：%1$s</string>
     <string name="crash_report_export_failed">导出失败：%1$s</string>
     <string name="settings_log_card_title">运行日志</string>
-    <string name="settings_log_card_desc">最近模块运行日志与崩溃记录</string>
+    <string name="settings_log_card_desc">最近 200 条模块日志；导出为 ZIP 后包含完整内存日志切片、崩溃栈、Hook/配置状态和 logcat 快照</string>
     <string name="settings_log_empty">暂无日志</string>
     <string name="settings_log_export">导出日志</string>
     <string name="settings_log_clear">清空日志</string>

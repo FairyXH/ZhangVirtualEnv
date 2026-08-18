@@ -90,6 +90,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import kotlinx.coroutines.delay
 import java.nio.charset.StandardCharsets
+import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -335,16 +336,16 @@ class SettingsFragment : Fragment() {
         )
     }
 
-    /** 运行日志导出：SAF 创建 TXT 文件后写入日志 + 崩溃记录。 */
+    /** 运行日志导出：SAF 创建诊断 ZIP，包含切片日志、完整状态报告和 logcat 快照。 */
     private val exportLogLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
+        ActivityResultContracts.CreateDocument("application/zip")
     ) { uri ->
         if (uri != null) exportLogTo(uri)
     }
 
     private fun onExportLog() {
         exportLogLauncher.launch(
-            "ZVE_Log_${io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.settings_log_card_title))}.txt"
+            "ZVE_Diagnostic_${io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.settings_log_card_title))}.zip"
         )
     }
 
@@ -352,24 +353,59 @@ class SettingsFragment : Fragment() {
         Thread {
             try {
                 val ctx = requireContext()
-                val out = ctx.contentResolver.openOutputStream(uri)
-                    ?: throw IllegalStateException("open output stream failed")
-                out.use {
-                    it.write(io.github.fairyxh.VirtualEnv.util.LogStore.exportText().toByteArray(StandardCharsets.UTF_8))
+                val temp = File.createTempFile("zve-diagnostic-", ".zip", ctx.cacheDir)
+                val report = runCatching { ApiClient.getReportExport().data?.toString(2) ?: "{}" }
+                    .getOrElse { "report fetch failed: ${it.javaClass.name}: ${it.message}\n" }
+                val hook = runCatching { ApiClient.getHookStatus().data?.toString(2) ?: "{}" }
+                    .getOrElse { "hook status fetch failed: ${it.javaClass.name}: ${it.message}\n" }
+                val profile = runCatching { ApiClient.getProfileStatus().data?.toString(2) ?: "{}" }
+                    .getOrElse { "profile fetch failed: ${it.javaClass.name}: ${it.message}\n" }
+                val module = runCatching { ApiClient.getModuleStatus().data?.toString(2) ?: "{}" }
+                    .getOrElse { "module status fetch failed: ${it.javaClass.name}: ${it.message}\n" }
+                val appInfo = buildString {
+                    append("package=").append(ctx.packageName).append('\n')
+                    append("version=").append(runCatching {
+                        ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+                    }.getOrNull()).append('\n')
+                    append("sdk=").append(Build.VERSION.SDK_INT).append('\n')
+                    append("release=").append(Build.VERSION.RELEASE).append('\n')
+                    append("fingerprint=").append(Build.FINGERPRINT).append('\n')
+                    append("manufacturer=").append(Build.MANUFACTURER).append('\n')
+                    append("model=").append(Build.MODEL).append('\n')
+                    append("device=").append(Build.DEVICE).append('\n')
+                    append("abis=").append(Build.SUPPORTED_ABIS.joinToString(",")).append('\n')
+                    append("elapsedRealtimeMs=").append(SystemClock.elapsedRealtime()).append('\n')
                 }
+                io.github.fairyxh.VirtualEnv.util.LogStore.exportDiagnosticZip(
+                    output = temp,
+                    metadata = mapOf("package" to ctx.packageName, "sdk" to Build.VERSION.SDK_INT.toString()),
+                    extraTexts = mapOf(
+                        "state/app_info.txt" to appInfo,
+                        "state/backend_report.json" to report,
+                        "state/hook_status.json" to hook,
+                        "state/profile_status.json" to profile,
+                        "state/module_status.json" to module,
+                        "state/log_export_note.txt" to "This archive contains bounded in-memory logs and a best-effort logcat snapshot.\n"
+                    ),
+                    logcatLines = 20000,
+                    linesPerSlice = 500
+                )
+                ctx.contentResolver.openOutputStream(uri)?.use { output ->
+                    temp.inputStream().use { input -> input.copyTo(output) }
+                } ?: throw IllegalStateException("open output stream failed")
+                val size = temp.length()
+                temp.delete()
+                ZLog.i(TAG_SCOPE, "diagnostic zip exported bytes=$size")
                 runOnUi {
                     Toast.makeText(requireContext(), R.string.settings_log_exported, Toast.LENGTH_SHORT).show()
                 }
             } catch (t: Throwable) {
+                ZLog.e(TAG_SCOPE, "diagnostic zip export failed", t)
                 runOnUi {
-                    Toast.makeText(
-                        requireContext(),
-                        getString(R.string.crash_report_export_failed, t.message ?: ""),
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(requireContext(), getString(R.string.crash_report_export_failed, t.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             }
-        }.start()
+        }.apply { name = "ZVE-DiagnosticExport"; isDaemon = true; start() }
     }
 
     /** 拉取后端完整调试报告并写入 SAF 文件。 */
@@ -550,7 +586,7 @@ class SettingsFragment : Fragment() {
             ) {
                 // 定时刷新运行日志卡片（LogStore 无状态，手动 tick 触发重组）
                 LaunchedEffect(logRefreshTick) {
-                    logPreview = io.github.fairyxh.VirtualEnv.util.LogStore.snapshot().takeLast(40)
+                    logPreview = io.github.fairyxh.VirtualEnv.util.LogStore.snapshot().takeLast(200)
                         .joinToString("\n")
                     kotlinx.coroutines.delay(2000L)
                     logRefreshTick++
