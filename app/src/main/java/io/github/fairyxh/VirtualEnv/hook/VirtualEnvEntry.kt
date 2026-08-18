@@ -115,9 +115,10 @@ class VirtualEnvEntry : XposedModule() {
                 // 必须拦截 TelephonyProperties setter 才能全局虚拟化（属性进程级全局，不 Hook 第三方 App）
                 val simPropHooked = SimSystemPropertyHookAdapter(cache, registrar).install(hostClassLoader)
                 log(Log.INFO, TAG, "[$TAG_SCOPE] sim system-property hooks installed pkg=$pkg hooked=$simPropHooked loader=${hostClassLoader}")
-                // RIL Java 层防御性 Hook：直达 RIL 的路径直接注入虚拟基站/信号（fail-open）
+                // RIL 入口会维护 Radio HAL request/serial 生命周期。API 37+ 由适配器明确
+                // 禁止短路，避免破坏 com.android.phone 的网络状态机；Binder 层仍可测试返回值。
                 val rilHooked = RilDefensiveHookAdapter(cache, registrar).install(hostClassLoader)
-                log(Log.INFO, TAG, "[$TAG_SCOPE] ril defensive hooks installed pkg=$pkg hooked=$rilHooked loader=${hostClassLoader}")
+                log(Log.INFO, TAG, "[$TAG_SCOPE] ril defensive hooks evaluated pkg=$pkg hooked=$rilHooked sdk=${android.os.Build.VERSION.SDK_INT} loader=${hostClassLoader}")
             }
             // com.android.bluetooth：BLE 扫描 Binder 服务端（全局 BLE 虚拟化）
             if (processName == "com.android.bluetooth" && bleHooksInstalled.compareAndSet(false, true)) {

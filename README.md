@@ -12,6 +12,8 @@
 
 目标 ROM 的静态材料为 Android 17 / API 37 Xiaomi HyperOS。项目已加入独立 `android17_xiaomi17` Profile，记录 Location、Telephony、Sensor Native、WiFi/Bluetooth APEX 的证据边界。Android 17 不复用 Android 16 Profile；WiFi/Bluetooth APEX 仅有 oat/vdex 时保持运行时发现和 fail-open。Native 传感器入口已加入 `libsensor.so` 的 `SensorEventQueue::write` 符号/锚点校验，但仍需对应真机验证。
 
+Android 17 的 Telephony RIL 请求会创建带 serial 的请求对象，经 Radio HAL 返回后由系统完成请求清理。为保持电话服务状态机完整，API 37 及以上不在 RIL 请求入口直接伪造 `Message` 回调；CellInfo、Telephony 和信号测试数据继续通过电话服务 Binder 返回层适配，RIL 原始请求保持系统行为。该边界已针对 Xiaomi Android 17 静态材料核对，仍需连接匹配真机后由 VirEnvDetector、logcat 和系统调用结果完成运行时验证。
+
 ---
 
 ## 项目简介

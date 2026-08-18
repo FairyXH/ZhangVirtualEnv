@@ -16,9 +16,10 @@ import org.json.JSONObject
  * 跨 ROM 版本更稳。
  *
  * 正常情况下 RIL 请求在 Phone.getAllCellInfo 等上层已由 Binder 服务端 Hook 覆盖；本适配器
- * 作为**防御性兜底**：当基站/SIM 引擎启用时，若仍有代码路径直达 RIL，直接向调用方 Message
- * 注入虚拟结果并阻断真实 RIL 请求。未启用/总开关关闭/采集暂停（cache 返回 null）时完全放行；
- * 注入失败 fail-open。
+ * 只作为 API 35/36 的防御性兜底。Android 17 的 RIL 请求会先创建带 serial 的 RILRequest，
+ * 再由 RadioNetworkProxy 发往 Radio HAL，响应必须经过 RIL.processResponseDone 清理请求状态。
+ * 因此 API 37+ 禁止在入口向 Message 直接投递 AsyncResult，避免遗留请求、串号和电话状态抖动，
+ * 由上层 Binder 返回层继续提供可控测试数据。旧版本的注入失败仍 fail-open。
  */
 class RilDefensiveHookAdapter(
     private val cache: EnvStateCache,
@@ -97,6 +98,13 @@ class RilDefensiveHookAdapter(
     }
 
     fun install(classLoader: ClassLoader): Int {
+        // Android 17 Xiaomi uses the Radio HAL request/serial lifecycle described above.
+        // Never short-circuit RIL entry points on API 37+ until a matching runtime-safe
+        // response hook exists. Binder-layer adapters remain the supported test path.
+        if (android.os.Build.VERSION.SDK_INT >= 37) {
+            ZLog.w(TAG_SCOPE, "RIL defensive hooks disabled on API ${android.os.Build.VERSION.SDK_INT}; preserve Radio HAL request lifecycle")
+            return 0
+        }
         val clazz = HookSupport.findClass(classLoader, "com.android.internal.telephony.RIL")
         if (clazz == null) {
             ZLog.w(TAG_SCOPE, "RIL class not found (fail-open)")
