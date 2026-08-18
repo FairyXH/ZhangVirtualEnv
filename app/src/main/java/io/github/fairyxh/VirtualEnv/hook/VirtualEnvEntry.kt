@@ -148,10 +148,10 @@ class VirtualEnvEntry : XposedModule() {
         val phoneSubInfo = mutableListOf<String>()
         val phoneObj = mutableListOf<String>()
         try {
-            // 按 SDK 精确选择 sim profile：Android 16 使用 android16.json（类/方法候选差异见 docs/reverse/android16-adapt）。
-            // 精确匹配（==36/==35/==34），API 37+ 未适配时回退 default.json，绝不误用 android16（与 ProfileManager 一致）。
+            // Android 17 Xiaomi 静态 Profile 已包含真实 RIL 签名；未命中资源时仍回退 default.json。
             val sdk = android.os.Build.VERSION.SDK_INT
             val profileName = when (sdk) {
+                37 -> "android17_xiaomi17.json"
                 36 -> "android16.json"
                 35 -> "android15.json"
                 34 -> "android14.json"

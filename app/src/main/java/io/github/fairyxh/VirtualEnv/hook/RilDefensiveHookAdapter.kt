@@ -103,7 +103,9 @@ class RilDefensiveHookAdapter(
             return 0
         }
         var hooked = 0
-        // 基站：requestCellInfoUpdate / requestCellInfoList / getCellInfoList 等
+        // API 37 static adaptation: use the target material's RIL signature.
+        // Android 17 Xiaomi exposes getCellInfoList(Message, WorkSource) and
+        // getSignalStrength(Message); requestCellInfoUpdate is not assumed.
         hooked += hookByMethodName(clazz, "CellInfo", { cache.currentCell() }) { data ->
             val list = VirtualCellFactory.buildCellInfoList(data, cache.locationLat(), cache.locationLon())
             if (list.isEmpty()) null else ArrayList(list)

@@ -111,7 +111,13 @@ class ProfileManager(private val dataDir: File) {
             p.optString(KEY_DEVICE) == device && sdkInRange(p, sdk)
         }?.let { return it }
 
-        // 2. SDK 范围匹配（通配设备）
+        // 2. Android 17 Xiaomi 静态 Profile。设备字段采用通配符，避免依赖 ROM 是否暴露
+        // 真实 ro.product.device；具体 Hook 仍逐点做运行时能力检查。
+        profiles.firstOrNull { p ->
+            p.optString(KEY_NAME) == "android17-xiaomi17-static" && sdkInRange(p, sdk)
+        }?.let { return it }
+
+        // 3. SDK 范围匹配（通配设备）
         profiles.firstOrNull { p ->
             p.optString(KEY_DEVICE) == "*" && sdkInRange(p, sdk)
         }?.let { return it }

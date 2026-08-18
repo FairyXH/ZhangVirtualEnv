@@ -1,0 +1,69 @@
+{
+  "name": "android17-xiaomi17-static",
+  "android": 17,
+  "minSdk": 37,
+  "maxSdk": 37,
+  "device": "*",
+  "vendor": "Xiaomi",
+  "rom": "HyperOS",
+  "buildFingerprint": "Xiaomi/mivendor/mivendor:16/BQ2A.260225.001-BP2A.250705.008/OS3.0.332.0.XPAMIXM:user/release-keys",
+  "hooks": {
+    "location": {
+      "managerClass": "com.android.server.location.LocationManagerService",
+      "getLastLocation": "getLastLocation",
+      "getCurrentLocation": "getCurrentLocation",
+      "gnssClass": "com.android.server.location.gnss.GnssLocationProvider",
+      "reportLocation": "onReportLocation",
+      "providerManagerClass": "com.android.server.location.provider.LocationProviderManager",
+      "managerReportLocation": "onReportLocation",
+      "injectProviders": ["gps", "passive", "network"],
+      "injectIntervalMs": 1000
+    },
+    "sim": {
+      "phoneInterfaceClasses": [
+        "com.android.phone.PhoneInterfaceManager",
+        "com.android.phone.PhoneInterfaceManager$Stub"
+      ],
+      "phoneSubInfoClasses": [
+        "com.android.internal.telephony.PhoneSubInfoController",
+        "com.android.phone.PhoneSubInfoController"
+      ],
+      "phoneClasses": [
+        "com.android.internal.telephony.GsmCdmaPhone",
+        "com.android.internal.telephony.Phone"
+      ],
+      "subscriptionClasses": [
+        "com.android.internal.telephony.subscription.SubscriptionManagerService",
+        "com.android.server.telephony.SubscriptionManagerService",
+        "com.android.server.telephony.SubscriptionController",
+        "com.android.internal.telephony.SubscriptionController"
+      ],
+      "telephonyPropertiesClass": "android.sysprop.TelephonyProperties",
+      "rilCellInfoMethod": "getCellInfoList",
+      "rilCellInfoSignature": "(android.os.Message,android.os.WorkSource)",
+      "rilSignalMethod": "getSignalStrength",
+      "rilSignalSignature": "(android.os.Message)"
+    },
+    "sensor": {
+      "systemServiceClass": "com.android.server.sensors.SensorService",
+      "systemServiceStubClass": "com.android.server.sensors.SensorServiceStub",
+      "nativeLibrary": "/system/lib64/libsensorservice.so",
+      "eventConnectionSymbol": "_ZN7android13SensorService21SensorEventConnection10sendEventsEPK15sensors_event_tmPS2_PKNS_2wpIKS1_EE",
+      "eventConnectionVaddr": "0x95754",
+      "eventQueueSymbol": "_ZN7android16SensorEventQueue5writeERKNS_2spINS_7BitTubeEEEPK12ASensorEventm",
+      "eventQueueVaddr": "0x14e00",
+      "eventQueuePrologue": ["0xd503245f", "0x52800d03", "branch"],
+      "batchDispatcher": "not-found-static",
+      "nativeStatus": "VERIFIED_STATIC_ONLY"
+    },
+    "wifi": {
+      "serviceJar": "apex@com.android.wifi@javalib@service-wifi.jar",
+      "serviceImplClass": "runtime-discovered:com.android.server.wifi.WifiServiceImpl",
+      "status": "REQUIRES_DEVICE"
+    },
+    "bluetooth": {
+      "serviceJar": "apex@com.android.bt@javalib@service-bluetooth.jar",
+      "status": "REQUIRES_DEVICE"
+    }
+  }
+}

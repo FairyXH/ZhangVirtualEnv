@@ -8,11 +8,13 @@
 
 > 测试结果校验：可通过独立工具 [VirEnvDetector](https://github.com/FairyXH/VirEnvDetector) 从测试环境外部校验测试数据是否按预期生效。
 
+### Android 17 Xiaomi 静态适配
+
+目标 ROM 的静态材料为 Android 17 / API 37 Xiaomi HyperOS。项目已加入独立 `android17_xiaomi17` Profile，记录 Location、Telephony、Sensor Native、WiFi/Bluetooth APEX 的证据边界。Android 17 不复用 Android 16 Profile；WiFi/Bluetooth APEX 仅有 oat/vdex 时保持运行时发现和 fail-open。Native 传感器入口已加入 `libsensor.so` 的 `SensorEventQueue::write` 符号/锚点校验，但仍需对应真机验证。
+
 ---
 
 ## 项目简介
-
-本项目是一个 Android 系统环境参数测试与兼容性验证框架，用于：
 
 - 验证应用对 **Location API** 数据变化、轨迹变化与时间戳处理逻辑的兼容性；
 - 验证应用对不同网络制式 **CellInfo** 数据结构解析的兼容性；
@@ -49,7 +51,7 @@
 
 ### 环境要求
 
-- Android 10+（当前验证机型：**OPPO/OnePlus Oplus Android 15**，API 35）
+- Android 10+（静态适配材料包含 Android 17 / API 37 Xiaomi HyperOS；设备级验证仍需对应真机）
 - 已 Root（Magisk）+ LSPosed（API 101）
 - 控制端与测试结果校验工具需要同时安装
 
@@ -78,7 +80,7 @@ adb install -r VirEnvDetector/app/build/outputs/apk/debug/app-debug.apk
 adb reboot
 ```
 
-在 LSPosed 管理中启用 `ZhangVirtualEnv`。作用域默认包含测试所需的系统组件（`system`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.oplus.location`、`com.google.android.gms`）与模块自身、校验工具；**不要手动添加任何第三方应用**。
+在 LSPosed 管理中启用 `ZhangVirtualEnv`。作用域默认包含测试所需的系统组件（`system`、`system_server`、`com.android.phone`、`com.android.bluetooth`、`com.android.location.fused`、`com.google.android.gms`）与模块自身、校验工具；不同 ROM 的额外系统组件仅在证据充分且属于系统组件时单独评估；**不要手动添加任何第三方应用**。
 
 > 测试适配模块在系统服务层加载，安装或更新后需要重启设备生效。
 
