@@ -42,11 +42,8 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
-import io.github.fairyxh.VirtualEnv.app.RecordingCaptureManager
 import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
-import io.github.fairyxh.VirtualEnv.app.collect.SensorStreamRecorder
-import io.github.fairyxh.VirtualEnv.app.collect.StreamEnvironmentSampler
 import io.github.fairyxh.VirtualEnv.app.collect.VrenvTransfer
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
@@ -65,8 +62,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.TimeUnit
 
 /**
  * 主页：模块状态 + 一键采集（快照/录像选项卡）+ 已保存采集（快照/录像统一）+ 采集回放。
@@ -156,6 +151,8 @@ class HomeFragment : Fragment() {
     private var recordingInterval by mutableStateOf("3")
     private var recordingStatus by mutableStateOf("")
     private var recordingRunning by mutableStateOf(false)
+    private var recordingPaused by mutableStateOf(false)
+    private var defaultNamesRefreshedForIdleSession = false
 
     private var playbackSelected by mutableStateOf("")
     private var playbackStatus by mutableStateOf("")
@@ -194,21 +191,11 @@ class HomeFragment : Fragment() {
     private var collector: EnvironmentCollector? = null
     private var lastCollectResult: JSONObject? = null
 
-    /** 录像期间持续监听环境（位置/GNSS/BLE/传感器 + 基站/WiFi 轮询），采样线程按间隔截帧。 */
-    private var streamSampler: StreamEnvironmentSampler? = null
-
-    /** 录像期间连续采集真实传感器数据（加速度/陀螺仪/计步）并逐帧追加。 */
-    private var sensorRecorder: SensorStreamRecorder? = null
-
     @Volatile
     private var recordingId = -1L
     private var recordingFrames = 0
     private var recordingNameBackend = ""
-    private var recordingScheduler: ScheduledExecutorService? = null
     private var pendingRecordingStart = false
-
-    /** 采样链保护：collectAll 为异步链，上一轮未完成时跳过本轮，避免并发扫描。 */
-    private val samplingBusy = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val playbackPollHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val playbackPoll = object : Runnable {
@@ -244,16 +231,14 @@ class HomeFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         collector = EnvironmentCollector(requireContext())
-        sensorRecorder = SensorStreamRecorder(requireContext())
-        streamSampler = StreamEnvironmentSampler(requireContext())
 
         // 输入框默认值：从本地 UI 状态恢复，不能因页面重建而重置
         val prefs = requireContext().getSharedPreferences(UI_STATE_PREFS, android.content.Context.MODE_PRIVATE)
-        recordingName = prefs.getString(KEY_RECORDING_NAME, null)?.trim().orEmpty()
-            .ifBlank { io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title)) }
+        // Names are session defaults. Backend status restores only an active recording;
+        // an idle page must never inherit the last snapshot or recording name.
+        recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
         recordingInterval = prefs.getString(KEY_RECORDING_INTERVAL, "3") ?: "3"
-        collectName = prefs.getString(KEY_COLLECT_NAME, null)?.trim().orEmpty()
-            .ifBlank { io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title)) }
+        collectName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
         collectRemark = prefs.getString(KEY_COLLECT_REMARK, "") ?: ""
         playbackStatus = getString(R.string.home_playback_idle)
         collectRecordingMode = false
@@ -718,6 +703,17 @@ class HomeFragment : Fragment() {
                                     BasicText(
                                         getString(R.string.home_recording_start),
                                         style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                GlassButton(
+                                    onClick = { fragment.toggleRecordingPause() },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.weight(1f),
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.55f)
+                                ) {
+                                    BasicText(
+                                        getString(if (recordingPaused) R.string.home_recording_resume else R.string.home_recording_pause),
+                                        style = TextStyle(color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     )
                                 }
                                 GlassButton(
@@ -1507,6 +1503,8 @@ class HomeFragment : Fragment() {
             requireActivity().runOnUiThread {
                 Toast.makeText(requireContext(), apiResult.message, Toast.LENGTH_SHORT).show()
                 if (apiResult.code == ApiResult.CODE_OK) {
+                    resetDefaultNames()
+                    saveUiState()
                     refreshSavedItems()
                 }
             }
@@ -1655,13 +1653,13 @@ class HomeFragment : Fragment() {
                     recordingFrames = 0
                     recordingNameBackend = name
                     saveUiState()
-                    RecordingCaptureManager.start(requireContext(), recordingId, interval)
                     Toast.makeText(
                         requireContext(),
                         R.string.home_recording_suspend_notice,
                         Toast.LENGTH_LONG
                     ).show()
                     recordingRunning = true
+                    recordingPaused = false
                     recordingStatus = getString(R.string.home_recording_running, name, recordingFrames)
                 } else {
                     Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
@@ -1670,43 +1668,29 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun startSamplingLoop(intervalSec: Double) {
-        recordingScheduler?.shutdownNow()
-        val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "ZVE-Recorder").apply { isDaemon = true }
-        }
-        recordingScheduler = scheduler
-        val intervalMs = (intervalSec * 1000.0).toLong().coerceAtLeast(100L)
-        scheduler.scheduleWithFixedDelay({
-            if (recordingId <= 0 || !samplingBusy.compareAndSet(false, true)) return@scheduleWithFixedDelay
-            executor.execute {
-                try {
-                    val id = recordingId
-                    if (id > 0) {
-                        val frame = streamSampler?.snapshot() ?: JSONObject()
-                        val result = ApiClient.appendRecordingFrame(id, frame)
-                        if (result.code == ApiResult.CODE_OK) {
-                            recordingFrames++
-                            if (isAdded) requireActivity().runOnUiThread {
-                                if (isAdded) recordingStatus = getString(
-                                    R.string.home_recording_running,
-                                    recordingNameBackend,
-                                    recordingFrames
-                                )
-                            }
-                        }
+    private fun toggleRecordingPause() {
+        val id = recordingId
+        if (id <= 0) return
+        executor.execute {
+            val result = if (recordingPaused) ApiClient.resumeRecordingCapture() else ApiClient.pauseRecordingCapture()
+            requireActivity().runOnUiThread {
+                if (!isAdded) return@runOnUiThread
+                if (result.code == ApiResult.CODE_OK) {
+                    recordingPaused = !recordingPaused
+                    val name = recordingNameBackend.ifBlank { recordingName }
+                    recordingStatus = if (recordingPaused) {
+                        getString(R.string.home_recording_paused, name)
+                    } else {
+                        getString(R.string.home_recording_running, name, recordingFrames)
                     }
-                } catch (t: Throwable) {
-                    ZLog.w(TAG_SCOPE, "app recording frame failed", t)
-                } finally {
-                    samplingBusy.set(false)
+                } else {
+                    Toast.makeText(requireContext(), result.message, Toast.LENGTH_SHORT).show()
                 }
             }
-        }, 0L, intervalMs, TimeUnit.MILLISECONDS)
+        }
     }
 
     private fun stopRecording() {
-        RecordingCaptureManager.stop(recordingId)
         val id = recordingId
         if (id <= 0) return
         recordingId = -1L
@@ -1720,8 +1704,13 @@ class HomeFragment : Fragment() {
                 if (!isAdded) return@runOnUiThread
                 Toast.makeText(requireContext(), R.string.home_recording_stopped, Toast.LENGTH_SHORT).show()
                 recordingRunning = false
+                recordingPaused = false
                 recordingStatus = getString(R.string.home_recording_idle)
-                if (result.code == ApiResult.CODE_OK) refreshSavedItems()
+                if (result.code == ApiResult.CODE_OK) {
+                    resetDefaultNames()
+                    saveUiState()
+                    refreshSavedItems()
+                }
             }
         }
     }
@@ -2303,26 +2292,38 @@ class HomeFragment : Fragment() {
     private fun renderPlaybackStatus(result: ApiResult) {
         val data = result.data ?: return
         val recording = data.optBoolean("recording", false)
+        val pausedCapture = data.optBoolean("recordingPaused", false)
         val backendRecordingId = data.optLong("recordingId", -1L)
         val backendRecordingName = data.optString("recordingName", "").trim()
         val backendFrameCount = data.optInt("recordingFrameCount", 0)
         recordingId = backendRecordingId
         recordingRunning = recording
+        recordingPaused = recording && pausedCapture
         if (backendRecordingName.isNotEmpty()) recordingNameBackend = backendRecordingName
         if (recording) {
-            recordingStatus = getString(
-                R.string.home_recording_running,
-                if (backendRecordingName.isNotEmpty()) backendRecordingName else recordingNameBackend,
-                backendFrameCount
-            )
-        } else if (backendRecordingId <= 0 && recordingStatus.isEmpty()) {
-            val last = data.optJSONObject("lastRecording")
-            val lastName = last?.optString("name", "")?.trim().orEmpty()
-            val lastFrames = last?.optInt("frameCount", 0) ?: 0
-            recordingStatus = if (lastName.isNotEmpty()) {
-                "上次录像：$lastName（${lastFrames}帧）"
+            recordingStatus = if (recordingPaused) {
+                getString(
+                    R.string.home_recording_paused,
+                    if (backendRecordingName.isNotEmpty()) backendRecordingName else recordingNameBackend
+                )
             } else {
-                getString(R.string.home_recording_idle)
+                getString(
+                    R.string.home_recording_running,
+                    if (backendRecordingName.isNotEmpty()) backendRecordingName else recordingNameBackend,
+                    backendFrameCount
+                )
+            }
+        } else {
+            refreshDefaultNamesForIdleSession()
+            if (backendRecordingId <= 0 && recordingStatus.isEmpty()) {
+                val last = data.optJSONObject("lastRecording")
+                val lastName = last?.optString("name", "")?.trim().orEmpty()
+                val lastFrames = last?.optInt("frameCount", 0) ?: 0
+                recordingStatus = if (lastName.isNotEmpty()) {
+                    "上次录像：$lastName（${lastFrames}帧）"
+                } else {
+                    getString(R.string.home_recording_idle)
+                }
             }
         }
         val playing = data.optBoolean("playing", false)
@@ -2365,6 +2366,14 @@ class HomeFragment : Fragment() {
     }
 
     // ---------- 工具 ----------
+
+    /** 页面首次确认没有进行中采集时，刷新时间型默认名称而不是恢复上次输入。 */
+    private fun refreshDefaultNamesForIdleSession() {
+        if (defaultNamesRefreshedForIdleSession) return
+        defaultNamesRefreshedForIdleSession = true
+        resetDefaultNames()
+        saveUiState()
+    }
 
     /** 保存/录制成功后重置默认名称（时间命名）。 */
     private fun resetDefaultNames() {

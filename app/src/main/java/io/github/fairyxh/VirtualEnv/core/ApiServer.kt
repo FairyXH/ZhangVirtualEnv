@@ -253,6 +253,8 @@ class ApiServer(
                 path == "/api/recording/start" && method == "POST" -> recordingStart(body)
                 path == "/api/recording/append" && method == "POST" -> recordingAppend(body)
                 path == "/api/recording/stop" && method == "POST" -> recordingStop(body)
+                path == "/api/recording/pause-capture" && method == "POST" -> recordingPauseCapture()
+                path == "/api/recording/resume-capture" && method == "POST" -> recordingResumeCapture()
                 path == "/api/recording/list" && method == "GET" -> recordingList()
                 path == "/api/recording/get" && method == "POST" -> recordingGet(body)
                 path == "/api/recording/delete" && method == "POST" -> recordingDelete(body)
@@ -688,6 +690,16 @@ class ApiServer(
         } else {
             ApiResult.error("no active recording")
         }
+    }
+
+    private fun recordingPauseCapture(): ApiResult {
+        return if (backend.pauseRecording()) ApiResult.ok("paused", backend.recordingStatusJson())
+        else ApiResult.error("no active recording or already paused")
+    }
+
+    private fun recordingResumeCapture(): ApiResult {
+        return if (backend.resumeRecording()) ApiResult.ok("resumed", backend.recordingStatusJson())
+        else ApiResult.error("no paused recording")
     }
 
     private fun recordingList(): ApiResult {

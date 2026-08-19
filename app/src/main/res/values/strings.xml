@@ -80,8 +80,11 @@
     <string name="home_recording_name_hint">录像名称，如：通勤路线 1</string>
     <string name="home_recording_interval_hint">间隔 秒（0.1~300，支持小数）</string>
     <string name="home_recording_start">开始录制</string>
+    <string name="home_recording_pause">暂停</string>
+    <string name="home_recording_resume">继续</string>
     <string name="home_recording_stop">停止录制</string>
     <string name="home_recording_running">录制中：%1$s · 已 %2$d 帧</string>
+    <string name="home_recording_paused">已暂停：%1$s</string>
     <string name="home_recording_idle">未在录制</string>
     <string name="home_recording_name_required">请输入录像名称</string>
     <string name="home_recording_started">录像已开始</string>

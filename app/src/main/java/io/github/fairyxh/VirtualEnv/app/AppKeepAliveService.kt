@@ -8,15 +8,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import io.github.fairyxh.VirtualEnv.R
-import java.util.concurrent.Executors
 
-/** 控制端进程保活入口；录像内容仍由 App 采样链和后端数据库维护。 */
+/** 控制端进程保活入口；录制生命周期由 system_server Backend 独立维护。 */
 class AppKeepAliveService : Service() {
-    companion object {
-        private val recoveryExecutor = Executors.newSingleThreadExecutor { r ->
-            Thread(r, "ZVE-Recovery").apply { isDaemon = true }
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
@@ -37,19 +31,9 @@ class AppKeepAliveService : Service() {
                 .setContentTitle("测试框架服务运行中").setOngoing(true).build()
         }
         startForeground(0x5A5646, notification)
-        recoveryExecutor.execute {
-            runCatching {
-                val result = ApiClient.getRecordingStatus()
-                val data = result.data ?: return@runCatching
-                if (data.optBoolean("recording", false)) {
-                    RecordingCaptureManager.start(
-                        this,
-                        data.optLong("recordingId", -1L),
-                        data.optLong("intervalMs", 1000L) / 1000.0
-                    )
-                }
-            }
-        }
+        // Recording is system-owned. Do not recreate an App-side sampler after a
+        // service restart: a second writer can inflate frame payloads and compete
+        // with system_server finalization.
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

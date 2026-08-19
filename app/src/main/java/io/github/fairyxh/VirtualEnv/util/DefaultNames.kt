@@ -28,9 +28,9 @@ object DefaultNames {
         return if (!poi.isNullOrBlank()) poi else timeName(prefix)
     }
 
-    /** 纯时间默认名，如「录像 2026-08-10 14:30」。 */
+    /** 纯时间默认名，精确到秒以便快速连续创建时仍保持唯一。 */
     fun timeName(prefix: String): String {
-        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         return "$prefix ${fmt.format(Date())}"
     }
 }

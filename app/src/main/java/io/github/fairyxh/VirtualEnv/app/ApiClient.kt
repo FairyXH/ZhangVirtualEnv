@@ -331,6 +331,10 @@ object ApiClient {
         return post("/api/recording/stop", body)
     }
 
+    fun pauseRecordingCapture(): ApiResult = post("/api/recording/pause-capture", JSONObject())
+
+    fun resumeRecordingCapture(): ApiResult = post("/api/recording/resume-capture", JSONObject())
+
     fun listRecordings(): ApiResult = get("/api/recording/list")
 
     /** 取录像帧；传 offset/limit 时分页返回（响应带 total/firstTs/lastTs）。 */

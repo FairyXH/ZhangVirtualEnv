@@ -1562,7 +1562,8 @@ class Backend private constructor(private val dataDir: File) {
         recordingEngine.setRecordingInterval(intervalMs)
         beginHookObserve()
         suspendAll()
-        ZLog.i(TAG_SCOPE, "app-owned recording capture enabled id=$id intervalMs=${intervalMs.coerceIn(100L, 300_000L)}")
+        recordingEngine.startCoreSampling(intervalMs)
+        ZLog.i(TAG_SCOPE, "system-owned recording capture enabled id=$id intervalMs=${intervalMs.coerceIn(100L, 300_000L)}")
         return id
     }
 
@@ -1572,10 +1573,16 @@ class Backend private constructor(private val dataDir: File) {
 
     fun stopRecording(id: Long): Boolean {
         if (id <= 0) return false
+        val stopped = recordingEngine.stopRecording()
+        if (!stopped) return false
         endHookObserve()
         resumeAll()
-        return recordingEngine.stopRecording()
+        return true
     }
+
+    fun pauseRecording(): Boolean = recordingEngine.pauseRecording()
+
+    fun resumeRecording(): Boolean = recordingEngine.resumeRecording()
 
     fun listRecordings(): List<org.json.JSONObject> {
         return recordingEngine.listRecordings()

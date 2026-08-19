@@ -39,6 +39,8 @@ class RecordingEngine(
 
         /** 循环回放时末帧停留余量（ms），避免最后一帧与时长边界重合导致不显示。 */
         private const val FRAME_GRACE_MS = 500L
+        /** Keep metadata writes off the per-frame hot path. */
+        private const val META_FLUSH_FRAME_INTERVAL = 25
     }
 
     // ---------- 录制状态 ----------
@@ -59,6 +61,8 @@ class RecordingEngine(
     private var recordingFrameCount: Int = 0
     @Volatile
     private var recordingIntervalMs: Long = 1000L
+    @Volatile
+    private var recordingPaused = false
 
     // ---------- 回放状态 ----------
 
@@ -111,6 +115,7 @@ class RecordingEngine(
             recordingLastTs = 0L
             recordingFrameSeq = 0
             recordingFrameCount = 0
+            recordingPaused = false
         }
         ZLog.i(TAG_SCOPE, "recording started id=$id name=$name")
         return id
@@ -121,7 +126,7 @@ class RecordingEngine(
         coreSamplingFuture?.cancel(false)
         val interval = intervalMs.coerceIn(100L, 300_000L)
         val task = Runnable {
-            if (!isRecording()) return@Runnable
+            if (!isRecording() || isRecordingPaused()) return@Runnable
             try {
                 appendFrame(HookObserver.recordingFrameJson())
             } catch (t: Throwable) {
@@ -138,10 +143,9 @@ class RecordingEngine(
         coreSamplingFuture = null
     }
 
-    /** 追加一帧；无活动录像时返回 false。 */
+    /** 追加一帧；无活动或已暂停录像时返回 false。 */
     fun appendFrame(data: JSONObject): Boolean {
-        val id = activeRecordingId
-        if (id <= 0) return false
+        if (!isRecording() || isRecordingPaused()) return false
         // 录像编程器：每帧附加完整环境状态（位置/路线/摇杆/所有环境开关与配置），
         // 回放时按时间轴自动重放这些“操作”。
         // 采集模式（suspend 中）各引擎被临时清空，帧内 envState 取录制基线，
@@ -157,30 +161,55 @@ class RecordingEngine(
             ZLog.w(TAG_SCOPE, "append envState snapshot failed", t)
         }
         val ts = data.optLong("timestamp", System.currentTimeMillis())
-        val seq = synchronized(this) {
+        synchronized(this) {
+            val id = activeRecordingId
+            if (id <= 0 || recordingPaused) return false
             if (recordingFirstTs == 0L) recordingFirstTs = ts
             recordingLastTs = ts
             recordingFrameSeq++
             recordingFrameCount++
-            recordingFrameSeq
+            databaseManager.insertRecordingFrame(id, recordingFrameSeq, ts, data.toString())
+            // Keep progress recoverable without issuing a metadata UPDATE for every frame.
+            if (recordingFrameCount % META_FLUSH_FRAME_INTERVAL == 0) {
+                databaseManager.updateRecordingMeta(id, 0L, recordingFrameCount)
+            }
         }
-        databaseManager.insertRecordingFrame(id, seq, ts, data.toString())
-        // Keep the list/status view current while recording; do not wait for stop().
-        databaseManager.updateRecordingMeta(id, 0L, recordingFrameCount)
+        return true
+    }
+
+    fun pauseRecording(): Boolean {
+        synchronized(this) {
+            if (activeRecordingId <= 0 || recordingPaused) return false
+            recordingPaused = true
+        }
+        stopCoreSampling()
+        ZLog.i(TAG_SCOPE, "recording paused id=$activeRecordingId")
+        return true
+    }
+
+    fun resumeRecording(): Boolean {
+        val interval: Long
+        synchronized(this) {
+            if (activeRecordingId <= 0 || !recordingPaused) return false
+            recordingPaused = false
+            interval = recordingIntervalMs
+        }
+        startCoreSampling(interval)
+        ZLog.i(TAG_SCOPE, "recording resumed id=$activeRecordingId")
         return true
     }
 
     /** 停止录制并写入元信息。 */
     fun stopRecording(): Boolean {
-        val id = activeRecordingId
-        if (id <= 0) return false
         stopCoreSampling()
-        backend.clearRecordingBaseState()
-        var count = 0
-        var duration = 0L
-        synchronized(this) {
-            count = recordingFrameCount
-            duration = if (recordingFirstTs > 0 && recordingLastTs >= recordingFirstTs) {
+        val stopSummary = synchronized(this) {
+            val id = activeRecordingId
+            if (id <= 0) return false
+            // Close the write gate before restoring the environment. A scheduled
+            // sample that was already queued will then observe no active recording.
+            recordingPaused = true
+            val count = recordingFrameCount
+            val duration = if (recordingFirstTs > 0 && recordingLastTs >= recordingFirstTs) {
                 recordingLastTs - recordingFirstTs
             } else if (recordingFirstTs > 0) {
                 (System.currentTimeMillis() - recordingFirstTs).coerceAtLeast(0L)
@@ -192,8 +221,14 @@ class RecordingEngine(
             recordingFrameCount = 0
             recordingFirstTs = 0L
             recordingLastTs = 0L
+            recordingPaused = false
+            id to Pair(count, duration)
         }
-        ZLog.i(TAG_SCOPE, "recording stopped id=$id frames=$count duration=$duration")
+        backend.clearRecordingBaseState()
+        ZLog.i(
+            TAG_SCOPE,
+            "recording stopped id=${stopSummary.first} frames=${stopSummary.second.first} duration=${stopSummary.second.second}"
+        )
         return true
     }
 
@@ -202,6 +237,8 @@ class RecordingEngine(
     }
 
     fun isRecording(): Boolean = activeRecordingId > 0
+
+    fun isRecordingPaused(): Boolean = recordingPaused
 
     /**
      * 启动兜底：system_server 重启/崩溃后，把未正常 finalize 的录像按实际帧数据收尾
@@ -572,6 +609,7 @@ class RecordingEngine(
                 put("frameProgress", lastAppliedIdx.coerceAtLeast(0))
                 put("durationMs", durationMs)
                 put("recording", isRecording())
+                put("recordingPaused", recordingPaused)
                 put("recordingId", activeRecordingId)
                 put("recordingName", recordingName)
                 put("recordingFrameCount", recordingFrameCount)

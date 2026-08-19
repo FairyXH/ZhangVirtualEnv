@@ -99,9 +99,9 @@ adb reboot
 
 ## 录像与控制端状态恢复（2026-08）
 
-录像状态以 system_server Backend 为唯一真源，状态接口返回当前录像 ID、名称、实时帧数、首末帧时间戳和最近已保存录像。控制端页面重建、后台划掉或 Activity 重新创建不会把后端状态覆盖为空闲；控制端输入的录像名称、采样间隔、快照名称和备注写入本地 UI 偏好并在下次进入时恢复。
+录像状态以 system_server Backend 为唯一真源，状态接口返回当前录像 ID、名称、实时帧数、首末帧时间戳、暂停状态和最近已保存录像。控制端页面重建、后台划掉或 Activity 重新创建不会把后端状态覆盖为空闲；只有后端明确不存在进行中的快照或录像时，快照与录像名称输入框才会生成新的当前时间默认值。
 
-录像开始后，system_server 同时使用 Hook 观测和系统服务主动采样，主动采样补足没有及时触发 Hook 回调的位置、基站和 WiFi 数据。每一帧落库后立即更新录像元数据中的帧数，因此录制期间查询列表和状态接口不会长期显示 0 帧。
+录像由 system_server 的单一采样器持久化。控制端仅发送开始、暂停、继续和停止命令并轮询状态，前台服务重启也不会另行创建采样器。暂停会停止新增帧并显示“已暂停：名称”；继续会在同一录像会话内恢复采样。为控制大录像的 SQLite 写入压力，帧数据仍逐帧提交，但进度元数据按固定批次更新，并在停止时完成最终时长、帧数和 finalized 标记写入。
 
 地图页的「当前位置」使用地图 SDK 标准定位能力（与普通应用一致的定位链路），
 可在关闭测试数据时确认设备真实位置；定位失败时自动回退系统定位结果。地图
@@ -276,7 +276,7 @@ ZhangVirtualEnv/
 | POST | `/api/env/use` | 应用测试数据包 |
 | POST | `/api/debug/load-sample-profile` | 加载预设测试环境（随机生成全套测试数据并启用，冒烟测试） |
 | GET/POST | `/api/test/report` | 测试结果上报/查询 |
-| POST | `/api/recording/start` `/append` `/stop` | 环境数据录制 |
+| POST | `/api/recording/start` `/stop` `/pause-capture` `/resume-capture` | 环境数据录制控制 |
 | GET | `/api/recording/list` `/get` | 录制列表 / 帧数据 |
 | POST | `/api/recording/play` `/pause` `/resume` `/stop-play` `/speed` | 回放控制 |
 | POST | `/api/recording/smooth` | 回放帧间平滑插值开关 |
