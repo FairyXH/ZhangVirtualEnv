@@ -551,6 +551,25 @@ class DatabaseManager(private val dbFile: File) {
         return null
     }
 
+    /** 查询录像时间轴，只返回时间戳，不解析大帧 JSON。 */
+    fun queryRecordingFrameTimeline(recordingId: Long): List<Long> {
+        val result = ArrayList<Long>()
+        val cursor = open().query(
+            TABLE_RECORDING_FRAME,
+            arrayOf(COL_TIMESTAMP_MS),
+            "$COL_RECORDING_ID=?",
+            arrayOf(recordingId.toString()),
+            null,
+            null,
+            "$COL_SEQ ASC"
+        )
+        cursor?.use {
+            val tsIdx = it.getColumnIndexOrThrow(COL_TIMESTAMP_MS)
+            while (it.moveToNext()) result.add(it.getLong(tsIdx))
+        }
+        return result
+    }
+
     /** 查询录像帧（按 seq 升序），offset/limit 非空时分页返回。 */
     fun queryRecordingFrames(
         recordingId: Long,

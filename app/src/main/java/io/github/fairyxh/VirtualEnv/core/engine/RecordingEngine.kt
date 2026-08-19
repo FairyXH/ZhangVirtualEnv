@@ -41,6 +41,8 @@ class RecordingEngine(
         private const val FRAME_GRACE_MS = 500L
         /** Keep metadata writes off the per-frame hot path. */
         private const val META_FLUSH_FRAME_INTERVAL = 25
+        /** Playback keeps only a small JSON window resident. */
+        private const val PLAYBACK_WINDOW_SIZE = 32
     }
 
     // ---------- 录制状态 ----------
@@ -74,6 +76,9 @@ class RecordingEngine(
     private var playlist: List<Long> = emptyList()
     private var playIndex = 0
     private var frames: List<JSONObject> = emptyList()
+    private var frameTimeline: List<Long> = emptyList()
+    private var frameWindowStart = 0
+    private var totalFrameCount = 0
     private var firstFrameTs = 0L
     private var durationMs = 0L
     private var playStartWall = 0L
@@ -363,23 +368,45 @@ class RecordingEngine(
         playbackPaused = false
         playlist = emptyList()
         frames = emptyList()
+        frameTimeline = emptyList()
+        frameWindowStart = 0
+        totalFrameCount = 0
         lastAppliedIdx = -1
         frameOffsets = emptyList()
         frameLocations = emptyList()
     }
 
     private fun loadRecording(id: Long): Boolean {
-        val loaded = databaseManager.queryRecordingFrames(id)
-        if (loaded.isEmpty()) return false
+        val timeline = databaseManager.queryRecordingFrameTimeline(id)
+        if (timeline.isEmpty()) return false
         synchronized(playbackLock) {
-            frames = loaded
-            firstFrameTs = loaded.first().optLong("timestampMs", 0L)
-            durationMs = (loaded.last().optLong("timestampMs", 0L) - firstFrameTs).coerceAtLeast(0L)
+            frameTimeline = timeline
+            totalFrameCount = timeline.size
+            firstFrameTs = timeline.first()
+            durationMs = (timeline.last() - firstFrameTs).coerceAtLeast(0L)
             playStartWall = SystemClock.elapsedRealtime()
             pausedElapsed = 0L
             lastAppliedIdx = -1
-            // 预解析每帧位置项（平滑插值用，避免每 tick 重复解析 JSON）
-            frameOffsets = loaded.map { (it.optLong("timestampMs", 0L) - firstFrameTs).coerceAtLeast(0L) }
+        }
+        if (!loadPlaybackWindow(0)) return false
+        val first = frames.firstOrNull() ?: return false
+        applyFrame(first.optJSONObject("data") ?: JSONObject())
+        lastAppliedIdx = 0
+        ZLog.i(TAG_SCOPE, "playback load recording id=$id frames=$totalFrameCount durationMs=$durationMs window=$PLAYBACK_WINDOW_SIZE smooth=$smoothLocation")
+        return true
+    }
+
+    /** Read only a bounded JSON window; keep the complete timeline as timestamps. */
+    private fun loadPlaybackWindow(frameIndex: Int): Boolean {
+        if (frameIndex < 0 || frameIndex >= totalFrameCount) return false
+        val start = (frameIndex / PLAYBACK_WINDOW_SIZE) * PLAYBACK_WINDOW_SIZE
+        val recordingId = playlist.getOrNull(playIndex) ?: return false
+        val loaded = databaseManager.queryRecordingFrames(recordingId, start, PLAYBACK_WINDOW_SIZE)
+        if (loaded.isEmpty()) return false
+        synchronized(playbackLock) {
+            frames = loaded
+            frameWindowStart = start
+            frameOffsets = loaded.map { it.optLong("timestampMs", 0L) - firstFrameTs }
             frameLocations = loaded.map { frame ->
                 frame.optJSONObject("data")?.optJSONObject("location")?.let { loc ->
                     val keys = loc.keys()
@@ -387,18 +414,12 @@ class RecordingEngine(
                         val item = loc.optJSONObject(keys.next()) ?: continue
                         if (!item.optDouble("latitude", Double.NaN).isNaN() &&
                             !item.optDouble("longitude", Double.NaN).isNaN()
-                        ) {
-                            return@map item
-                        }
+                        ) return@map item
                     }
                     null
                 }
             }
         }
-        // 立即应用第一帧，使回放开始即有环境
-        applyFrame(loaded.first().optJSONObject("data") ?: JSONObject())
-        lastAppliedIdx = 0
-        ZLog.i(TAG_SCOPE, "playback load recording id=$id frames=${loaded.size} durationMs=$durationMs smooth=$smoothLocation")
         return true
     }
 
@@ -450,12 +471,17 @@ class RecordingEngine(
                 // 平滑循环：末帧停留 FRAME_GRACE_MS 后再从头
                 val cycleLen = dur + FRAME_GRACE_MS
                 val cycleElapsed = elapsed % cycleLen
-                idx = if (cycleElapsed >= dur) frames.size - 1 else findFrameIndex(cycleElapsed)
+                idx = if (cycleElapsed >= dur) totalFrameCount - 1 else findFrameIndex(cycleElapsed)
             } else {
                 // 非循环：先确保停在最后一帧，再推进到下一段或结束
-                idx = frames.size - 1
+                idx = totalFrameCount - 1
                 if (idx != lastAppliedIdx) {
-                    applyFrame(frames.getOrNull(idx)?.optJSONObject("data") ?: JSONObject())
+                    val frame = synchronized(playbackLock) {
+                        frames.getOrNull(idx - frameWindowStart)
+                    } ?: if (loadPlaybackWindow(idx)) {
+                        synchronized(playbackLock) { frames.getOrNull(idx - frameWindowStart) }
+                    } else null
+                    applyFrame(frame?.optJSONObject("data") ?: JSONObject())
                     lastAppliedIdx = idx
                 }
                 handler.post { advanceOrStop() }
@@ -465,24 +491,30 @@ class RecordingEngine(
             idx = findFrameIndex(elapsed)
         }
 
-        val frame = frames.getOrNull(idx) ?: return
+        val frame = synchronized(playbackLock) {
+            frames.getOrNull(idx - frameWindowStart)
+        } ?: run {
+            if (!loadPlaybackWindow(idx)) return
+            synchronized(playbackLock) { frames.getOrNull(idx - frameWindowStart) }
+        } ?: return
         if (idx != lastAppliedIdx) {
             applyFrame(frame.optJSONObject("data") ?: JSONObject())
             lastAppliedIdx = idx
         }
         // 帧间平滑过渡：当前帧已应用且未到最后一帧时，按时间比例插值位置并叠加随机抖动，
         // 使定位不跳变（生成中间段）。仅当当前帧与下一帧都有有效坐标时生效。
-        if (smoothLocation && !paused && idx == lastAppliedIdx && idx < frames.size - 1) {
+        if (smoothLocation && !paused && idx == lastAppliedIdx && idx < totalFrameCount - 1) {
             interpolateLocation(elapsed, idx)
         }
     }
 
     /** 在当前帧与下一帧之间按时间比例插值位置，附加确定性小随机抖动（约 1~2 米）。 */
     private fun interpolateLocation(elapsed: Long, idx: Int) {
-        val cur = frameLocations.getOrNull(idx) ?: return
-        val nxt = frameLocations.getOrNull(idx + 1) ?: return
-        val t0 = frameOffsets.getOrNull(idx)?.toDouble() ?: return
-        val t1 = frameOffsets.getOrNull(idx + 1)?.toDouble() ?: return
+        val local = idx - frameWindowStart
+        val cur = frameLocations.getOrNull(local) ?: return
+        val nxt = frameLocations.getOrNull(idx + 1 - frameWindowStart) ?: return
+        val t0 = frameOffsets.getOrNull(local)?.toDouble() ?: return
+        val t1 = frameOffsets.getOrNull(local + 1)?.toDouble() ?: return
         if (t1 <= t0) return
         val t = ((elapsed - t0) / (t1 - t0)).coerceIn(0.0, 1.0)
         // 缓动：先快后慢，接近帧点时收敛到帧值，避免帧切换瞬间跳变
@@ -516,11 +548,11 @@ class RecordingEngine(
     private fun findFrameIndex(elapsed: Long): Int {
         // frames 按 timestampMs 升序；二分查找最后一个 offset <= elapsed 的帧
         var lo = 0
-        var hi = frames.size - 1
+        var hi = frameTimeline.size - 1
         var ans = 0
         while (lo <= hi) {
             val mid = (lo + hi) / 2
-            val offset = frames[mid].optLong("timestampMs", 0L) - firstFrameTs
+            val offset = frameTimeline[mid] - firstFrameTs
             if (offset <= elapsed) {
                 ans = mid
                 lo = mid + 1
@@ -605,7 +637,7 @@ class RecordingEngine(
                 put("playlistSize", playlist.size)
                 put("playIndex", playIndex)
                 put("currentRecordingId", playlist.getOrNull(playIndex) ?: -1L)
-                put("frameCount", frames.size)
+                put("frameCount", totalFrameCount)
                 put("frameProgress", lastAppliedIdx.coerceAtLeast(0))
                 put("durationMs", durationMs)
                 put("recording", isRecording())
