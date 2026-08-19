@@ -390,7 +390,7 @@ class RecordingEngine(
         }
         if (!loadPlaybackWindow(0)) return false
         val first = frames.firstOrNull() ?: return false
-        applyFrame(first.optJSONObject("data") ?: JSONObject())
+        applyFrame(first.optJSONObject("data") ?: JSONObject(), applyState = true)
         lastAppliedIdx = 0
         ZLog.i(TAG_SCOPE, "playback load recording id=$id frames=$totalFrameCount durationMs=$durationMs window=$PLAYBACK_WINDOW_SIZE smooth=$smoothLocation")
         return true
@@ -590,16 +590,19 @@ class RecordingEngine(
      * 把一帧数据写入对应模拟引擎（Hook 层随即输出）。
      *
      * 录像编程器语义：帧内 `envState` 记录录制时刻的完整环境状态
-     * （位置/路线/摇杆/所有环境开关与配置），回放时先整体应用；
+     * （位置/路线/环境开关与配置），回放只在首帧应用；
      * 随后帧内采集数据（location/cell/wifi/bluetooth/gnss/sensor）
      * 覆盖为具体输出数据。两者叠加 = 在合适时间点自动操作软件功能。
      */
-    private fun applyFrame(data: JSONObject) {
+    private fun applyFrame(data: JSONObject, applyState: Boolean = false) {
         try {
-            // 1) 应用录制时刻的完整环境状态快照（开关、路线、位置、摇杆、配置）
-            data.optJSONObject("envState")?.let { backend.applyEnvStateSnapshot(it) }
+            // Apply the baseline once. Reapplying the full envState on every frame
+            // repeatedly rewrites all engines during a large replay.
+            if (applyState) {
+                data.optJSONObject("envState")?.let { backend.applyEnvStateSnapshot(it) }
+            }
 
-            // 2) 帧内采集数据覆盖：位置
+            // Frame-specific location data.
             data.optJSONObject("location")?.let { loc ->
                 val keys = loc.keys()
                 while (keys.hasNext()) {
@@ -614,15 +617,28 @@ class RecordingEngine(
                     }
                 }
             }
-            // 3) 帧内采集数据覆盖：基站 / WiFi / 蓝牙 / GNSS / 传感器
+            // Frame-specific environment data. Sensor events are cumulative in the
+            // recording schema, so only retain the latest sample for replay.
             data.optJSONObject("cell")?.let { backend.cellEngine.update(it) }
             data.optJSONObject("wifi")?.let { backend.wifiEngine.update(it) }
             data.optJSONObject("bluetooth")?.let { backend.bleEngine.update(it) }
             data.optJSONObject("gnss")?.let { backend.gnssEngine.update(it) }
-            // 传感器连续模拟/回放：帧内 sensor 数据写入引擎，进程内注入器按事件流/采样率连续输出
-            data.optJSONObject("sensor")?.let { backend.sensorEngine.update(it) }
+            data.optJSONObject("sensor")?.let { backend.sensorEngine.update(compactSensorFrame(it)) }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "apply frame failed", t)
+        }
+    }
+
+    /** Keep only the latest sensor values; never replay cumulative events[]. */
+    private fun compactSensorFrame(sensor: JSONObject): JSONObject {
+        return JSONObject().apply {
+            listOf("accelerometer", "gyroscope", "stepCounter", "accuracy", "sampleRateMs")
+                .forEach { key -> if (sensor.has(key)) put(key, sensor.opt(key)) }
+            sensor.optJSONArray("events")?.let { events ->
+                if (events.length() > 0) {
+                    events.optJSONObject(events.length() - 1)?.let { put("lastEvent", it) }
+                }
+            }
         }
     }
 
