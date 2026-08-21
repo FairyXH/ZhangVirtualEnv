@@ -101,12 +101,18 @@ class RemoteWebSocketClient(
         .build()
     private var socket: WebSocket? = null
     @Volatile private var closed = false
+    @Volatile private var transportOpen = false
+    fun isActive(): Boolean = !closed && socket != null
+    fun isOpen(): Boolean = !closed && transportOpen
+    @Volatile private var reconnectScheduled = false
     @Volatile private var reconnectAttempt = 0
     private var selectedDeviceId: String? = null
     private val selectedTypes = linkedSetOf<String>()
 
     fun connect() {
         closed = false
+        reconnectScheduled = false
+        transportOpen = false
         val request = Request.Builder().url(normalizeUrl(config.url)).build()
         onState("连接中")
         socket = client.newWebSocket(request, Listener())
@@ -114,6 +120,7 @@ class RemoteWebSocketClient(
 
     fun disconnect() {
         closed = true
+        transportOpen = false
         socket?.close(1000, "client disconnect")
         socket = null
         onState("未连接")
@@ -146,12 +153,14 @@ class RemoteWebSocketClient(
         socket?.send(json.toString())
     }
 
-    private fun restoreSubscription() {
+    fun restoreSubscription() {
         selectedDeviceId?.let { subscribe(it, selectedTypes) }
     }
 
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            ZLog.i("Remote", "consumer websocket opened server=${config.url}")
+            transportOpen = true
             reconnectAttempt = 0
             send(JSONObject().apply {
                 put("type", "auth")
@@ -163,6 +172,7 @@ class RemoteWebSocketClient(
         override fun onMessage(webSocket: WebSocket, text: String) {
             runCatching {
                 val message = JSONObject(text)
+                ZLog.d("Remote", "consumer websocket message type=${message.optString("type")} device=${message.optString("device_id")} seq=${message.optLong("sequence", -1L)}")
                 when (message.optString("type")) {
                     "auth_result" -> {
                         val success = message.optBoolean("success", false)
@@ -188,24 +198,31 @@ class RemoteWebSocketClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            transportOpen = false
+            ZLog.e("Remote", "consumer websocket failure code=${response?.code} message=${t.message}", t)
             onAuth(false, t.message ?: "连接失败")
             scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            transportOpen = false
             if (!closed) scheduleReconnect()
             else onState("未连接")
         }
     }
 
     private fun scheduleReconnect() {
-        if (closed) return
-        val attempt = reconnectAttempt++
-        val delay = min(60_000L, 1_000L * (1L shl min(attempt, 6))) + Random.nextLong(0, 500)
+        if (closed || reconnectScheduled) return
+        reconnectScheduled = true
+        val delay = min(60_000L, 1_000L * (1L shl min(reconnectAttempt, 6))) + Random.nextLong(0, 500)
+        reconnectAttempt++
         onState("${delay / 1000} 秒后重连")
         Thread {
-            Thread.sleep(delay)
-            if (!closed) connect()
+            try { Thread.sleep(delay) } catch (_: InterruptedException) { return@Thread }
+            if (!closed) {
+                reconnectScheduled = false
+                connect()
+            }
         }.apply { name = "ZVE-RemoteReconnect"; isDaemon = true }.start()
     }
 

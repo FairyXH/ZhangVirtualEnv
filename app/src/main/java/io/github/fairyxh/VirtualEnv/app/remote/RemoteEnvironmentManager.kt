@@ -125,7 +125,14 @@ class RemoteEnvironmentManager(context: Context) {
         listener?.onServersChanged(servers())
     }
 
+    private var reconnecting = false
+
     fun connect(config: RemoteServerConfig) {
+        if (activeConfig?.id == config.id && socket?.isActive() == true) {
+            socket?.restoreSubscription()
+            emitState(currentState)
+            return
+        }
         val savedDeviceId = activeDeviceId
         disconnect(restoreLocal = false)
         activeConfig = config
@@ -172,11 +179,12 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun reconnectPersisted() {
         if (!useRemote) return
+        if (activeConfig?.id == activeServer()?.id && socket?.isActive() == true) {
+            socket?.restoreSubscription()
+            return
+        }
         val config = activeServer() ?: return
         connect(config)
-        activeDeviceId?.let { deviceId ->
-            if (deviceId.isNotBlank()) selectDevice(deviceId)
-        }
     }
 
     fun disconnect(restoreLocal: Boolean = true) {
