@@ -38,6 +38,9 @@ class RemoteEnvironmentManager(context: Context) {
         Thread(r, "ZVE-RemoteHeartbeat").apply { isDaemon = true }
     }
     private var heartbeatTask: ScheduledFuture<*>? = null
+    private var freshnessTask: ScheduledFuture<*>? = null
+    private var lastForcedRefreshAt = 0L
+    private val lastObservedDeviceDataAt = mutableMapOf<String, Long>()
     private var socket: RemoteWebSocketClient? = null
     private var activeConfig: RemoteServerConfig? = null
     private var currentState = "未连接"
@@ -66,6 +69,7 @@ class RemoteEnvironmentManager(context: Context) {
             remoteEnabled[type] = prefs.getBoolean("remote_enabled_$type", false)
         }
         applyExecutor.scheduleWithFixedDelay({ drainPendingRemote() }, 0L, 200L, TimeUnit.MILLISECONDS)
+        freshnessTask = applyExecutor.scheduleWithFixedDelay({ refreshSelectedDeviceIfStale() }, 2L, 2L, TimeUnit.SECONDS)
     }
 
     var listener: Listener? = null
@@ -119,6 +123,8 @@ class RemoteEnvironmentManager(context: Context) {
     fun close() {
         disconnect(restoreLocal = false)
         writeExecutor.shutdownNow()
+        freshnessTask?.cancel(false)
+        freshnessTask = null
         applyExecutor.shutdownNow()
         applyWorkers.shutdownNow()
         heartbeatExecutor.shutdownNow()
@@ -169,6 +175,12 @@ class RemoteEnvironmentManager(context: Context) {
             },
             onDevices = { devices ->
                 currentDevices = devices
+                devices.forEach { device ->
+                    val previous = lastObservedDeviceDataAt[device.deviceId] ?: 0L
+                    if (device.lastData != null && device.lastData > previous) {
+                        lastObservedDeviceDataAt[device.deviceId] = device.lastData
+                    }
+                }
                 if (activeDeviceId != null && devices.none { it.deviceId == activeDeviceId }) {
                     activeDeviceId = null
                     listener?.onDeviceSelected(null)
@@ -207,6 +219,7 @@ class RemoteEnvironmentManager(context: Context) {
         if (useRemote) prepareRemoteTypesWithoutData()
         activeConfig = null
         activeDeviceId = null
+        lastObservedDeviceDataAt.clear()
         currentDevices = emptyList()
         latest.clear()
         emitState("未连接")
@@ -221,10 +234,17 @@ class RemoteEnvironmentManager(context: Context) {
             socket?.unsubscribe(old, PROTOCOL_TYPES)
             latest.clear()
         }
+        lastForcedRefreshAt = 0L
         activeDeviceId = deviceId
         socket?.subscribe(deviceId, PROTOCOL_TYPES)
         listener?.onDeviceSelected(deviceId)
         listener?.onDataChanged(latest.toMap())
+    }
+
+    /** Replays the selected device's cached/latest frames without changing selection state. */
+    fun forceRefreshSelectedDevice() {
+        if (activeDeviceId == null || socket?.isOpen() != true) return
+        socket?.refreshSubscription()
     }
 
     fun setUseRemote(enabled: Boolean) {
@@ -302,6 +322,21 @@ class RemoteEnvironmentManager(context: Context) {
                     synchronized(stateLock) { applyingTypes.remove(type) }
                 }
             }
+        }
+    }
+
+    private fun refreshSelectedDeviceIfStale() {
+        if (!useRemote || !moduleEnabled || activeDeviceId == null || socket?.isOpen() != true) return
+        val now = System.currentTimeMillis()
+        val deviceDataAt = latest.values.maxOfOrNull { it.optLong("_timestamp", 0L) } ?: 0L
+        val observedAt = activeDeviceId?.let { lastObservedDeviceDataAt[it] } ?: 0L
+        val sourceAhead = observedAt > 0L && observedAt > deviceDataAt
+        val dataAge = if (deviceDataAt > 0L) now - deviceDataAt else Long.MAX_VALUE
+        val selectedHasData = latest.isNotEmpty()
+        if ((sourceAhead || !selectedHasData || dataAge > 10_000L) && now - lastForcedRefreshAt > 10_000L) {
+            lastForcedRefreshAt = now
+            ZLog.i("Remote", "selected device data stale; force refresh device=${activeDeviceId} ageMs=$dataAge")
+            forceRefreshSelectedDevice()
         }
     }
 

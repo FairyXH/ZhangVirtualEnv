@@ -158,6 +158,11 @@ class RemoteWebSocketClient(
         selectedDeviceId?.let { subscribe(it, selectedTypes) }
     }
 
+    /** Re-sends the active subscription, equivalent to selecting the device again. */
+    fun refreshSubscription() {
+        selectedDeviceId?.let { subscribe(it, selectedTypes) }
+    }
+
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             ZLog.i("Remote", "consumer websocket opened server=${config.url}")
