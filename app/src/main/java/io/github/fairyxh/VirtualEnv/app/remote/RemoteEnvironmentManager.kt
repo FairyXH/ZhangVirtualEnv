@@ -23,6 +23,7 @@ class RemoteEnvironmentManager(context: Context) {
     private val remoteEnabled = mutableMapOf<String, Boolean>()
     private var activeDeviceId: String? = null
     private var useRemote = false
+    private val localSnapshots = mutableMapOf<String, JSONObject?>()
 
     var listener: Listener? = null
 
@@ -69,6 +70,7 @@ class RemoteEnvironmentManager(context: Context) {
     fun disconnect() {
         socket?.disconnect()
         socket = null
+        restoreLocalTypes()
         activeConfig = null
         activeDeviceId = null
         latest.clear()
@@ -80,7 +82,6 @@ class RemoteEnvironmentManager(context: Context) {
         if (old != null && old != deviceId) {
             socket?.unsubscribe(old, SUPPORTED_TYPES)
             latest.clear()
-            SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
         }
         activeDeviceId = deviceId
         socket?.subscribe(deviceId, SUPPORTED_TYPES)
@@ -90,8 +91,8 @@ class RemoteEnvironmentManager(context: Context) {
     fun setUseRemote(enabled: Boolean) {
         useRemote = enabled
         if (!enabled) {
-            // Keep local engine data and only disable remote ownership through the arbitration layer.
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
+            restoreLocalTypes()
             listener?.onState("本地环境模拟正常工作")
             return
         }
@@ -107,7 +108,11 @@ class RemoteEnvironmentManager(context: Context) {
     fun setTypeEnabled(type: String, enabled: Boolean) {
         require(type in SUPPORTED_TYPES)
         remoteEnabled[type] = enabled
-        if (useRemote && enabled) latest[type]?.let { applyRemote(type, it) }
+        if (useRemote && enabled) {
+            latest[type]?.let { applyRemote(type, it) }
+        } else if (!enabled) {
+            restoreLocalType(type)
+        }
     }
 
     fun isUseRemote(): Boolean = useRemote
@@ -116,6 +121,11 @@ class RemoteEnvironmentManager(context: Context) {
     fun currentData(): Map<String, JSONObject> = latest.toMap()
 
     private fun applyRemote(type: String, data: JSONObject) {
+        if (!localSnapshots.containsKey(type)) {
+            localSnapshots[type] = runCatching {
+                ApiClient.getEnvStatus(type).data?.optJSONObject("data")
+            }.getOrNull()
+        }
         val envType = if (type == "ble") "ble" else type
         val normalized = when (type) {
             "ble" -> JSONObject().apply {
@@ -136,5 +146,27 @@ class RemoteEnvironmentManager(context: Context) {
         } catch (t: Throwable) {
             ZLog.w("Remote", "apply remote $type exception: ${t.message}")
         }
+    }
+
+    private fun restoreLocalType(type: String) {
+        val local = localSnapshots[type] ?: return
+        runCatching {
+            ApiClient.setEnvData(type, local)
+            ApiClient.setEnvEnabled(type, true)
+        }.onFailure { ZLog.w("Remote", "restore local $type failed: ${it.message}") }
+    }
+
+    private fun restoreLocalTypes() {
+        localSnapshots.keys.toList().forEach(::restoreLocalType)
+        localSnapshots.clear()
+    }
+}
+
+/** Process-wide owner so leaving the management page does not stop remote virtualization. */
+object RemoteEnvironmentRuntime {
+    @Volatile private var instance: RemoteEnvironmentManager? = null
+
+    fun get(context: Context): RemoteEnvironmentManager = synchronized(this) {
+        instance ?: RemoteEnvironmentManager(context.applicationContext).also { instance = it }
     }
 }

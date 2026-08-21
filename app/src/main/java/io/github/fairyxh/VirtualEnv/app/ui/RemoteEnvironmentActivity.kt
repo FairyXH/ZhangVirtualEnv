@@ -25,8 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.remote.RemoteDevice
-import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentManager
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.remote.RemoteServerConfig
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentManager
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
@@ -46,7 +47,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        manager = RemoteEnvironmentManager(this).also {
+        manager = RemoteEnvironmentRuntime.get(this).also {
             it.listener = this
             servers = it.servers()
         }
