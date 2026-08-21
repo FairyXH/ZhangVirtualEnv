@@ -89,6 +89,7 @@ class RemoteServerRepository(context: Context) {
 /** WebSocket consumer for one server. It owns transport only, not Hook state. */
 class RemoteWebSocketClient(
     private val config: RemoteServerConfig,
+    private val clientDeviceId: String?,
     private val onAuth: (Boolean, String) -> Unit,
     private val onDevices: (List<RemoteDevice>) -> Unit,
     private val onData: (String, String, JSONObject) -> Unit,
@@ -166,6 +167,12 @@ class RemoteWebSocketClient(
                 put("type", "auth")
                 put("role", "consumer")
                 put("token", config.token)
+                put("device_id", clientDeviceId)
+                put("device", JSONObject().apply {
+                    put("name", "ZhangVirtualEnv")
+                    put("device_type", "android")
+                    put("capabilities", JSONArray(listOf("bluetooth", "wifi", "cell")))
+                })
             })
         }
 

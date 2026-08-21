@@ -42,7 +42,11 @@ class RemoteEnvironmentManager(context: Context) {
     private var activeConfig: RemoteServerConfig? = null
     private var currentState = "未连接"
     private var currentDevices = emptyList<RemoteDevice>()
-    @Volatile private var moduleEnabled = true
+    private var moduleEnabled = true
+    private val clientDeviceId: String = prefs.getString("consumer_device_id", null)
+        ?: ("android-consumer-" + UUID.randomUUID().toString()).also {
+            prefs.edit().putString("consumer_device_id", it).apply()
+        }
     private var lastHeartbeatAt = 0L
     private var lastDataAt = 0L
     private val latest = mutableMapOf<String, JSONObject>()
@@ -146,6 +150,7 @@ class RemoteEnvironmentManager(context: Context) {
         }, 0L, 5L, TimeUnit.SECONDS)
         socket = RemoteWebSocketClient(
             config = config,
+            clientDeviceId = clientDeviceId,
             onAuth = { success, state ->
                 emitState(state)
                 if (success) {
@@ -238,7 +243,7 @@ class RemoteEnvironmentManager(context: Context) {
         if (useRemote && enabled) {
             latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
         } else if (!enabled) {
-            restoreLocalType(type)
+            writeExecutor.execute { restoreLocalType(type) }
         }
     }
 
@@ -260,6 +265,7 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun isUseRemote(): Boolean = useRemote
     fun isTypeEnabled(type: String): Boolean = remoteEnabled[type] == true
+    fun typeEnabledSnapshot(): Map<String, Boolean> = remoteEnabled.toMap()
     fun currentDeviceId(): String? = activeDeviceId
     fun currentData(): Map<String, JSONObject> = latest.toMap()
 

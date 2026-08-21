@@ -48,6 +48,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private var state by mutableStateOf("未连接")
     private var useRemote by mutableStateOf(false)
     private var nowMs by mutableLongStateOf(System.currentTimeMillis())
+    private var typeEnabled by mutableStateOf(mapOf("ble" to false, "wifi" to false, "cell" to false))
     private var editingId by mutableStateOf<String?>(null)
     private var name by mutableStateOf("")
     private var url by mutableStateOf("")
@@ -58,6 +59,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         manager = RemoteEnvironmentRuntime.get(this).also {
             it.listener = this
             useRemote = it.isUseRemote()
+            typeEnabled = it.typeEnabledSnapshot()
             clearEditor()
             it.refreshListener()
         }
@@ -69,6 +71,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         if (::manager.isInitialized) {
             manager.listener = this
             useRemote = manager.isUseRemote()
+            typeEnabled = manager.typeEnabledSnapshot()
             manager.refreshListener()
         }
     }
@@ -226,7 +229,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private fun DataCard(type: String, title: String, backdrop: com.kyant.backdrop.Backdrop) {
         val colors = glassColors()
         val item = data[type]
-        val enabled = manager.isTypeEnabled(type)
+        val enabled = typeEnabled[type] == true
         GlassCard(backdrop = backdrop, modifier = Modifier.fillMaxWidth(), containerColor = colors.bgTertiary.copy(alpha = .35f), contentPadding = 12.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -234,7 +237,10 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                         BasicText(title, style = TextStyle(colors.textPrimary, 16.sp, FontWeight.Medium))
                         BasicText(summarize(type, item), style = TextStyle(colors.textSecondary, 12.sp))
                     }
-                    GlassToggle(selected = { enabled }, onSelect = { manager.setTypeEnabled(type, it) }, backdrop = backdrop)
+                    GlassToggle(selected = { enabled }, onSelect = { value ->
+                        typeEnabled = typeEnabled + (type to value)
+                        manager.setTypeEnabled(type, value)
+                    }, backdrop = backdrop)
                 }
                 if (item != null) GuiData(type, item)
             }
