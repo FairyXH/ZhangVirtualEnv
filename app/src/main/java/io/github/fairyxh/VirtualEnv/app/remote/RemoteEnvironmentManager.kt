@@ -60,6 +60,7 @@ class RemoteEnvironmentManager(context: Context) {
         fun onState(state: String)
         fun onServersChanged(servers: List<RemoteServerConfig>)
         fun onDevicesChanged(devices: List<RemoteDevice>)
+        fun onDeviceSelected(deviceId: String?)
         fun onDataChanged(data: Map<String, JSONObject>)
     }
 
@@ -76,6 +77,7 @@ class RemoteEnvironmentManager(context: Context) {
             currentListener.onServersChanged(servers())
             currentListener.onState(currentState)
             currentListener.onDevicesChanged(currentDevices)
+            currentListener.onDeviceSelected(activeDeviceId)
             currentListener.onDataChanged(latest.toMap())
         }
     }
@@ -177,6 +179,7 @@ class RemoteEnvironmentManager(context: Context) {
         latest.clear()
         emitState("未连接")
         listener?.onDevicesChanged(currentDevices)
+        listener?.onDeviceSelected(null)
         listener?.onDataChanged(emptyMap())
     }
 
@@ -188,6 +191,7 @@ class RemoteEnvironmentManager(context: Context) {
         }
         activeDeviceId = deviceId
         socket?.subscribe(deviceId, PROTOCOL_TYPES)
+        listener?.onDeviceSelected(deviceId)
         listener?.onDataChanged(latest.toMap())
     }
 

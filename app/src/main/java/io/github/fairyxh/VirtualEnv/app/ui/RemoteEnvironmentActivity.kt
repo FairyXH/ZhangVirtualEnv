@@ -42,6 +42,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private lateinit var manager: RemoteEnvironmentManager
     private var servers by mutableStateOf(emptyList<RemoteServerConfig>())
     private var devices by mutableStateOf(emptyList<RemoteDevice>())
+    private var selectedDeviceId by mutableStateOf<String?>(null)
     private var data by mutableStateOf(emptyMap<String, JSONObject>())
     private var state by mutableStateOf("未连接")
     private var useRemote by mutableStateOf(false)
@@ -181,7 +182,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     @Composable
     private fun DeviceCard(device: RemoteDevice, backdrop: com.kyant.backdrop.Backdrop) {
         val colors = glassColors()
-        val selected = manager.currentDeviceId() == device.deviceId
+        val selected = selectedDeviceId == device.deviceId
         GlassCard(backdrop = backdrop, modifier = Modifier.fillMaxWidth(), containerColor = if (selected) colors.accent.copy(alpha = .16f) else colors.bgTertiary.copy(alpha = .35f), contentPadding = 12.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -285,5 +286,6 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     override fun onState(value: String) { runOnUiThread { state = value } }
     override fun onServersChanged(value: List<RemoteServerConfig>) { runOnUiThread { servers = value } }
     override fun onDevicesChanged(value: List<RemoteDevice>) { runOnUiThread { devices = value } }
+    override fun onDeviceSelected(value: String?) { runOnUiThread { selectedDeviceId = value } }
     override fun onDataChanged(value: Map<String, JSONObject>) { runOnUiThread { data = value } }
 }
