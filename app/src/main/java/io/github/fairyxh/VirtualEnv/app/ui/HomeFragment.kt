@@ -42,6 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.VrenvTransfer
@@ -132,6 +133,7 @@ class HomeFragment : Fragment() {
     private var moduleVersion by mutableStateOf("")
     private var deviceInfo by mutableStateOf("")
     private var moduleEnabled by mutableStateOf(true)
+    private var remoteEnvironmentEnabled by mutableStateOf(false)
     /** Root 权限是否可用（su 可用）。 */
     private var rootAvailable by mutableStateOf(false)
     private val featureStatusRows = mutableStateListOf<Pair<String, String>>()
@@ -456,7 +458,10 @@ class HomeFragment : Fragment() {
                                 )
                                 BasicText(
                                     value,
-                                    style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                                    style = TextStyle(
+                                        color = if (remoteEnvironmentEnabled && label in setOf(getString(R.string.env_cell_title), getString(R.string.env_wifi_title), getString(R.string.env_ble_title))) Color(0xFF42A5F5) else colors.textPrimary,
+                                        fontSize = 12.sp
+                                    )
                                 )
                             }
                         }
@@ -1291,6 +1296,8 @@ class HomeFragment : Fragment() {
                 if (reachable) {
                     val masterOn = moduleResult?.data?.optBoolean("enabled", true) ?: true
                     moduleEnabled = masterOn
+                    RemoteEnvironmentRuntime.get(requireContext()).setModuleEnabled(masterOn)
+                    remoteEnvironmentEnabled = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote()
                     statusText = if (masterOn) {
                         getString(R.string.home_status_ok)
                     } else {
@@ -1408,8 +1415,9 @@ class HomeFragment : Fragment() {
             "sim" to getString(R.string.env_sim_title)
         ).forEach { (key, label) ->
             val enabled = envData?.optJSONObject(key)?.optBoolean("enabled", false) == true
+            val isRemoteControlled = remoteEnvironmentEnabled && key in setOf("cell", "wifi", "ble")
             featureStatusRows.add(
-                label to getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
+                label to if (isRemoteControlled) "远程环境" else getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
             )
         }
     }
@@ -1611,8 +1619,12 @@ class HomeFragment : Fragment() {
                     put("address", address)
                     put("rssi", src.optInt("rssi", -70))
                     if (src.has("txPower")) put("txPower", src.optInt("txPower", 0))
-                    if (src.has("manufacturerData")) put("manufacturerData", src.optString("manufacturerData", ""))
+                    if (src.has("manufacturerData")) put("manufacturerData", src.opt("manufacturerData"))
+                    if (src.has("serviceData")) put("serviceData", src.opt("serviceData"))
                     if (src.has("serviceUuids")) put("serviceUuids", src.optJSONArray("serviceUuids"))
+                    if (src.has("raw")) put("raw", src.optString("raw", ""))
+                    if (src.has("rawHex")) put("rawHex", src.optString("rawHex", ""))
+                    if (src.has("rawLength")) put("rawLength", src.optInt("rawLength", 0))
                 })
             }
             for (i in 0 until btBonded.length()) appendEntry(btBonded.optJSONObject(i) ?: continue)

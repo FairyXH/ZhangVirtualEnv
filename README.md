@@ -96,6 +96,7 @@ adb reboot
 - **环境数据采集与回放**：采集测试设备环境参数，保存为测试数据包并回放
 - **测试开关**：一键停用全部测试数据，系统恢复默认行为
 - **测试状态与调试报告**：导出测试适配状态与完整调试信息，用于问题定位
+- **远程 BLE RAW 广播**：远程环境的 Bluetooth 数据条目保留完整 `ScanRecord` 原始字节（Base64 `raw`，同时提供 `rawHex`/`rawLength`/`manufacturerData`/`serviceData`/`serviceUuids`），系统 BLE 测试适配层按原始字节重建扫描记录；Manufacturer Data 单独不等价于完整 RAW。
 
 ### 远程测试环境连接
 

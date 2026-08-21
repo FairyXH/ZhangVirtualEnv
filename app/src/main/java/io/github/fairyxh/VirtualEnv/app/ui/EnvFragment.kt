@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
@@ -59,6 +60,7 @@ class EnvFragment : Fragment() {
 
     /** 当前展开的环境子页面类型（null = 五大功能列表）。 */
     private var detailType by mutableStateOf<String?>(null)
+    private var remoteEnvironmentEnabled by mutableStateOf(false)
 
     private var items by mutableStateOf(
         listOf(
@@ -76,6 +78,9 @@ class EnvFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         refreshStatuses()
+        val manager = RemoteEnvironmentRuntime.get(requireContext())
+        remoteEnvironmentEnabled = manager.isUseRemote()
+        manager.refreshModuleEnabled()
         return androidx.compose.ui.platform.ComposeView(requireContext()).apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
@@ -86,6 +91,8 @@ class EnvFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        remoteEnvironmentEnabled = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote()
+        RemoteEnvironmentRuntime.get(requireContext()).refreshModuleEnabled()
         refreshStatuses()
     }
 
@@ -146,8 +153,9 @@ class EnvFragment : Fragment() {
                             // 环境子页面：不启动独立 Activity，直接切换为子页面
                             detailType = item.type
                         },
-                        onToggle = { checked -> fragment.toggleEnv(item.type, checked) }
-                    )
+                        onToggle = { checked -> fragment.toggleEnv(item.type, checked) },
+                        remoteControlled = remoteEnvironmentEnabled && item.type in setOf(TYPE_CELL, TYPE_WIFI, TYPE_BLE),
+                        onRemoteBlocked = { Toast.makeText(requireContext(), "已开启远程环境功能", Toast.LENGTH_SHORT).show() }                    )
                 }
                 } // Column
             } // else
@@ -185,7 +193,9 @@ class EnvFragment : Fragment() {
         item: EnvItem,
         backdrop: com.kyant.backdrop.Backdrop,
         onCardClick: () -> Unit,
-        onToggle: (Boolean) -> Unit
+        onToggle: (Boolean) -> Unit,
+        remoteControlled: Boolean = false,
+        onRemoteBlocked: () -> Unit = {}
     ) {
         val colors = glassColors()
         GlassCard(
@@ -215,6 +225,8 @@ class EnvFragment : Fragment() {
                     selected = { item.switchState },
                     onSelect = onToggle,
                     backdrop = backdrop,
+                    enabled = !remoteControlled,
+                    onDisabledClick = onRemoteBlocked,
                     modifier = Modifier.padding(start = 8.dp)
                 )
             }

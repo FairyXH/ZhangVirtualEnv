@@ -76,7 +76,14 @@ object VirtualBleFactory {
                         if (raw.isNotBlank()) {
                             android.util.Base64.decode(raw, android.util.Base64.DEFAULT)
                         } else {
-                            buildAdvBytes(d.optString("name", ""))
+                            val rawHex = d.optString("rawHex", "")
+                            if (rawHex.matches(Regex("[0-9A-Fa-f]+")) && rawHex.length % 2 == 0) {
+                                ByteArray(rawHex.length / 2) { offset ->
+                                    rawHex.substring(offset * 2, offset * 2 + 2).toInt(16).toByte()
+                                }
+                            } else {
+                                buildAdvBytes(d.optString("name", ""))
+                            }
                         }
                     } catch (_: Throwable) {
                         buildAdvBytes(d.optString("name", ""))

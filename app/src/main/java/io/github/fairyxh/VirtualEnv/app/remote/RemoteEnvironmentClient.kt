@@ -172,6 +172,7 @@ class RemoteWebSocketClient(
                     "device_list" -> onDevices(parseDevices(message.optJSONArray("devices")))
                     "environment_data" -> {
                         val payload = JSONObject(message.optJSONObject("data")?.toString() ?: "{}")
+                        normalizeRemoteBleRaw(payload)
                         payload.put("_timestamp", message.optLong("timestamp", 0L))
                         payload.put("_sequence", message.optLong("sequence", 0L))
                         onData(
@@ -206,6 +207,30 @@ class RemoteWebSocketClient(
             Thread.sleep(delay)
             if (!closed) connect()
         }.apply { name = "ZVE-RemoteReconnect"; isDaemon = true }.start()
+    }
+
+    private fun normalizeRemoteBleRaw(payload: JSONObject) {
+        val devices = payload.optJSONArray("devices") ?: return
+        for (index in 0 until devices.length()) {
+            val device = devices.optJSONObject(index) ?: continue
+            val raw = device.optString("raw", "")
+            if (raw.isBlank()) {
+                val rawHex = device.optString("rawHex", "")
+                if (rawHex.matches(Regex("[0-9A-Fa-f]+")) && rawHex.length % 2 == 0) {
+                    runCatching {
+                        val bytes = ByteArray(rawHex.length / 2) { offset ->
+                            rawHex.substring(offset * 2, offset * 2 + 2).toInt(16).toByte()
+                        }
+                        device.put("raw", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                    }
+                }
+            }
+            if (!device.has("rawLength") && device.optString("raw", "").isNotBlank()) {
+                runCatching {
+                    device.put("rawLength", android.util.Base64.decode(device.getString("raw"), android.util.Base64.DEFAULT).size)
+                }
+            }
+        }
     }
 
     private fun parseDevices(array: JSONArray?): List<RemoteDevice> {

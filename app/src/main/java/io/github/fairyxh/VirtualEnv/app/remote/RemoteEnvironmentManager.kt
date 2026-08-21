@@ -34,6 +34,7 @@ class RemoteEnvironmentManager(context: Context) {
     private var activeConfig: RemoteServerConfig? = null
     private var currentState = "未连接"
     private var currentDevices = emptyList<RemoteDevice>()
+    @Volatile private var moduleEnabled = true
     private var lastHeartbeatAt = 0L
     private var lastDataAt = 0L
     private val latest = mutableMapOf<String, JSONObject>()
@@ -206,10 +207,8 @@ class RemoteEnvironmentManager(context: Context) {
         }
         listener?.onState("远程环境模拟启用")
         SUPPORTED_TYPES.forEach { type ->
-            if (latest[type] != null) {
-                remoteEnabled[type] = true
-                applyRemote(type, latest.getValue(type))
-            }
+            remoteEnabled[type] = true
+            latest[type]?.let { applyRemote(type, it) }
         }
     }
 
@@ -224,12 +223,30 @@ class RemoteEnvironmentManager(context: Context) {
         }
     }
 
+    fun setModuleEnabled(enabled: Boolean) {
+        moduleEnabled = enabled
+        if (enabled && useRemote) {
+            SUPPORTED_TYPES.forEach { type -> latest[type]?.let { applyRemote(type, it) } }
+        }
+    }
+
+    fun refreshModuleEnabled() {
+        writeExecutor.execute {
+            val enabled = ApiClient.getModuleStatus().data?.optBoolean("enabled", true) ?: true
+            setModuleEnabled(enabled)
+        }
+    }
+
     fun isUseRemote(): Boolean = useRemote
     fun isTypeEnabled(type: String): Boolean = remoteEnabled[type] == true
     fun currentDeviceId(): String? = activeDeviceId
     fun currentData(): Map<String, JSONObject> = latest.toMap()
 
     private fun applyRemote(type: String, data: JSONObject) {
+        if (!moduleEnabled) {
+            ZLog.i("Remote", "module master switch is off; defer remote apply type=$type")
+            return
+        }
         if (!localSnapshots.containsKey(type)) {
             localSnapshots[type] = runCatching {
                 ApiClient.getEnvStatus(type).data?.optJSONObject("data")
