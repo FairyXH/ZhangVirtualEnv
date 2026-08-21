@@ -328,14 +328,26 @@ class RemoteEnvironmentManager(context: Context) {
     private fun refreshSelectedDeviceIfStale() {
         if (!useRemote || !moduleEnabled || activeDeviceId == null || socket?.isOpen() != true) return
         val now = System.currentTimeMillis()
-        val deviceDataAt = latest.values.maxOfOrNull { it.optLong("_timestamp", 0L) } ?: 0L
-        val observedAt = activeDeviceId?.let { lastObservedDeviceDataAt[it] } ?: 0L
-        val sourceAhead = observedAt > 0L && observedAt > deviceDataAt
-        val dataAge = if (deviceDataAt > 0L) now - deviceDataAt else Long.MAX_VALUE
-        val selectedHasData = latest.isNotEmpty()
-        if ((sourceAhead || !selectedHasData || dataAge > 10_000L) && now - lastForcedRefreshAt > 10_000L) {
+        val selectedId = activeDeviceId ?: return
+        val device = currentDevices.firstOrNull { it.deviceId == selectedId }
+        val observedAt = lastObservedDeviceDataAt[selectedId] ?: 0L
+        val sourceDataAt = maxOf(device?.lastData ?: 0L, observedAt)
+        val staleTypes = remoteEnabled.filterValues { it }.keys.filter { type ->
+            val item = latest[type]
+            val itemAt = item?.optLong("_timestamp", 0L) ?: 0L
+            val protocolType = if (type == "ble") "bluetooth" else type
+            val serverTypeAt = device?.lastDataByType?.get(protocolType)
+                ?: device?.lastDataByType?.get(type) ?: 0L
+            item == null || itemAt <= 0L || now - itemAt > 10_000L ||
+                (maxOf(sourceDataAt, serverTypeAt) > itemAt && maxOf(sourceDataAt, serverTypeAt) - itemAt > 1_000L)
+        }
+        if (staleTypes.isNotEmpty() && now - lastForcedRefreshAt > 10_000L) {
             lastForcedRefreshAt = now
-            ZLog.i("Remote", "selected device data stale; force refresh device=${activeDeviceId} ageMs=$dataAge")
+            ZLog.i(
+                "Remote",
+                "selected device data stale; force refresh device=$selectedId types=${staleTypes.joinToString(",")} " +
+                    "sourceAt=$sourceDataAt"
+            )
             forceRefreshSelectedDevice()
         }
     }

@@ -33,6 +33,7 @@ data class RemoteDevice(
     val online: Boolean,
     val lastSeen: Long?,
     val lastData: Long?,
+    val lastDataByType: Map<String, Long> = emptyMap(),
 )
 
 class RemoteServerRepository(context: Context) {
@@ -160,7 +161,13 @@ class RemoteWebSocketClient(
 
     /** Re-sends the active subscription, equivalent to selecting the device again. */
     fun refreshSubscription() {
-        selectedDeviceId?.let { subscribe(it, selectedTypes) }
+        selectedDeviceId?.let { deviceId ->
+            send(JSONObject().apply {
+                put("type", "refresh")
+                put("device_id", deviceId)
+                put("data_types", JSONArray(selectedTypes.toList()))
+            })
+        }
     }
 
     private inner class Listener : WebSocketListener() {
@@ -277,6 +284,16 @@ class RemoteWebSocketClient(
                     },
                     online = json.optBoolean("online"), lastSeen = json.optLong("last_seen").takeIf { it > 0 },
                     lastData = json.optLong("last_data").takeIf { it > 0 },
+                    lastDataByType = buildMap {
+                        val values = json.optJSONObject("last_data_by_type")
+                        if (values != null) {
+                            val keys = values.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                put(key, values.optLong(key, 0L))
+                            }
+                        }
+                    },
                 )
             }
         }
