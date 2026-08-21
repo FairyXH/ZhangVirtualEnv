@@ -1,11 +1,13 @@
 package io.github.fairyxh.VirtualEnv.app.remote
 
 import android.content.Context
+import android.content.SharedPreferences
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.util.ZLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.Executors
 
 /**
  * Control-app-side remote manager. Transport and arbitration are kept separate from Hook code.
@@ -18,13 +20,28 @@ class RemoteEnvironmentManager(context: Context) {
     }
 
     private val repository = RemoteServerRepository(context.applicationContext)
+    private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences("remote_environment", Context.MODE_PRIVATE)
+    private val stateLock = Any()
+    private val writeExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "ZVE-RemoteState").apply { isDaemon = true } }
     private var socket: RemoteWebSocketClient? = null
     private var activeConfig: RemoteServerConfig? = null
     private val latest = mutableMapOf<String, JSONObject>()
     private val remoteEnabled = mutableMapOf<String, Boolean>()
-    private var activeDeviceId: String? = null
+    private var activeDeviceId: String?
+        get() = prefs.getString("active_device_id", null)
+        set(value) { prefs.edit().putString("active_device_id", value).apply() }
     private var useRemote = false
     private val localSnapshots = mutableMapOf<String, JSONObject?>()
+    private var activeServerId: String?
+        get() = prefs.getString("active_server_id", null)
+        set(value) { prefs.edit().putString("active_server_id", value).apply() }
+
+    init {
+        useRemote = prefs.getBoolean("use_remote", false)
+        SUPPORTED_TYPES.forEach { type ->
+            remoteEnabled[type] = prefs.getBoolean("remote_enabled_$type", false)
+        }
+    }
 
     var listener: Listener? = null
 
@@ -42,20 +59,51 @@ class RemoteEnvironmentManager(context: Context) {
         listener?.onServersChanged(servers())
     }
 
+    fun activeServer(): RemoteServerConfig? = servers().firstOrNull { it.id == activeServerId }
+
+    fun editServer(id: String, name: String, url: String, token: String) {
+        val current = servers().firstOrNull { it.id == id } ?: return
+        repository.save(current.copy(name = name, url = url, token = token))
+        if (activeConfig?.id == id) {
+            val wasRemote = useRemote
+            disconnect(restoreLocal = false)
+            if (wasRemote) connect(repository.list().first { it.id == id })
+        }
+        listener?.onServersChanged(servers())
+    }
+
+    fun close() {
+        disconnect(restoreLocal = false)
+        writeExecutor.shutdownNow()
+    }
+
     fun deleteServer(id: String) {
         if (activeConfig?.id == id) disconnect()
+        if (activeServerId == id) activeServerId = null
         repository.delete(id)
         listener?.onServersChanged(servers())
     }
 
     fun connect(config: RemoteServerConfig) {
-        disconnect()
+        val savedDeviceId = activeDeviceId
+        disconnect(restoreLocal = false)
         activeConfig = config
+        activeServerId = config.id
+        activeDeviceId = savedDeviceId
+        persistState()
         socket = RemoteWebSocketClient(
             config = config,
             onAuth = { success, state ->
                 listener?.onState(state)
-                if (success) listener?.onDevicesChanged(emptyList())
+                if (success) {
+                    listener?.onDevicesChanged(emptyList())
+                    activeDeviceId?.let { deviceId -> selectDevice(deviceId) }
+                    if (useRemote) {
+                        remoteEnabled.filterValues { it }.keys.forEach { type ->
+                            latest[type]?.let { applyRemote(type, it) }
+                        }
+                    }
+                }
             },
             onDevices = { devices -> listener?.onDevicesChanged(devices) },
             onData = { deviceId, protocolType, data ->
@@ -70,10 +118,19 @@ class RemoteEnvironmentManager(context: Context) {
         ).also { it.connect() }
     }
 
-    fun disconnect() {
+    fun reconnectPersisted() {
+        if (!useRemote) return
+        val config = activeServer() ?: return
+        connect(config)
+        activeDeviceId?.let { deviceId ->
+            if (deviceId.isNotBlank()) selectDevice(deviceId)
+        }
+    }
+
+    fun disconnect(restoreLocal: Boolean = true) {
         socket?.disconnect()
         socket = null
-        restoreLocalTypes()
+        if (restoreLocal) restoreLocalTypes()
         activeConfig = null
         activeDeviceId = null
         latest.clear()
@@ -93,6 +150,7 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun setUseRemote(enabled: Boolean) {
         useRemote = enabled
+        persistState()
         if (!enabled) {
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
             restoreLocalTypes()
@@ -111,6 +169,7 @@ class RemoteEnvironmentManager(context: Context) {
     fun setTypeEnabled(type: String, enabled: Boolean) {
         require(type in SUPPORTED_TYPES)
         remoteEnabled[type] = enabled
+        persistState()
         if (useRemote && enabled) {
             latest[type]?.let { applyRemote(type, it) }
         } else if (!enabled) {
@@ -162,6 +221,15 @@ class RemoteEnvironmentManager(context: Context) {
     private fun restoreLocalTypes() {
         localSnapshots.keys.toList().forEach(::restoreLocalType)
         localSnapshots.clear()
+    }
+
+    private fun persistState() {
+        prefs.edit()
+            .putBoolean("use_remote", useRemote)
+            .apply {
+                remoteEnabled.forEach { (type, enabled) -> putBoolean("remote_enabled_$type", enabled) }
+            }
+            .apply()
     }
 }
 
