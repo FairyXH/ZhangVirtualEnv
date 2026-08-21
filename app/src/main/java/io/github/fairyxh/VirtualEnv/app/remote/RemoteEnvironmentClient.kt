@@ -261,6 +261,9 @@ class RemoteWebSocketClient(
         if (array == null) return emptyList()
         return (0 until array.length()).mapNotNull { index ->
             array.optJSONObject(index)?.let { json ->
+                // Consumer 只允许选择环境数据采集端；服务端 device_list
+                // 同时包含 role=client 的订阅客户端，必须在协议入口过滤。
+                if (json.optString("role", "") != "collector") return@mapNotNull null
                 RemoteDevice(
                     deviceId = json.optString("device_id"), name = json.optString("name"),
                     deviceType = json.optString("device_type"),

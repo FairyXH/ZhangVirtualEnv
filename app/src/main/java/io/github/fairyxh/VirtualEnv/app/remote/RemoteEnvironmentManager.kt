@@ -82,6 +82,8 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun currentState(): String = currentState
     fun currentDevices(): List<RemoteDevice> = currentDevices
+    fun isServerConnected(serverId: String): Boolean =
+        activeConfig?.id == serverId && socket?.isOpen() == true
     fun lastHeartbeatAt(): Long = lastHeartbeatAt
     fun lastDataAt(): Long = lastDataAt
 
@@ -132,7 +134,7 @@ class RemoteEnvironmentManager(context: Context) {
     private var reconnecting = false
 
     fun connect(config: RemoteServerConfig) {
-        if (activeConfig?.id == config.id && socket?.isActive() == true) {
+        if (activeConfig?.id == config.id && socket?.isOpen() == true) {
             socket?.restoreSubscription()
             emitState(currentState)
             return
@@ -167,6 +169,10 @@ class RemoteEnvironmentManager(context: Context) {
             },
             onDevices = { devices ->
                 currentDevices = devices
+                if (activeDeviceId != null && devices.none { it.deviceId == activeDeviceId }) {
+                    activeDeviceId = null
+                    listener?.onDeviceSelected(null)
+                }
                 listener?.onDevicesChanged(devices)
             },
             onData = { deviceId, protocolType, data ->

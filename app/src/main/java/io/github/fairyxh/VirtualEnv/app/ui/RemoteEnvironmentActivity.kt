@@ -194,8 +194,18 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                         BasicText(server.url, style = TextStyle(colors.textSecondary, 12.sp))
                         BasicText(if (server.id == manager.activeServer()?.id) state else server.lastStatus, style = TextStyle(colors.textSecondary, 12.sp))
                     }
-                    GlassPill(onClick = { manager.connect(server) }, backdrop = backdrop, selected = server.id == manager.activeServer()?.id) {
-                        BasicText(if (server.id == manager.activeServer()?.id) "已连接" else getString(R.string.remote_env_connect), Modifier.padding(horizontal = 10.dp), style = TextStyle(colors.textPrimary, 11.sp))
+                    val active = server.id == manager.activeServer()?.id
+                    val connected = manager.isServerConnected(server.id)
+                    GlassPill(onClick = { manager.connect(server) }, backdrop = backdrop, selected = connected) {
+                        BasicText(
+                            when {
+                                connected -> "已连接"
+                                active -> "重连"
+                                else -> getString(R.string.remote_env_connect)
+                            },
+                            Modifier.padding(horizontal = 10.dp),
+                            style = TextStyle(colors.textPrimary, 11.sp)
+                        )
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
