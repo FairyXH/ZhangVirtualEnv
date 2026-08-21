@@ -159,15 +159,9 @@ class RemoteWebSocketClient(
         selectedDeviceId?.let { subscribe(it, selectedTypes) }
     }
 
-    /** Re-sends the active subscription, equivalent to selecting the device again. */
+    /** Re-sends the active subscription, exactly matching a user device selection. */
     fun refreshSubscription() {
-        selectedDeviceId?.let { deviceId ->
-            send(JSONObject().apply {
-                put("type", "refresh")
-                put("device_id", deviceId)
-                put("data_types", JSONArray(selectedTypes.toList()))
-            })
-        }
+        selectedDeviceId?.let { subscribe(it, selectedTypes) }
     }
 
     private inner class Listener : WebSocketListener() {

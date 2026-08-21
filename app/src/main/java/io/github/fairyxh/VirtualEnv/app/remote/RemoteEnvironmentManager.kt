@@ -332,7 +332,7 @@ class RemoteEnvironmentManager(context: Context) {
         val device = currentDevices.firstOrNull { it.deviceId == selectedId }
         val observedAt = lastObservedDeviceDataAt[selectedId] ?: 0L
         val sourceDataAt = maxOf(device?.lastData ?: 0L, observedAt)
-        val staleTypes = remoteEnabled.filterValues { it }.keys.filter { type ->
+        val staleTypes = SUPPORTED_TYPES.filter { type ->
             val item = latest[type]
             val itemAt = item?.optLong("_timestamp", 0L) ?: 0L
             val protocolType = if (type == "ble") "bluetooth" else type
@@ -345,10 +345,11 @@ class RemoteEnvironmentManager(context: Context) {
             lastForcedRefreshAt = now
             ZLog.i(
                 "Remote",
-                "selected device data stale; force refresh device=$selectedId types=${staleTypes.joinToString(",")} " +
+                "selected device data stale; auto-select device=$selectedId types=${staleTypes.joinToString(",")} " +
                     "sourceAt=$sourceDataAt"
             )
-            forceRefreshSelectedDevice()
+            // Use the exact same manager path as tapping the selected device button.
+            selectDevice(selectedId)
         }
     }
 
