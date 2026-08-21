@@ -120,6 +120,8 @@ VirEnvDetector 与控制端内置环境测试分别从普通应用视角注册 G
 方位角、高度角、CN0、载波频率、历书和星历标志。虚拟定位启用时，系统层只分发单一的
 虚拟 GNSS 数据面，避免物理卫星与测试卫星混合。
 
+VirEnvDetector 的蓝牙测试会同时读取 BLE `ScanRecord` 的完整 RAW 广播字节、制造商数据、Service Data、Service UUID、RSSI、Tx Power 和时间戳，并在测试报告中保存原始证据。Profile 为设备配置 `raw`、`manufacturerData` 或 `serviceData` 字段时，检测器会按地址执行内容校验；未配置时保持原有地址与适配器身份校验。RAW 校验 PASS 只代表普通 App API 数据面一致，仍需结合模块 Hook 状态和 logcat 判断系统层链路。
+
 所有操作走本地测试 API（`127.0.0.1:18790`，需 `X-ZVE-Token` 鉴权），无需外部网络（地图 SDK、基站数据查询等可选能力除外）。控制端对所有 API 请求共享失败计数：连续 3 次无法连接后进入 30 秒冷却窗口，并在主页显示一次错误提示，避免后端未启动时多个轮询任务持续建立连接。后续可在保持 HTTP 兼容面的同时增加受控的本机 IPC 实现；Root 不会自动改变通信协议，默认不通过每次请求启动 `su` 子进程。
 
 GNSS 自动测试数据由独立 `GNSSSimulationEngine` 生成：它从当前统一虚拟位置和时间戳计算卫星轨道近似位置，再经过 WGS-84 LLA/ECEF、ENU 坐标变换得到方位角、高度角和距离，并据此计算可见性、历书/星历状态、UsedInFix 与平滑 C/N0。卫星目录固定包含 GPS、BeiDou、Galileo、GLONASS 和 QZSS 的合法 SVID 与合理测试频率；不会按刷新周期随机更换卫星、数量或几何数据。该模型用于 Android API 数据路径和应用兼容性测试，不模拟真实射频、GNSS 芯片输入、伪距或导航电文。
