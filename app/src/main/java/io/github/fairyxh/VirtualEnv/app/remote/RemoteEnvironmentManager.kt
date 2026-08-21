@@ -26,6 +26,14 @@ class RemoteEnvironmentManager(context: Context) {
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences("remote_environment", Context.MODE_PRIVATE)
     private val stateLock = Any()
     private val writeExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "ZVE-RemoteState").apply { isDaemon = true } }
+    private val applyExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-RemoteApply").apply { isDaemon = true }
+    }
+    private val applyWorkers = Executors.newFixedThreadPool(3) { r ->
+        Thread(r, "ZVE-RemoteApplyWorker").apply { isDaemon = true }
+    }
+    private val pendingRemote = mutableMapOf<String, JSONObject>()
+    private val applyingTypes = mutableSetOf<String>()
     private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-RemoteHeartbeat").apply { isDaemon = true }
     }
@@ -53,6 +61,7 @@ class RemoteEnvironmentManager(context: Context) {
         SUPPORTED_TYPES.forEach { type ->
             remoteEnabled[type] = prefs.getBoolean("remote_enabled_$type", false)
         }
+        applyExecutor.scheduleWithFixedDelay({ drainPendingRemote() }, 0L, 200L, TimeUnit.MILLISECONDS)
     }
 
     var listener: Listener? = null
@@ -104,6 +113,8 @@ class RemoteEnvironmentManager(context: Context) {
     fun close() {
         disconnect(restoreLocal = false)
         writeExecutor.shutdownNow()
+        applyExecutor.shutdownNow()
+        applyWorkers.shutdownNow()
         heartbeatExecutor.shutdownNow()
     }
 
@@ -137,7 +148,7 @@ class RemoteEnvironmentManager(context: Context) {
                     activeDeviceId?.let { deviceId -> selectDevice(deviceId) }
                     if (useRemote) {
                         remoteEnabled.filterValues { it }.keys.forEach { type ->
-                            latest[type]?.let { applyRemote(type, it) }
+                            latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
                         }
                     }
                 }
@@ -151,8 +162,8 @@ class RemoteEnvironmentManager(context: Context) {
                 val dataType = if (protocolType == "bluetooth") "ble" else protocolType
                 if (dataType !in SUPPORTED_TYPES) return@RemoteWebSocketClient
                 latest[dataType] = data
+                synchronized(stateLock) { pendingRemote[dataType] = JSONObject(data.toString()) }
                 lastDataAt = System.currentTimeMillis()
-                if (useRemote && remoteEnabled[dataType] == true) applyRemote(dataType, data)
                 listener?.onDataChanged(latest.toMap())
             },
             onState = { state -> emitState(state) },
@@ -208,7 +219,7 @@ class RemoteEnvironmentManager(context: Context) {
         listener?.onState("远程环境模拟启用")
         SUPPORTED_TYPES.forEach { type ->
             remoteEnabled[type] = true
-            latest[type]?.let { applyRemote(type, it) }
+            latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
         }
     }
 
@@ -217,7 +228,7 @@ class RemoteEnvironmentManager(context: Context) {
         remoteEnabled[type] = enabled
         persistState()
         if (useRemote && enabled) {
-            latest[type]?.let { applyRemote(type, it) }
+            latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
         } else if (!enabled) {
             restoreLocalType(type)
         }
@@ -226,7 +237,9 @@ class RemoteEnvironmentManager(context: Context) {
     fun setModuleEnabled(enabled: Boolean) {
         moduleEnabled = enabled
         if (enabled && useRemote) {
-            SUPPORTED_TYPES.forEach { type -> latest[type]?.let { applyRemote(type, it) } }
+            synchronized(stateLock) {
+                latest.forEach { (type, data) -> pendingRemote[type] = JSONObject(data.toString()) }
+            }
         }
     }
 
@@ -241,6 +254,32 @@ class RemoteEnvironmentManager(context: Context) {
     fun isTypeEnabled(type: String): Boolean = remoteEnabled[type] == true
     fun currentDeviceId(): String? = activeDeviceId
     fun currentData(): Map<String, JSONObject> = latest.toMap()
+
+    private fun drainPendingRemote() {
+        if (!useRemote || !moduleEnabled) return
+        val pending = synchronized(stateLock) {
+            pendingRemote.toMap().also { pendingRemote.clear() }
+        }
+        pending.forEach { (type, data) ->
+            if (remoteEnabled[type] != true) return@forEach
+            synchronized(stateLock) {
+                if (!applyingTypes.add(type)) {
+                    pendingRemote[type] = data
+                    return@forEach
+                }
+            }
+            applyWorkers.execute {
+                try {
+                    applyRemote(type, data)
+                } catch (t: Throwable) {
+                    synchronized(stateLock) { pendingRemote[type] = data }
+                    ZLog.w("Remote", "queued remote apply retry type=$type", t)
+                } finally {
+                    synchronized(stateLock) { applyingTypes.remove(type) }
+                }
+            }
+        }
+    }
 
     private fun applyRemote(type: String, data: JSONObject) {
         if (!moduleEnabled) {
@@ -266,11 +305,12 @@ class RemoteEnvironmentManager(context: Context) {
         try {
             val result = ApiClient.setEnvData(envType, normalized)
             if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                ZLog.w("Remote", "apply remote $type failed: ${result.message}")
+                throw IllegalStateException("apply remote $type failed: ${result.message}")
             }
             ApiClient.setEnvEnabled(envType, true)
         } catch (t: Throwable) {
             ZLog.w("Remote", "apply remote $type exception: ${t.message}")
+            throw t
         }
     }
 

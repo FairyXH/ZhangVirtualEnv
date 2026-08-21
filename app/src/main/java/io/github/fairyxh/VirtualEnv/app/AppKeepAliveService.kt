@@ -15,6 +15,7 @@ class AppKeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
         RootProcessProtector.start()
+        io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime.get(this).reconnectPersisted()
         val channelId = "zve_app_keepalive"
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
