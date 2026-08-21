@@ -18,6 +18,8 @@ object ApiClient {
 
     private const val TAG_SCOPE = "ApiClient"
     private const val BASE_URL = "http://127.0.0.1:18790"
+    private const val MAX_CONSECUTIVE_TRANSPORT_FAILURES = 3
+    private const val TRANSPORT_COOLDOWN_MS = 30_000L
 
     /** 访问令牌：由控制端 Application 从自身 APK assets/api_token.txt 初始化。 */
     @Volatile
@@ -423,7 +425,46 @@ object ApiClient {
         return request("POST", path, body?.toString())
     }
 
+    @Volatile
+    private var consecutiveTransportFailures = 0
+    @Volatile
+    private var transportCooldownUntilMs = 0L
+
+    /** 最近一次不可达状态，供 UI 只显示一次明确错误而不重复打扰用户。 */
+    @Volatile
+    private var transportFailureMessage = ""
+
+    fun consumeTransportFailureMessage(): String? {
+        val message = transportFailureMessage
+        if (message.isNotEmpty()) transportFailureMessage = ""
+        return message.ifEmpty { null }
+    }
+
+    private fun isTransportCooldownActive(): Boolean {
+        return System.currentTimeMillis() < transportCooldownUntilMs
+    }
+
+    private fun markTransportSuccess() {
+        consecutiveTransportFailures = 0
+        transportCooldownUntilMs = 0L
+        transportFailureMessage = ""
+    }
+
+    private fun markTransportFailure(t: Throwable): ApiResult {
+        val failures = (consecutiveTransportFailures + 1).coerceAtMost(MAX_CONSECUTIVE_TRANSPORT_FAILURES)
+        consecutiveTransportFailures = failures
+        if (failures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES) {
+            transportCooldownUntilMs = System.currentTimeMillis() + TRANSPORT_COOLDOWN_MS
+            transportFailureMessage = "后端连接失败，已停止继续重试。请确认模块已加载；30 秒后可自动恢复。"
+            ZLog.w(TAG_SCOPE, "transport failure limit reached; cooldown=${TRANSPORT_COOLDOWN_MS}ms")
+        }
+        return ApiResult.error("backend unreachable: ${t.javaClass.simpleName}: ${t.message}")
+    }
+
     private fun request(method: String, path: String, body: String?): ApiResult {
+        if (isTransportCooldownActive()) {
+            return ApiResult.error("backend unavailable (retry cooldown)")
+        }
         val conn = URL(BASE_URL + path).openConnection() as HttpURLConnection
         return try {
             conn.requestMethod = method
@@ -445,6 +486,7 @@ object ApiClient {
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(StandardCharsets.UTF_8)?.use(BufferedReader::readText) ?: ""
             val json = JSONObject(text)
+            markTransportSuccess()
             ApiResult(
                 code = json.optInt("code", ApiResult.CODE_ERROR),
                 message = json.optString("message", ""),
@@ -452,7 +494,7 @@ object ApiClient {
             )
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "$method $path failed: ${t.javaClass.name}: ${t.message}", t)
-            ApiResult.error("backend unreachable: ${t.javaClass.simpleName}: ${t.message}")
+            markTransportFailure(t)
         } finally {
             conn.disconnect()
         }

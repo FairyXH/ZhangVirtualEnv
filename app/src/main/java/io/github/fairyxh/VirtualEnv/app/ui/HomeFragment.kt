@@ -129,6 +129,8 @@ class HomeFragment : Fragment() {
     private var statusDotEnabled by mutableStateOf(false)
     private var statusText by mutableStateOf("")
     private var statusDetail by mutableStateOf("")
+    private var moduleVersion by mutableStateOf("")
+    private var deviceInfo by mutableStateOf("")
     private var moduleEnabled by mutableStateOf(true)
     /** Root 权限是否可用（su 可用）。 */
     private var rootAvailable by mutableStateOf(false)
@@ -242,6 +244,14 @@ class HomeFragment : Fragment() {
         collectRemark = prefs.getString(KEY_COLLECT_REMARK, "") ?: ""
         playbackStatus = getString(R.string.home_playback_idle)
         collectRecordingMode = false
+        moduleVersion = runCatching {
+            requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName.orEmpty()
+        }.getOrDefault("")
+        deviceInfo = listOfNotNull(
+            android.os.Build.MANUFACTURER.takeIf(String::isNotBlank),
+            android.os.Build.MODEL.takeIf(String::isNotBlank),
+            "Android ${android.os.Build.VERSION.RELEASE}".takeIf { android.os.Build.VERSION.RELEASE.isNotBlank() }
+        ).joinToString(" ")
 
         // Root 权限检测（su 可用性）
         Thread {
@@ -395,6 +405,13 @@ class HomeFragment : Fragment() {
                                 statusDetail,
                                 Modifier.padding(top = 8.dp),
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                            )
+                        }
+                        if (moduleVersion.isNotBlank() || deviceInfo.isNotBlank()) {
+                            BasicText(
+                                "模块版本：${moduleVersion.ifBlank { "未知" }}\n设备：${deviceInfo.ifBlank { "未知" }}",
+                                Modifier.padding(top = 8.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
                             )
                         }
                         // Root 权限状态（su 可用性）
@@ -1258,6 +1275,19 @@ class HomeFragment : Fragment() {
             }
             requireActivity().runOnUiThread {
                 statusDotEnabled = reachable
+                val infoData = info?.data
+                moduleVersion = infoData?.optString("moduleVersion", "") ?: ""
+                val device = infoData?.optJSONObject("device")
+                deviceInfo = device?.let {
+                    listOfNotNull(
+                        it.optString("manufacturer", "").takeIf(String::isNotBlank),
+                        it.optString("model", "").takeIf(String::isNotBlank),
+                        "Android ${it.optString("release", "")}".takeIf { value -> value != "Android " }
+                    ).joinToString(" ")
+                } ?: ""
+                ApiClient.consumeTransportFailureMessage()?.let { message ->
+                    detailDialog = "后端连接失败" to message
+                }
                 if (reachable) {
                     val masterOn = moduleResult?.data?.optBoolean("enabled", true) ?: true
                     moduleEnabled = masterOn
