@@ -52,11 +52,20 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         super.onCreate(savedInstanceState)
         manager = RemoteEnvironmentRuntime.get(this).also {
             it.listener = this
-            servers = it.servers()
             useRemote = it.isUseRemote()
-            it.activeServer()?.let { server -> loadServer(server) }
+            clearEditor()
+            it.refreshListener()
         }
         setContent { Screen() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::manager.isInitialized) {
+            manager.listener = this
+            useRemote = manager.isUseRemote()
+            manager.refreshListener()
+        }
     }
 
     override fun onDestroy() {

@@ -25,6 +25,8 @@ class RemoteEnvironmentManager(context: Context) {
     private val writeExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "ZVE-RemoteState").apply { isDaemon = true } }
     private var socket: RemoteWebSocketClient? = null
     private var activeConfig: RemoteServerConfig? = null
+    private var currentState = "未连接"
+    private var currentDevices = emptyList<RemoteDevice>()
     private val latest = mutableMapOf<String, JSONObject>()
     private val remoteEnabled = mutableMapOf<String, Boolean>()
     private var activeDeviceId: String?
@@ -53,6 +55,19 @@ class RemoteEnvironmentManager(context: Context) {
     }
 
     fun servers(): List<RemoteServerConfig> = repository.list()
+
+    fun currentState(): String = currentState
+    fun currentDevices(): List<RemoteDevice> = currentDevices
+
+    /** Replays the process-wide remote session to a newly bound UI listener. */
+    fun refreshListener() {
+        listener?.let { currentListener ->
+            currentListener.onServersChanged(servers())
+            currentListener.onState(currentState)
+            currentListener.onDevicesChanged(currentDevices)
+            currentListener.onDataChanged(latest.toMap())
+        }
+    }
 
     fun saveServer(name: String, url: String, token: String, id: String? = null) {
         repository.save(RemoteServerConfig(id ?: UUID.randomUUID().toString(), name, url, token, true, "未连接"))
@@ -91,12 +106,14 @@ class RemoteEnvironmentManager(context: Context) {
         activeServerId = config.id
         activeDeviceId = savedDeviceId
         persistState()
+        emitState("连接中")
         socket = RemoteWebSocketClient(
             config = config,
             onAuth = { success, state ->
-                listener?.onState(state)
+                emitState(state)
                 if (success) {
-                    listener?.onDevicesChanged(emptyList())
+                    currentDevices = emptyList()
+                    listener?.onDevicesChanged(currentDevices)
                     activeDeviceId?.let { deviceId -> selectDevice(deviceId) }
                     if (useRemote) {
                         remoteEnabled.filterValues { it }.keys.forEach { type ->
@@ -105,7 +122,10 @@ class RemoteEnvironmentManager(context: Context) {
                     }
                 }
             },
-            onDevices = { devices -> listener?.onDevicesChanged(devices) },
+            onDevices = { devices ->
+                currentDevices = devices
+                listener?.onDevicesChanged(devices)
+            },
             onData = { deviceId, protocolType, data ->
                 if (deviceId != activeDeviceId) return@RemoteWebSocketClient
                 val dataType = if (protocolType == "bluetooth") "ble" else protocolType
@@ -114,7 +134,7 @@ class RemoteEnvironmentManager(context: Context) {
                 if (useRemote && remoteEnabled[dataType] == true) applyRemote(dataType, data)
                 listener?.onDataChanged(latest.toMap())
             },
-            onState = { state -> listener?.onState(state) },
+            onState = { state -> emitState(state) },
         ).also { it.connect() }
     }
 
@@ -133,7 +153,10 @@ class RemoteEnvironmentManager(context: Context) {
         if (restoreLocal) restoreLocalTypes()
         activeConfig = null
         activeDeviceId = null
+        currentDevices = emptyList()
         latest.clear()
+        emitState("未连接")
+        listener?.onDevicesChanged(currentDevices)
         listener?.onDataChanged(emptyMap())
     }
 
@@ -230,6 +253,11 @@ class RemoteEnvironmentManager(context: Context) {
                 remoteEnabled.forEach { (type, enabled) -> putBoolean("remote_enabled_$type", enabled) }
             }
             .apply()
+    }
+
+    private fun emitState(value: String) {
+        currentState = value
+        listener?.onState(value)
     }
 }
 
