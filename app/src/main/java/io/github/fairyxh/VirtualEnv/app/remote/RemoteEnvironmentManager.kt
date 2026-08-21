@@ -14,6 +14,7 @@ import java.util.UUID
 class RemoteEnvironmentManager(context: Context) {
     companion object {
         val SUPPORTED_TYPES = linkedSetOf("ble", "wifi", "cell")
+        private val PROTOCOL_TYPES = setOf("bluetooth", "wifi", "cell")
     }
 
     private val repository = RemoteServerRepository(context.applicationContext)
@@ -57,8 +58,10 @@ class RemoteEnvironmentManager(context: Context) {
                 if (success) listener?.onDevicesChanged(emptyList())
             },
             onDevices = { devices -> listener?.onDevicesChanged(devices) },
-            onData = { deviceId, dataType, data ->
+            onData = { deviceId, protocolType, data ->
                 if (deviceId != activeDeviceId) return@RemoteWebSocketClient
+                val dataType = if (protocolType == "bluetooth") "ble" else protocolType
+                if (dataType !in SUPPORTED_TYPES) return@RemoteWebSocketClient
                 latest[dataType] = data
                 if (useRemote && remoteEnabled[dataType] == true) applyRemote(dataType, data)
                 listener?.onDataChanged(latest.toMap())
@@ -80,11 +83,11 @@ class RemoteEnvironmentManager(context: Context) {
     fun selectDevice(deviceId: String) {
         val old = activeDeviceId
         if (old != null && old != deviceId) {
-            socket?.unsubscribe(old, SUPPORTED_TYPES)
+            socket?.unsubscribe(old, PROTOCOL_TYPES)
             latest.clear()
         }
         activeDeviceId = deviceId
-        socket?.subscribe(deviceId, SUPPORTED_TYPES)
+        socket?.subscribe(deviceId, PROTOCOL_TYPES)
         listener?.onDataChanged(latest.toMap())
     }
 
