@@ -3,6 +3,7 @@ package io.github.fairyxh.VirtualEnv.app.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +80,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
 
     @Composable
     private fun Screen() {
+        BackHandler { finish() }
         LaunchedEffect(Unit) {
             while (true) {
                 nowMs = System.currentTimeMillis()
@@ -92,7 +94,29 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                BasicText(getString(R.string.remote_env_title), style = TextStyle(colors.textPrimary, 32.sp, FontWeight.Bold))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlassPill(
+                        onClick = { finish() },
+                        backdrop = backdrop,
+                        selected = false,
+                        containerColor = colors.bgTertiary.copy(alpha = 0.4f),
+                        height = 36.dp
+                    ) {
+                        BasicText(
+                            "← 返回",
+                            Modifier.padding(horizontal = 16.dp),
+                            style = TextStyle(colors.textPrimary, 13.sp)
+                        )
+                    }
+                    BasicText(
+                        getString(R.string.remote_env_title),
+                        Modifier.padding(start = 12.dp).weight(1f),
+                        style = TextStyle(colors.textPrimary, 30.sp, FontWeight.Bold)
+                    )
+                }
                 BasicText(state, style = TextStyle(colors.textSecondary, 13.sp))
                 BasicText(
                     "服务端心跳：${formatAge(manager.lastHeartbeatAt(), nowMs)} · 最近数据：${formatAge(manager.lastDataAt(), nowMs)}",
