@@ -135,6 +135,9 @@ class EnvFragment : Fragment() {
                     getString(R.string.env_subtitle),
                     style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                 )
+                EnvRemoteCard(backdrop = backdrop) {
+                    startActivity(android.content.Intent(requireContext(), RemoteEnvironmentActivity::class.java))
+                }
                 items.forEach { item ->
                     EnvCard(
                         item = item,
@@ -148,6 +151,32 @@ class EnvFragment : Fragment() {
                 }
                 } // Column
             } // else
+        }
+    }
+
+    @Composable
+    private fun EnvRemoteCard(
+        backdrop: com.kyant.backdrop.Backdrop,
+        onClick: () -> Unit
+    ) {
+        val colors = glassColors()
+        GlassCard(
+            backdrop = backdrop,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onClick,
+            containerColor = colors.accent.copy(alpha = 0.18f)
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                BasicText(
+                    getString(R.string.env_remote_title),
+                    style = TextStyle(color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                )
+                BasicText(
+                    getString(R.string.env_remote_desc),
+                    Modifier.padding(top = 3.dp),
+                    style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                )
+            }
         }
     }
 

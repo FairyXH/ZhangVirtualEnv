@@ -83,6 +83,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".app.ui.RemoteEnvironmentActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".app.ui.RecordingDetailActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />

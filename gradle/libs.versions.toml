@@ -10,6 +10,7 @@ compose = "1.11.0"
 kyant-shapes = "1.2.0"
 backdrop = "2.0.0"
 ui-graphics = "1.11.4"
+okhttp = "4.12.0"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "xposed-api" }
@@ -23,6 +24,7 @@ compose-ui-graphics = { group = "org.jetbrains.compose.ui", name = "ui-graphics"
 kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kyant-shapes" }
 kyant-backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "ui-graphics" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 
 [plugins]
 agp-app = { id = "com.android.application", version.ref = "agp" }

@@ -123,4 +123,5 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.kyant.backdrop)
     implementation(libs.kyant.shapes)
+    implementation(libs.okhttp)
 }
