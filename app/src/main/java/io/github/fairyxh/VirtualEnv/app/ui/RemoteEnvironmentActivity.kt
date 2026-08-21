@@ -97,6 +97,14 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                BasicText(
+                    "远程环境测试",
+                    style = TextStyle(colors.textPrimary, 30.sp, FontWeight.Bold)
+                )
+                BasicText(
+                    "连接通用环境数据服务，选择采集端后再启用远程测试数据。",
+                    style = TextStyle(colors.textSecondary, 13.sp)
+                )
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -206,6 +214,11 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                             Modifier.padding(horizontal = 10.dp),
                             style = TextStyle(colors.textPrimary, 11.sp)
                         )
+                    }
+                    if (connected) {
+                        GlassPill(onClick = { manager.disconnect() }, backdrop = backdrop, selected = false, containerColor = colors.danger.copy(alpha = .2f)) {
+                            BasicText("断开", Modifier.padding(horizontal = 10.dp), style = TextStyle(colors.danger, 11.sp))
+                        }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

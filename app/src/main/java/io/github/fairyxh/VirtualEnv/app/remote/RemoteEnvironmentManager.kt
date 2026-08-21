@@ -203,7 +203,8 @@ class RemoteEnvironmentManager(context: Context) {
         socket = null
         heartbeatTask?.cancel(false)
         heartbeatTask = null
-        if (restoreLocal) restoreLocalTypes()
+        if (restoreLocal) restoreLocalTypes() else localSnapshots.clear()
+        if (useRemote) prepareRemoteTypesWithoutData()
         activeConfig = null
         activeDeviceId = null
         currentDevices = emptyList()
@@ -231,7 +232,7 @@ class RemoteEnvironmentManager(context: Context) {
         persistState()
         if (!enabled) {
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
-            restoreLocalTypes()
+            disconnect()
             listener?.onState("本地环境模拟正常工作")
             return
         }
@@ -239,6 +240,9 @@ class RemoteEnvironmentManager(context: Context) {
         SUPPORTED_TYPES.forEach { type ->
             remoteEnabled[type] = true
             latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
+        }
+        if (socket?.isOpen() != true) {
+            prepareRemoteTypesWithoutData()
         }
     }
 
@@ -297,6 +301,25 @@ class RemoteEnvironmentManager(context: Context) {
                 } finally {
                     synchronized(stateLock) { applyingTypes.remove(type) }
                 }
+            }
+        }
+    }
+
+    private fun prepareRemoteTypesWithoutData() {
+        writeExecutor.execute {
+            SUPPORTED_TYPES.forEach { type ->
+                val empty = when (type) {
+                    "ble" -> JSONObject().put("devices", JSONArray())
+                    "wifi" -> JSONObject().put("networks", JSONArray())
+                    "cell" -> JSONObject().put("entries", JSONArray())
+                    else -> JSONObject()
+                }
+                runCatching {
+                    val result = ApiClient.setEnvData(type, empty)
+                    if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                        ApiClient.setEnvEnabled(type, true)
+                    }
+                }.onFailure { ZLog.w("Remote", "clear disconnected remote type failed: $type", it) }
             }
         }
     }

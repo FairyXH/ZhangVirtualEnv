@@ -425,43 +425,56 @@ object ApiClient {
         return request("POST", path, body?.toString())
     }
 
-    @Volatile
+    private val transportStateLock = Any()
     private var consecutiveTransportFailures = 0
-    @Volatile
     private var transportCooldownUntilMs = 0L
 
     /** 最近一次不可达状态，供 UI 只显示一次明确错误而不重复打扰用户。 */
-    @Volatile
     private var transportFailureMessage = ""
 
     fun consumeTransportFailureMessage(): String? {
-        val message = transportFailureMessage
-        if (message.isNotEmpty()) transportFailureMessage = ""
+        val message = synchronized(transportStateLock) {
+            transportFailureMessage.also { transportFailureMessage = "" }
+        }
         return message.ifEmpty { null }
     }
 
     private fun isTransportCooldownActive(): Boolean {
-        return System.currentTimeMillis() < transportCooldownUntilMs
+        return synchronized(transportStateLock) {
+            System.currentTimeMillis() < transportCooldownUntilMs
+        }
     }
 
     private fun markTransportSuccess() {
-        consecutiveTransportFailures = 0
-        transportCooldownUntilMs = 0L
-        transportFailureMessage = ""
+        synchronized(transportStateLock) {
+            consecutiveTransportFailures = 0
+            transportCooldownUntilMs = 0L
+            transportFailureMessage = ""
+        }
     }
 
     private fun markTransportFailure(t: Throwable): ApiResult {
-        val failures = (consecutiveTransportFailures + 1).coerceAtMost(MAX_CONSECUTIVE_TRANSPORT_FAILURES)
-        consecutiveTransportFailures = failures
-        if (failures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES) {
-            transportCooldownUntilMs = System.currentTimeMillis() + TRANSPORT_COOLDOWN_MS
-            transportFailureMessage = "后端连接失败，已停止继续重试。请确认模块已加载；30 秒后可自动恢复。"
+        var reachedLimit = false
+        synchronized(transportStateLock) {
+            consecutiveTransportFailures =
+                (consecutiveTransportFailures + 1).coerceAtMost(MAX_CONSECUTIVE_TRANSPORT_FAILURES)
+            if (consecutiveTransportFailures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES &&
+                System.currentTimeMillis() >= transportCooldownUntilMs
+            ) {
+                transportCooldownUntilMs = System.currentTimeMillis() + TRANSPORT_COOLDOWN_MS
+                transportFailureMessage = "后端连接失败，已停止继续重试。请确认模块已加载；30 秒后可自动恢复。"
+                reachedLimit = true
+            }
+        }
+        if (reachedLimit) {
             ZLog.w(TAG_SCOPE, "transport failure limit reached; cooldown=${TRANSPORT_COOLDOWN_MS}ms")
         }
         return ApiResult.error("backend unreachable: ${t.javaClass.simpleName}: ${t.message}")
     }
 
     private fun request(method: String, path: String, body: String?): ApiResult {
+        // All callers share this gate. This check is deliberately before opening a
+        // connection so parallel polling jobs stop creating sockets together.
         if (isTransportCooldownActive()) {
             return ApiResult.error("backend unavailable (retry cooldown)")
         }
