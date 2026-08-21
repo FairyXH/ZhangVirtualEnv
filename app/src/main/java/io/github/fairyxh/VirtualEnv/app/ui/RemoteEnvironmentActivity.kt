@@ -13,7 +13,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +45,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private var data by mutableStateOf(emptyMap<String, JSONObject>())
     private var state by mutableStateOf("未连接")
     private var useRemote by mutableStateOf(false)
+    private var nowMs by mutableLongStateOf(System.currentTimeMillis())
     private var editingId by mutableStateOf<String?>(null)
     private var name by mutableStateOf("")
     private var url by mutableStateOf("")
@@ -75,6 +78,13 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
 
     @Composable
     private fun Screen() {
+        LaunchedEffect(Unit) {
+            while (true) {
+                nowMs = System.currentTimeMillis()
+                manager.refreshListener()
+                kotlinx.coroutines.delay(1000L)
+            }
+        }
         GlassBackdropHost(Modifier.fillMaxSize()) { backdrop ->
             val colors = glassColors()
             Column(
@@ -83,6 +93,10 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             ) {
                 BasicText(getString(R.string.remote_env_title), style = TextStyle(colors.textPrimary, 32.sp, FontWeight.Bold))
                 BasicText(state, style = TextStyle(colors.textSecondary, 13.sp))
+                BasicText(
+                    "服务端心跳：${formatAge(manager.lastHeartbeatAt(), nowMs)} · 最近数据：${formatAge(manager.lastDataAt(), nowMs)}",
+                    style = TextStyle(colors.textTertiary, 11.sp)
+                )
 
                 GlassCard(backdrop = backdrop, modifier = Modifier.fillMaxWidth(), containerColor = colors.bgSecondary.copy(alpha = .45f), contentPadding = 16.dp) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -174,7 +188,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                     BasicText(device.name.ifBlank { device.deviceId }, style = TextStyle(colors.textPrimary, 16.sp, FontWeight.Medium))
                     BasicText(device.deviceId, style = TextStyle(colors.textSecondary, 11.sp))
                     BasicText("${device.deviceType} · ${device.capabilities.joinToString(" / ")} · ${if (device.online) "在线" else "离线"}", style = TextStyle(colors.textSecondary, 12.sp))
-                    BasicText("最后数据：${device.lastData ?: 0}", style = TextStyle(colors.textTertiary, 11.sp))
+                    BasicText("最后数据：${device.lastData?.let { formatAge(it, nowMs) } ?: "无"}", style = TextStyle(colors.textTertiary, 11.sp))
                 }
                 GlassPill(onClick = { manager.selectDevice(device.deviceId) }, backdrop = backdrop, selected = selected) {
                     BasicText(if (selected) getString(R.string.remote_env_selected) else getString(R.string.remote_env_select), Modifier.padding(horizontal = 10.dp), style = TextStyle(colors.textPrimary, 11.sp))
@@ -212,7 +226,21 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             else -> emptyList()
         }
         if (lines.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textTertiary, 12.sp))
+        BasicText(
+            "更新时间：${item.optLong("_timestamp", 0L).takeIf { it > 0L }?.let { formatAge(it, nowMs) } ?: "未知"} · 序号：${item.optLong("_sequence", 0L)}",
+            style = TextStyle(colors.textTertiary, 11.sp)
+        )
         lines.take(8).forEach { line -> BasicText(line, style = TextStyle(colors.textSecondary, 12.sp)) }
+    }
+
+    private fun formatAge(timestamp: Long, now: Long): String {
+        if (timestamp <= 0L) return "无"
+        val seconds = ((now - timestamp).coerceAtLeast(0L)) / 1000L
+        return when {
+            seconds < 2L -> "刚刚"
+            seconds < 60L -> "${seconds}秒前"
+            else -> "${seconds / 60L}分钟前"
+        }
     }
 
     private fun arrayLines(array: JSONArray?, vararg keys: String): List<String> {

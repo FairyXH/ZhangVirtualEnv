@@ -138,6 +138,10 @@ class RemoteWebSocketClient(
         })
     }
 
+    fun sendPing() {
+        send(JSONObject().apply { put("type", "ping") })
+    }
+
     private fun send(json: JSONObject) {
         socket?.send(json.toString())
     }
@@ -166,11 +170,17 @@ class RemoteWebSocketClient(
                         if (success) restoreSubscription()
                     }
                     "device_list" -> onDevices(parseDevices(message.optJSONArray("devices")))
-                    "environment_data" -> onData(
-                        message.optString("device_id"),
-                        message.optString("data_type"),
-                        message.optJSONObject("data") ?: JSONObject()
-                    )
+                    "environment_data" -> {
+                        val payload = JSONObject(message.optJSONObject("data")?.toString() ?: "{}")
+                        payload.put("_timestamp", message.optLong("timestamp", 0L))
+                        payload.put("_sequence", message.optLong("sequence", 0L))
+                        onData(
+                            message.optString("device_id"),
+                            message.optString("data_type"),
+                            payload
+                        )
+                    }
+                    "pong" -> onState("已连接 · 心跳正常")
                     "error" -> onState(message.optString("message", "服务器错误"))
                 }
             }.onFailure { error -> ZLog.w("Remote", "parse websocket message failed: ${error.message}") }

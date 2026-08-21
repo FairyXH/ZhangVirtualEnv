@@ -8,6 +8,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Control-app-side remote manager. Transport and arbitration are kept separate from Hook code.
@@ -23,10 +26,16 @@ class RemoteEnvironmentManager(context: Context) {
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences("remote_environment", Context.MODE_PRIVATE)
     private val stateLock = Any()
     private val writeExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "ZVE-RemoteState").apply { isDaemon = true } }
+    private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "ZVE-RemoteHeartbeat").apply { isDaemon = true }
+    }
+    private var heartbeatTask: ScheduledFuture<*>? = null
     private var socket: RemoteWebSocketClient? = null
     private var activeConfig: RemoteServerConfig? = null
     private var currentState = "未连接"
     private var currentDevices = emptyList<RemoteDevice>()
+    private var lastHeartbeatAt = 0L
+    private var lastDataAt = 0L
     private val latest = mutableMapOf<String, JSONObject>()
     private val remoteEnabled = mutableMapOf<String, Boolean>()
     private var activeDeviceId: String?
@@ -58,6 +67,8 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun currentState(): String = currentState
     fun currentDevices(): List<RemoteDevice> = currentDevices
+    fun lastHeartbeatAt(): Long = lastHeartbeatAt
+    fun lastDataAt(): Long = lastDataAt
 
     /** Replays the process-wide remote session to a newly bound UI listener. */
     fun refreshListener() {
@@ -90,6 +101,7 @@ class RemoteEnvironmentManager(context: Context) {
     fun close() {
         disconnect(restoreLocal = false)
         writeExecutor.shutdownNow()
+        heartbeatExecutor.shutdownNow()
     }
 
     fun deleteServer(id: String) {
@@ -107,11 +119,16 @@ class RemoteEnvironmentManager(context: Context) {
         activeDeviceId = savedDeviceId
         persistState()
         emitState("连接中")
+        heartbeatTask?.cancel(false)
+        heartbeatTask = heartbeatExecutor.scheduleAtFixedRate({
+            socket?.sendPing()
+        }, 0L, 5L, TimeUnit.SECONDS)
         socket = RemoteWebSocketClient(
             config = config,
             onAuth = { success, state ->
                 emitState(state)
                 if (success) {
+                    lastHeartbeatAt = System.currentTimeMillis()
                     currentDevices = emptyList()
                     listener?.onDevicesChanged(currentDevices)
                     activeDeviceId?.let { deviceId -> selectDevice(deviceId) }
@@ -131,6 +148,7 @@ class RemoteEnvironmentManager(context: Context) {
                 val dataType = if (protocolType == "bluetooth") "ble" else protocolType
                 if (dataType !in SUPPORTED_TYPES) return@RemoteWebSocketClient
                 latest[dataType] = data
+                lastDataAt = System.currentTimeMillis()
                 if (useRemote && remoteEnabled[dataType] == true) applyRemote(dataType, data)
                 listener?.onDataChanged(latest.toMap())
             },
@@ -150,6 +168,8 @@ class RemoteEnvironmentManager(context: Context) {
     fun disconnect(restoreLocal: Boolean = true) {
         socket?.disconnect()
         socket = null
+        heartbeatTask?.cancel(false)
+        heartbeatTask = null
         if (restoreLocal) restoreLocalTypes()
         activeConfig = null
         activeDeviceId = null
@@ -256,6 +276,9 @@ class RemoteEnvironmentManager(context: Context) {
     }
 
     private fun emitState(value: String) {
+        if (value == "已连接 · 心跳正常") {
+            lastHeartbeatAt = System.currentTimeMillis()
+        }
         currentState = value
         listener?.onState(value)
     }
