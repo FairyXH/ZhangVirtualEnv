@@ -58,16 +58,13 @@ object VirtualBleFactory {
             }
 
             val result = mutableListOf<Any>()
-            val seen = HashSet<String>()
-            // mode=classic 的设备只在经典发现中出现，不进 BLE 扫描结果；bonded 保持兼容全部加入
-            fun isBleVisible(d: JSONObject): Boolean {
-                val mode = d.optString("mode", "").lowercase()
-                return mode != "classic"
-            }
+            // Do not deduplicate by address: the server payload is an ordered
+            // test fixture and every devices[] entry must reach the BLE callback.
             fun addEntry(d: JSONObject, filterClassicOnly: Boolean) {
-                if (filterClassicOnly && !isBleVisible(d)) return
+                val mode = d.optString("mode", "").lowercase()
+                if (filterClassicOnly && mode == "classic") return
                 val address = d.optString("address", "").uppercase()
-                if (address.isBlank() || !seen.add(address)) return
+                if (address.isBlank()) return
                 try {
                     val device = getRemoteDevice.invoke(adapterInstance, address)
                     // RAW 广播数据优先（base64，采集回放）；缺失时按名称生成
@@ -108,6 +105,7 @@ object VirtualBleFactory {
             data.optJSONArray("bonded")?.let { arr ->
                 for (i in 0 until arr.length()) addEntry(arr.optJSONObject(i) ?: continue, false)
             }
+            logSink?.invoke(4, "ZVirtualEnv", "[Hook] BLE payload entries=${data.optJSONArray("devices")?.length() ?: 0} + bonded=${data.optJSONArray("bonded")?.length() ?: 0}, emitted=${result.size}")
             result
         } catch (t: Throwable) {
             logSink?.invoke(4, "ZVirtualEnv", "[Hook] build virtual ble results failed: ${t.message}")

@@ -385,14 +385,16 @@ class RemoteEnvironmentManager(context: Context) {
         }
         val envType = if (type == "ble") "ble" else type
         val normalized = when (type) {
-            "ble" -> JSONObject().apply {
-                put("devices", data.optJSONArray("devices") ?: JSONArray())
-                data.opt("adapterMac")?.let { put("adapterMac", it) }
-                data.opt("adapterName")?.let { put("adapterName", it) }
+            "ble" -> JSONObject(data.toString()).apply {
+                if (!has("devices")) put("devices", JSONArray())
             }
-            "wifi" -> JSONObject().apply { put("networks", data.optJSONArray("networks") ?: JSONArray()) }
-            "cell" -> JSONObject().apply { put("entries", data.optJSONArray("entries") ?: JSONArray()) }
-            else -> data
+            "wifi" -> JSONObject(data.toString()).apply {
+                if (!has("networks")) put("networks", JSONArray())
+            }
+            "cell" -> JSONObject(data.toString()).apply {
+                if (!has("entries")) put("entries", JSONArray())
+            }
+            else -> JSONObject(data.toString())
         }
         try {
             val result = ApiClient.setEnvData(envType, normalized)

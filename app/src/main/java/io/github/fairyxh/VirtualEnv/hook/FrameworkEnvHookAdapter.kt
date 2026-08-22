@@ -567,7 +567,9 @@ class FrameworkEnvHookAdapter(
                 ZLog.w(TAG_SCOPE, "build virtual wifi result failed", t)
             }
         }
-        return result
+        return result.also {
+            ZLog.d(TAG_SCOPE, "WiFi payload networks=${networks.length()} emitted=${it.size}")
+        }
     }
 
     /** 设置空的 InformationElement[]，避免 Oplus 统计 NPE。

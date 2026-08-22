@@ -272,8 +272,8 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private fun GuiData(type: String, item: JSONObject) {
         val colors = glassColors()
         val lines = when (type) {
-            "ble" -> arrayLines(item.optJSONArray("devices"), "name", "address", "rssi")
-            "wifi" -> arrayLines(item.optJSONArray("networks"), "ssid", "bssid", "rssi", "frequency")
+            "ble" -> arrayObjectLines(item.optJSONArray("devices"))
+            "wifi" -> arrayObjectLines(item.optJSONArray("networks"))
             "cell" -> arrayObjectLines(item.optJSONArray("entries"))
             else -> emptyList()
         }
