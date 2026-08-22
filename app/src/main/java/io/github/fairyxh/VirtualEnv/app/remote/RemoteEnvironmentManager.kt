@@ -70,7 +70,6 @@ class RemoteEnvironmentManager(context: Context) {
         }
         applyExecutor.scheduleWithFixedDelay({ drainPendingRemote() }, 0L, 200L, TimeUnit.MILLISECONDS)
         freshnessTask = applyExecutor.scheduleWithFixedDelay({ refreshSelectedDeviceIfStale() }, 2L, 2L, TimeUnit.SECONDS)
-        writeExecutor.execute { publishRemoteSimulationMode() }
     }
 
     var listener: Listener? = null
@@ -255,13 +254,14 @@ class RemoteEnvironmentManager(context: Context) {
     fun setUseRemote(enabled: Boolean) {
         useRemote = enabled
         persistState()
-        publishRemoteSimulationMode()
         if (!enabled) {
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
             disconnect()
+            publishRemoteSimulationMode()
             listener?.onState("本地环境模拟正常工作")
             return
         }
+        publishRemoteSimulationMode()
         listener?.onState("远程环境模拟启用")
         SUPPORTED_TYPES.forEach { type ->
             remoteEnabled[type] = true

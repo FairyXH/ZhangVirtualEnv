@@ -297,7 +297,7 @@ object ApiClient {
             put("deviceId", deviceId)
             put("serverId", serverId)
         }
-        return post("/api/remote/status", body)
+        return post("/api/remote/status", body, suppressTransportFailure = true)
     }
 
     fun getRemoteSimulationStatus(): ApiResult = get("/api/remote/status")
@@ -434,8 +434,8 @@ object ApiClient {
         return request("GET", path, null)
     }
 
-    private fun post(path: String, body: JSONObject?): ApiResult {
-        return request("POST", path, body?.toString())
+    private fun post(path: String, body: JSONObject?, suppressTransportFailure: Boolean = false): ApiResult {
+        return request("POST", path, body?.toString(), suppressTransportFailure)
     }
 
     private val transportStateLock = Any()
@@ -485,7 +485,12 @@ object ApiClient {
         return ApiResult.error("backend unreachable: ${t.javaClass.simpleName}: ${t.message}")
     }
 
-    private fun request(method: String, path: String, body: String?): ApiResult {
+    private fun request(
+        method: String,
+        path: String,
+        body: String?,
+        suppressTransportFailure: Boolean = false,
+    ): ApiResult {
         // All callers share this gate. This check is deliberately before opening a
         // connection so parallel polling jobs stop creating sockets together.
         if (isTransportCooldownActive()) {
@@ -520,7 +525,11 @@ object ApiClient {
             )
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "$method $path failed: ${t.javaClass.name}: ${t.message}", t)
-            markTransportFailure(t)
+            if (suppressTransportFailure) {
+                ApiResult.error("backend auxiliary request failed: ${t.javaClass.simpleName}: ${t.message}")
+            } else {
+                markTransportFailure(t)
+            }
         } finally {
             conn.disconnect()
         }
