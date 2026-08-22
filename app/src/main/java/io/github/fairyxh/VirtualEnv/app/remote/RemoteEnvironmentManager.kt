@@ -274,7 +274,11 @@ class RemoteEnvironmentManager(context: Context) {
 
     private fun publishRemoteSimulationMode() {
         runCatching {
-            ApiClient.setRemoteSimulation(useRemote, activeDeviceId ?: "", activeServerId ?: "")
+            ApiClient.setRemoteSimulation(
+                useRemote && !activeDeviceId.isNullOrBlank() && socket?.isOpen() == true,
+                activeDeviceId ?: "",
+                activeServerId ?: "",
+            )
         }.onFailure { ZLog.w("Remote", "publish remote mode failed: ${it.message}") }
     }
 
