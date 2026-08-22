@@ -261,13 +261,6 @@ object ApiClient {
     /** 读取 Hook 层观测快照（采集挂起期间含实时真实基站）。 */
     fun getHookObserve(): JSONObject? = get("/api/debug/observe/snapshot").data
 
-    fun postRemoteDiagnostic(deviceId: String, type: String, frame: JSONObject): ApiResult {
-        return post("/api/debug/remote/ingest", JSONObject().apply {
-            put("deviceId", deviceId)
-            put("type", type)
-            put("frame", frame)
-        })
-    }
 
     /** 临时停用全部虚拟环境（采集真实环境前调用，可嵌套）。 */
     fun suspendEnv(): ApiResult = post("/api/env/suspend", JSONObject())
