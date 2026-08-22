@@ -106,11 +106,26 @@ class Backend private constructor(private val dataDir: File) {
     @Volatile
     private var testReport: org.json.JSONObject? = null
 
+    /** 最近一次由模块 App Consumer 收到的远程帧，仅供检测器诊断与报告。 */
+    private val remoteDiagnostics = java.util.concurrent.ConcurrentHashMap<String, org.json.JSONObject>()
+
     fun setTestReport(report: org.json.JSONObject) {
         testReport = report
     }
 
     fun getTestReport(): org.json.JSONObject? = testReport
+
+    fun setRemoteDiagnostic(deviceId: String, type: String, frame: org.json.JSONObject) {
+        remoteDiagnostics[type] = org.json.JSONObject(frame.toString()).apply {
+            put("deviceId", deviceId)
+            put("type", type)
+            put("receivedAt", System.currentTimeMillis())
+        }
+    }
+
+    fun getRemoteDiagnostics(): org.json.JSONObject = org.json.JSONObject().apply {
+        remoteDiagnostics.forEach { (type, frame) -> put(type, org.json.JSONObject(frame.toString())) }
+    }
 
     // ---------- Hook 层真实数据观测（采集检验） ----------
 

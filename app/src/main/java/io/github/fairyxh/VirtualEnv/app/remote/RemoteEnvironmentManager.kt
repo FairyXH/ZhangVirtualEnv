@@ -195,6 +195,10 @@ class RemoteEnvironmentManager(context: Context) {
                 synchronized(stateLock) { pendingRemote[dataType] = JSONObject(data.toString()) }
                 lastDataAt = System.currentTimeMillis()
                 listener?.onDataChanged(latest.toMap())
+                writeExecutor.execute {
+                    runCatching { ApiClient.postRemoteDiagnostic(deviceId, dataType, data) }
+                        .onFailure { ZLog.w("Remote", "diagnostic ingest failed type=$dataType", it) }
+                }
             },
             onState = { state -> emitState(state) },
         ).also { it.connect() }

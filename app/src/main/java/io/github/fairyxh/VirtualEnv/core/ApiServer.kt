@@ -248,6 +248,8 @@ class ApiServer(
                 path == "/api/debug/observe/start" && method == "POST" -> observeStart()
                 path == "/api/debug/observe/end" && method == "POST" -> observeEnd()
                 path == "/api/debug/observe/snapshot" && method == "GET" -> observeSnapshot()
+                path == "/api/debug/remote/snapshot" && method == "GET" -> remoteDiagnosticSnapshot()
+                path == "/api/debug/remote/ingest" && method == "POST" -> remoteDiagnosticIngest(body)
                 path == "/api/test/report" && method == "POST" -> testReportSet(body)
                 path == "/api/test/report" && method == "GET" -> testReportGet()
                 path == "/api/recording/start" && method == "POST" -> recordingStart(body)
@@ -640,6 +642,20 @@ class ApiServer(
     /** 读取 Hook 层观测快照（挂起期间自动补拉真实基站）。 */
     private fun observeSnapshot(): ApiResult {
         return ApiResult.ok("ok", backend.hookObserveSnapshotJson())
+    }
+
+    private fun remoteDiagnosticSnapshot(): ApiResult {
+        return ApiResult.ok("ok", backend.getRemoteDiagnostics())
+    }
+
+    private fun remoteDiagnosticIngest(body: String): ApiResult {
+        val json = try { JSONObject(body) } catch (_: Throwable) { return ApiResult.error("bad remote diagnostic json") }
+        val deviceId = json.optString("deviceId", "")
+        val type = json.optString("type", "")
+        val frame = json.optJSONObject("frame")
+        if (deviceId.isBlank() || type.isBlank() || frame == null) return ApiResult.error("remote diagnostic fields required")
+        backend.setRemoteDiagnostic(deviceId, type, frame)
+        return ApiResult.ok("ok")
     }
 
     /** App 环境实时测试上报报告。 */
