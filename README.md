@@ -97,6 +97,7 @@ adb reboot
 - **测试开关**：一键停用全部测试数据，系统恢复默认行为
 - **测试状态与调试报告**：导出测试适配状态与完整调试信息，用于问题定位
 - **远程 BLE RAW 广播**：远程环境的 Bluetooth 数据条目保留完整 `ScanRecord` 原始字节（Base64 `raw`，同时提供 `rawHex`/`rawLength`/`manufacturerData`/`serviceData`/`serviceUuids`），系统 BLE 测试适配层按原始字节重建扫描记录；Manufacturer Data 单独不等价于完整 RAW。
+- **经典与双模蓝牙测试**：Bluetooth `devices[]` 同时支持 `mode=ble`、`mode=classic` 和 `mode=dual`，经典/双模条目可携带 `classOfDevice`、`classicRssi`；`mode=classic` 不伪造 BLE RAW，避免把 BR/EDR 发现数据误当作 BLE 广播。
 
 ### 远程测试环境连接
 
@@ -112,6 +113,8 @@ adb reboot
 - 离开连接管理页面不会停止已经建立的远程测试会话；
 - 再次进入页面时会恢复当前服务器、设备列表和最近测试数据；
 - 服务器编辑器默认保持新建状态，只有主动点击“编辑”才会载入服务器配置。
+- 独立检测器的远程上传测试默认持续运行，直到用户主动停止；每轮按 Bluetooth、WiFi、Cell 分别递增序号，并以约 2.5–4 秒的随机间隔上传新的测试帧，页面同步显示最近上传数量、序号和 ACK 年龄，便于观察数据流是否持续跳变。
+- Cell 远程测试优先以检测器当前 `TelephonyManager` 实读条目形成匹配快照；服务端 ACK 只证明通用数据已接收，不替代本机 API 读数验证。
 
 远程核心由进程级常驻协调器维护：WebSocket 接收、心跳、最新数据快照和 Backend 写入队列不依赖 Activity 生命周期。每类远程数据只保留最新帧，由独立 Worker 持续写入本地测试 API，失败自动重试；页面只订阅展示状态。系统适配层（Hook）不联网、不解析远程协议，只从 Backend/EnvStateCache 读取已归一化快照，因此远程连接异常时保持 fail-open，测试环境可恢复为本地数据。
 
