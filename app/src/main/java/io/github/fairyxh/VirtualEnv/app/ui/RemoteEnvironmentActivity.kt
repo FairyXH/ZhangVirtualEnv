@@ -53,6 +53,13 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private var name by mutableStateOf("")
     private var url by mutableStateOf("")
     private var token by mutableStateOf("")
+    private companion object {
+        const val SERVER_PAGE_SIZE = 5
+        const val DEVICE_PAGE_SIZE = 5
+        const val DATA_PREVIEW_SIZE = 15
+    }
+    private var serverPage by mutableStateOf(0)
+    private var devicePage by mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -146,7 +153,12 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 }
 
                 GlassSection(title = getString(R.string.remote_env_servers), backdrop = backdrop) {
-                    servers.forEach { server -> ServerCard(server, backdrop) }
+                    val totalPages = maxOf(1, (servers.size + SERVER_PAGE_SIZE - 1) / SERVER_PAGE_SIZE)
+                    serverPage = serverPage.coerceIn(0, totalPages - 1)
+                    servers.drop(serverPage * SERVER_PAGE_SIZE).take(SERVER_PAGE_SIZE).forEach { server -> ServerCard(server, backdrop) }
+                    PaginationBar(serverPage, totalPages, "服务器", servers.size, backdrop) { delta ->
+                        serverPage = (serverPage + delta).coerceIn(0, totalPages - 1)
+                    }
                     GlassField(name, { name = it }, backdrop, placeholder = getString(R.string.remote_env_name_hint))
                     GlassField(url, { url = it }, backdrop, placeholder = getString(R.string.remote_env_url_hint))
                     GlassField(token, { token = it }, backdrop, placeholder = getString(R.string.remote_env_token_hint))
@@ -164,7 +176,12 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
 
                 GlassSection(title = getString(R.string.remote_env_devices), backdrop = backdrop) {
                     if (devices.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textSecondary, 13.sp))
-                    devices.forEach { device -> DeviceCard(device, backdrop) }
+                    val totalPages = maxOf(1, (devices.size + DEVICE_PAGE_SIZE - 1) / DEVICE_PAGE_SIZE)
+                    devicePage = devicePage.coerceIn(0, totalPages - 1)
+                    devices.drop(devicePage * DEVICE_PAGE_SIZE).take(DEVICE_PAGE_SIZE).forEach { device -> DeviceCard(device, backdrop) }
+                    PaginationBar(devicePage, totalPages, "设备", devices.size, backdrop) { delta ->
+                        devicePage = (devicePage + delta).coerceIn(0, totalPages - 1)
+                    }
                 }
 
                 GlassSection(title = getString(R.string.remote_env_current_data), backdrop = backdrop) {
@@ -185,6 +202,32 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     content()
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun PaginationBar(
+        page: Int,
+        totalPages: Int,
+        label: String,
+        totalItems: Int,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onMove: (Int) -> Unit
+    ) {
+        if (totalItems == 0) return
+        val colors = glassColors()
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            GlassPill(onClick = { onMove(-1) }, backdrop = backdrop, selected = false) {
+                BasicText("上一页", Modifier.padding(horizontal = 10.dp), style = TextStyle(colors.textSecondary, 11.sp))
+            }
+            BasicText(
+                "第 ${page + 1}/$totalPages 页 · 共 $totalItems 个$label",
+                Modifier.weight(1f).padding(horizontal = 8.dp),
+                style = TextStyle(colors.textTertiary, 11.sp)
+            )
+            GlassPill(onClick = { onMove(1) }, backdrop = backdrop, selected = false) {
+                BasicText("下一页", Modifier.padding(horizontal = 10.dp), style = TextStyle(colors.textSecondary, 11.sp))
             }
         }
     }
@@ -282,7 +325,10 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             "更新时间：${item.optLong("_timestamp", 0L).takeIf { it > 0L }?.let { formatAge(it, nowMs) } ?: "未知"} · 序号：${item.optLong("_sequence", 0L)}",
             style = TextStyle(colors.textTertiary, 11.sp)
         )
-        lines.forEach { line -> BasicText(line, style = TextStyle(colors.textSecondary, 12.sp)) }
+        lines.take(DATA_PREVIEW_SIZE).forEach { line -> BasicText(line, style = TextStyle(colors.textSecondary, 12.sp)) }
+        if (lines.size > DATA_PREVIEW_SIZE) {
+            BasicText("仅显示前 $DATA_PREVIEW_SIZE 条，共 ${lines.size} 条", style = TextStyle(colors.textTertiary, 11.sp))
+        }
     }
 
     private fun formatAge(timestamp: Long, now: Long): String {
