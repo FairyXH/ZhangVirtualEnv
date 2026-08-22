@@ -290,6 +290,18 @@ object ApiClient {
     /** 模块总开关状态。 */
     fun getModuleStatus(): ApiResult = get("/api/module/status")
 
+    /** 发布/读取当前 Consumer 远程环境模拟模式，供独立检测器选择判定路径。 */
+    fun setRemoteSimulation(enabled: Boolean, deviceId: String = "", serverId: String = ""): ApiResult {
+        val body = JSONObject().apply {
+            put("enabled", enabled)
+            put("deviceId", deviceId)
+            put("serverId", serverId)
+        }
+        return post("/api/remote/status", body)
+    }
+
+    fun getRemoteSimulationStatus(): ApiResult = get("/api/remote/status")
+
     /** 模块总开关切换（关闭 = 一键停用模块所有功能）。 */
     fun setModuleEnabled(enabled: Boolean): ApiResult {
         val body = JSONObject().apply { put("enabled", enabled) }

@@ -156,6 +156,14 @@ class Backend private constructor(private val dataDir: File) {
     /** 模块版本号（报告适配用）。 */
     @Volatile
     private var moduleVersion: String = ""
+    @Volatile
+    private var remoteSimulationEnabled: Boolean = false
+    @Volatile
+    private var remoteSimulationDeviceId: String = ""
+    @Volatile
+    private var remoteSimulationServerId: String = ""
+    @Volatile
+    private var remoteSimulationUpdatedAt: Long = 0L
 
     fun setModuleApkPath(path: String?) {
         moduleApkPath = path
@@ -209,6 +217,26 @@ class Backend private constructor(private val dataDir: File) {
         return org.json.JSONObject().apply {
             put("enabled", moduleEnabled)
         }
+    }
+
+    /** 当前远程环境模式及模块当前生效快照，供独立检测器按真实模式选择判定。 */
+    fun remoteSimulationStatusJson(): org.json.JSONObject = org.json.JSONObject().apply {
+        put("enabled", remoteSimulationEnabled && moduleEnabled)
+        put("configured", remoteSimulationEnabled)
+        put("deviceId", remoteSimulationDeviceId)
+        put("serverId", remoteSimulationServerId)
+        put("updatedAt", remoteSimulationUpdatedAt)
+        put("moduleEnabled", moduleEnabled)
+        put("location", locationStatusJson())
+        put("env", envStatusJson())
+    }
+
+    fun setRemoteSimulation(enabled: Boolean, deviceId: String = "", serverId: String = "") {
+        remoteSimulationEnabled = enabled
+        remoteSimulationDeviceId = deviceId
+        remoteSimulationServerId = serverId
+        remoteSimulationUpdatedAt = System.currentTimeMillis()
+        ZLog.i(TAG_SCOPE, "remote simulation mode=$enabled device=$deviceId server=$serverId")
     }
 
     // ---------- Hook 状态报告（各作用域 Hook 点状态） ----------

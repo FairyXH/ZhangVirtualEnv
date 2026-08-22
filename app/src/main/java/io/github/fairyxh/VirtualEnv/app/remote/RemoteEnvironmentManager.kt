@@ -70,6 +70,7 @@ class RemoteEnvironmentManager(context: Context) {
         }
         applyExecutor.scheduleWithFixedDelay({ drainPendingRemote() }, 0L, 200L, TimeUnit.MILLISECONDS)
         freshnessTask = applyExecutor.scheduleWithFixedDelay({ refreshSelectedDeviceIfStale() }, 2L, 2L, TimeUnit.SECONDS)
+        writeExecutor.execute { publishRemoteSimulationMode() }
     }
 
     var listener: Listener? = null
@@ -151,6 +152,7 @@ class RemoteEnvironmentManager(context: Context) {
         activeServerId = config.id
         activeDeviceId = savedDeviceId
         persistState()
+        publishRemoteSimulationMode()
         emitState("连接中")
         heartbeatTask?.cancel(false)
         heartbeatTask = heartbeatExecutor.scheduleAtFixedRate({
@@ -220,6 +222,7 @@ class RemoteEnvironmentManager(context: Context) {
         if (useRemote) prepareRemoteTypesWithoutData()
         activeConfig = null
         activeDeviceId = null
+        publishRemoteSimulationMode()
         lastObservedDeviceDataAt.clear()
         currentDevices = emptyList()
         latest.clear()
@@ -238,6 +241,7 @@ class RemoteEnvironmentManager(context: Context) {
         lastForcedRefreshAt = 0L
         activeDeviceId = deviceId
         socket?.subscribe(deviceId, PROTOCOL_TYPES)
+        publishRemoteSimulationMode()
         listener?.onDeviceSelected(deviceId)
         listener?.onDataChanged(latest.toMap())
     }
@@ -251,6 +255,7 @@ class RemoteEnvironmentManager(context: Context) {
     fun setUseRemote(enabled: Boolean) {
         useRemote = enabled
         persistState()
+        publishRemoteSimulationMode()
         if (!enabled) {
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
             disconnect()
@@ -265,6 +270,12 @@ class RemoteEnvironmentManager(context: Context) {
         if (socket?.isOpen() != true) {
             prepareRemoteTypesWithoutData()
         }
+    }
+
+    private fun publishRemoteSimulationMode() {
+        runCatching {
+            ApiClient.setRemoteSimulation(useRemote, activeDeviceId ?: "", activeServerId ?: "")
+        }.onFailure { ZLog.w("Remote", "publish remote mode failed: ${it.message}") }
     }
 
     fun setTypeEnabled(type: String, enabled: Boolean) {

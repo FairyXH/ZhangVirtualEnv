@@ -239,6 +239,8 @@ class ApiServer(
                 path == "/api/sim/set" && method == "POST" -> envSet("sim", body)
                 path == "/api/profile/status" && method == "GET" -> profileStatus()
                 path == "/api/module/status" && method == "GET" -> moduleStatus()
+                path == "/api/remote/status" && method == "GET" -> remoteStatus()
+                path == "/api/remote/status" && method == "POST" -> remoteStatusSet(body)
                 path == "/api/module/enable" && method == "POST" -> moduleEnable(body)
                 path == "/api/hook/status" && method == "POST" -> hookStatusReport(body)
                 path == "/api/hook/status" && method == "GET" -> hookStatusGet()
@@ -588,6 +590,18 @@ class ApiServer(
     /** 模块总开关状态。 */
     private fun moduleStatus(): ApiResult {
         return ApiResult.ok("ok", backend.moduleStatusJson())
+    }
+
+    private fun remoteStatus(): ApiResult = ApiResult.ok("ok", backend.remoteSimulationStatusJson())
+
+    private fun remoteStatusSet(body: String): ApiResult {
+        val json = JSONObject(body)
+        backend.setRemoteSimulation(
+            json.optBoolean("enabled", false),
+            json.optString("deviceId", ""),
+            json.optString("serverId", ""),
+        )
+        return ApiResult.ok("ok", backend.remoteSimulationStatusJson())
     }
 
     /** 模块总开关切换（关闭 = 一键停用模块所有功能）。 */
