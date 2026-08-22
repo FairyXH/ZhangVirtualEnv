@@ -153,10 +153,11 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 }
 
                 GlassSection(title = getString(R.string.remote_env_servers), backdrop = backdrop) {
-                    val totalPages = maxOf(1, (servers.size + SERVER_PAGE_SIZE - 1) / SERVER_PAGE_SIZE)
+                    val sortedServers = servers.sortedByDescending { manager.isServerConnected(it.id) }
+                    val totalPages = maxOf(1, (sortedServers.size + SERVER_PAGE_SIZE - 1) / SERVER_PAGE_SIZE)
                     serverPage = serverPage.coerceIn(0, totalPages - 1)
-                    servers.drop(serverPage * SERVER_PAGE_SIZE).take(SERVER_PAGE_SIZE).forEach { server -> ServerCard(server, backdrop) }
-                    PaginationBar(serverPage, totalPages, "服务器", servers.size, backdrop) { delta ->
+                    sortedServers.drop(serverPage * SERVER_PAGE_SIZE).take(SERVER_PAGE_SIZE).forEach { server -> ServerCard(server, backdrop) }
+                    PaginationBar(serverPage, totalPages, "服务器", sortedServers.size, backdrop) { delta ->
                         serverPage = (serverPage + delta).coerceIn(0, totalPages - 1)
                     }
                     GlassField(name, { name = it }, backdrop, placeholder = getString(R.string.remote_env_name_hint))
@@ -176,10 +177,11 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
 
                 GlassSection(title = getString(R.string.remote_env_devices), backdrop = backdrop) {
                     if (devices.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textSecondary, 13.sp))
-                    val totalPages = maxOf(1, (devices.size + DEVICE_PAGE_SIZE - 1) / DEVICE_PAGE_SIZE)
+                    val sortedDevices = devices.sortedByDescending { it.online }
+                    val totalPages = maxOf(1, (sortedDevices.size + DEVICE_PAGE_SIZE - 1) / DEVICE_PAGE_SIZE)
                     devicePage = devicePage.coerceIn(0, totalPages - 1)
-                    devices.drop(devicePage * DEVICE_PAGE_SIZE).take(DEVICE_PAGE_SIZE).forEach { device -> DeviceCard(device, backdrop) }
-                    PaginationBar(devicePage, totalPages, "设备", devices.size, backdrop) { delta ->
+                    sortedDevices.drop(devicePage * DEVICE_PAGE_SIZE).take(DEVICE_PAGE_SIZE).forEach { device -> DeviceCard(device, backdrop) }
+                    PaginationBar(devicePage, totalPages, "设备", sortedDevices.size, backdrop) { delta ->
                         devicePage = (devicePage + delta).coerceIn(0, totalPages - 1)
                     }
                 }
@@ -235,17 +237,25 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     @Composable
     private fun ServerCard(server: RemoteServerConfig, backdrop: com.kyant.backdrop.Backdrop) {
         val colors = glassColors()
+        val active = server.id == manager.activeServer()?.id
+        val connected = manager.isServerConnected(server.id)
         GlassCard(backdrop = backdrop, modifier = Modifier.fillMaxWidth(), containerColor = colors.bgTertiary.copy(alpha = .38f), contentPadding = 12.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         BasicText(server.name, style = TextStyle(colors.textPrimary, 16.sp, FontWeight.Medium))
                         BasicText(server.url, style = TextStyle(colors.textSecondary, 12.sp))
-                        BasicText(if (server.id == manager.activeServer()?.id) state else server.lastStatus, style = TextStyle(colors.textSecondary, 12.sp))
+                        BasicText(
+                            if (server.id == manager.activeServer()?.id) state else server.lastStatus,
+                            style = TextStyle(if (connected) colors.success else colors.textSecondary, 12.sp)
+                        )
                     }
-                    val active = server.id == manager.activeServer()?.id
-                    val connected = manager.isServerConnected(server.id)
-                    GlassPill(onClick = { manager.connect(server) }, backdrop = backdrop, selected = connected) {
+                    GlassPill(
+                        onClick = { manager.connect(server) },
+                        backdrop = backdrop,
+                        selected = connected,
+                        containerColor = if (connected) colors.success.copy(alpha = .2f) else colors.bgTertiary.copy(alpha = .38f)
+                    ) {
                         BasicText(
                             when {
                                 connected -> "已连接"
@@ -253,7 +263,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                                 else -> getString(R.string.remote_env_connect)
                             },
                             Modifier.padding(horizontal = 10.dp),
-                            style = TextStyle(colors.textPrimary, 11.sp)
+                            style = TextStyle(if (connected) colors.success else colors.textPrimary, 11.sp)
                         )
                     }
                     if (connected) {
@@ -279,7 +289,10 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     BasicText(device.name.ifBlank { device.deviceId }, style = TextStyle(colors.textPrimary, 16.sp, FontWeight.Medium))
                     BasicText(device.deviceId, style = TextStyle(colors.textSecondary, 11.sp))
-                    BasicText("${device.deviceType} · ${device.capabilities.joinToString(" / ")} · ${if (device.online) "在线" else "离线"}", style = TextStyle(colors.textSecondary, 12.sp))
+                    BasicText(
+                        "${device.deviceType} · ${device.capabilities.joinToString(" / ")} · ${if (device.online) "在线" else "离线"}",
+                        style = TextStyle(if (device.online) colors.success else colors.textSecondary, 12.sp)
+                    )
                     BasicText("最后数据：${device.lastData?.let { formatAge(it, nowMs) } ?: "无"}", style = TextStyle(colors.textTertiary, 11.sp))
                 }
                 GlassPill(onClick = { manager.selectDevice(device.deviceId) }, backdrop = backdrop, selected = selected) {
