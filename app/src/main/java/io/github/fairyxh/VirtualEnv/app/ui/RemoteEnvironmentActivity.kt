@@ -274,7 +274,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         val lines = when (type) {
             "ble" -> arrayLines(item.optJSONArray("devices"), "name", "address", "rssi")
             "wifi" -> arrayLines(item.optJSONArray("networks"), "ssid", "bssid", "rssi", "frequency")
-            "cell" -> arrayLines(item.optJSONArray("entries"), "type", "mcc", "mnc", "tac", "ci", "pci", "rsrp")
+            "cell" -> arrayLines(item.optJSONArray("entries"), "type", "mcc", "mnc", "tac", "ci", "nci", "cid", "lac", "pci", "rsrp")
             else -> emptyList()
         }
         if (lines.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textTertiary, 12.sp))
@@ -299,7 +299,21 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         if (array == null) return emptyList()
         return (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
-            keys.mapNotNull { key -> if (item.has(key)) "$key=${item.opt(key)}" else null }.joinToString(" · ")
+            if (keys.contains("ci") || keys.contains("nci") || keys.contains("cid")) {
+                val type = item.optString("type", "")
+                val identity = when (type.uppercase()) {
+                    "NR" -> item.optLong("nci", -1L)
+                    "GSM", "WCDMA" -> item.optLong("cid", -1L)
+                    else -> item.optLong("ci", -1L)
+                }
+                if (identity <= 0L) return@mapNotNull null
+            }
+            keys.mapNotNull { key ->
+                if (!item.has(key)) return@mapNotNull null
+                val value = item.opt(key)
+                if (key in setOf("ci", "nci", "cid") && value is Number && value.toLong() <= 0L) null
+                else "$key=$value"
+            }.joinToString(" · ")
         }
     }
 
