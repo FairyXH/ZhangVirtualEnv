@@ -97,14 +97,6 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                BasicText(
-                    "远程环境测试",
-                    style = TextStyle(colors.textPrimary, 30.sp, FontWeight.Bold)
-                )
-                BasicText(
-                    "连接通用环境数据服务，选择采集端后再启用远程测试数据。",
-                    style = TextStyle(colors.textSecondary, 13.sp)
-                )
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -122,11 +114,17 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                             style = TextStyle(colors.textPrimary, 13.sp)
                         )
                     }
-                    BasicText(
-                        getString(R.string.remote_env_title),
-                        Modifier.padding(start = 12.dp).weight(1f),
-                        style = TextStyle(colors.textPrimary, 30.sp, FontWeight.Bold)
-                    )
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        BasicText(
+                            getString(R.string.remote_env_title),
+                            style = TextStyle(colors.textPrimary, 30.sp, FontWeight.Bold)
+                        )
+                        BasicText(
+                            "连接通用环境数据服务，选择采集端后再启用远程测试数据。",
+                            Modifier.padding(top = 2.dp),
+                            style = TextStyle(colors.textSecondary, 13.sp)
+                        )
+                    }
                 }
                 BasicText(state, style = TextStyle(colors.textSecondary, 13.sp))
                 BasicText(
