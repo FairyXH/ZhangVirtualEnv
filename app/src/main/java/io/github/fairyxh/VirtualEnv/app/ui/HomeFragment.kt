@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.amap.location.support.BuildConfig
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.ApiClient
 import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
@@ -409,9 +410,9 @@ class HomeFragment : Fragment() {
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
                         }
-                        if (moduleVersion.isNotBlank() || deviceInfo.isNotBlank()) {
+                        if (deviceInfo.isNotBlank()) {
                             BasicText(
-                                "模块版本：${moduleVersion.ifBlank { "未知" }}\n设备：${deviceInfo.ifBlank { "未知" }}",
+                                "模块版本：${BuildConfig.VERSION_NAME}\n设备：${deviceInfo.ifBlank { "未知" }}",
                                 Modifier.padding(top = 8.dp),
                                 style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
                             )
