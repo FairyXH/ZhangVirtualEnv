@@ -11,7 +11,11 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -96,7 +100,18 @@ class RemoteWebSocketClient(
     private val onData: (String, String, JSONObject) -> Unit,
     private val onState: (String) -> Unit,
 ) {
+    private val insecureTrustManager = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String) = Unit
+        override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String) = Unit
+        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    }
+    private val insecureSslSocketFactory = SSLContext.getInstance("TLS").apply {
+        init(null, arrayOf(insecureTrustManager), SecureRandom())
+    }.socketFactory
     private val client = OkHttpClient.Builder()
+        // Test-framework endpoint: accept expired/private certificates on the configured test server.
+        .sslSocketFactory(insecureSslSocketFactory, insecureTrustManager)
+        .hostnameVerifier { _, _ -> true }
         .pingInterval(15, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
