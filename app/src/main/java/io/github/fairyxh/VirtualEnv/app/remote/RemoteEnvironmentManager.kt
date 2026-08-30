@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
  */
 class RemoteEnvironmentManager(context: Context) {
     companion object {
-        val SUPPORTED_TYPES = linkedSetOf("ble", "wifi", "cell")
-        private val PROTOCOL_TYPES = setOf("bluetooth", "wifi", "cell")
+        val SUPPORTED_TYPES = linkedSetOf("ble", "wifi", "cell", "gps", "gnss", "sensor")
+        private val PROTOCOL_TYPES = SUPPORTED_TYPES.map { if (it == "ble") "bluetooth" else it }.toSet()
     }
 
     private val repository = RemoteServerRepository(context.applicationContext)
