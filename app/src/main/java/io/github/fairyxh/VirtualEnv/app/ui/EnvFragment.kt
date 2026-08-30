@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -145,17 +146,24 @@ class EnvFragment : Fragment() {
                 EnvRemoteCard(backdrop = backdrop) {
                     startActivity(android.content.Intent(requireContext(), RemoteEnvironmentActivity::class.java))
                 }
+                val remoteManager = RemoteEnvironmentRuntime.get(requireContext())
                 items.forEach { item ->
+                    val remoteControlled = remoteManager.isUseRemote() && remoteManager.isTypeEnabled(item.type)
                     EnvCard(
                         item = item,
                         backdrop = backdrop,
                         onCardClick = {
-                            // 环境子页面：不启动独立 Activity，直接切换为子页面
-                            detailType = item.type
+                            if (remoteControlled) {
+                                Toast.makeText(requireContext(), "已开启远程环境功能", Toast.LENGTH_SHORT).show()
+                            } else {
+                                // 环境子页面：不启动独立 Activity，直接切换为子页面
+                                detailType = item.type
+                            }
                         },
                         onToggle = { checked -> fragment.toggleEnv(item.type, checked) },
-                        remoteControlled = remoteEnvironmentEnabled && item.type in setOf(TYPE_CELL, TYPE_WIFI, TYPE_BLE),
-                        onRemoteBlocked = { Toast.makeText(requireContext(), "已开启远程环境功能", Toast.LENGTH_SHORT).show() }                    )
+                        remoteControlled = remoteControlled,
+                        onRemoteBlocked = { Toast.makeText(requireContext(), "已开启远程环境功能", Toast.LENGTH_SHORT).show() }
+                    )
                 }
                 } // Column
             } // else
@@ -220,6 +228,13 @@ class EnvFragment : Fragment() {
                         Modifier.padding(top = 2.dp),
                         style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                     )
+                    if (remoteControlled) {
+                        BasicText(
+                            "使用中·远程环境",
+                            Modifier.padding(top = 4.dp),
+                            style = TextStyle(color = Color(0xFF42A5F5), fontSize = 12.sp)
+                        )
+                    }
                 }
                 GlassToggle(
                     selected = { item.switchState },

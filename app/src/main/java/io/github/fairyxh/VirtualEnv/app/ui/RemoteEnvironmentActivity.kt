@@ -378,64 +378,115 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     }
 
     private fun formatRemoteDetails(type: String, item: JSONObject): String {
-        val standard = StringBuilder()
-        val extensions = StringBuilder()
-        fun row(target: StringBuilder, key: String, value: String) {
-            target.append(String.format("%-22s | %s\n", key, value))
-        }
-        val known = when (type) {
-            "ble" -> setOf("scan_started_at", "scan_finished_at", "technology", "is_enabled", "devices")
+        val out = StringBuilder()
+        val standardKeys = when (type) {
             "wifi" -> setOf("scan_started_at", "scan_finished_at", "interface", "is_connected", "gateway", "dns_servers", "ip_address", "networks")
+            "ble" -> setOf("scan_started_at", "scan_finished_at", "technology", "is_enabled", "devices")
             "cell" -> setOf("observed_at", "network_type", "sim_slot", "is_connected", "registered", "serving", "neighbors", "entries")
             "gps" -> setOf("fix_at", "provider", "latitude", "longitude", "altitude_m", "accuracy_m", "speed_mps", "bearing_deg", "satellites", "fix_quality", "mocked", "points")
             "gnss" -> setOf("fix_at", "constellation", "satellites")
-            "sensor" -> setOf("sensor", "unit", "sampling_hz", "samples", "readings")
+            "sensor" -> setOf("sensor", "sensor_type", "unit", "sampling_hz", "timestamp", "value", "values", "samples", "readings")
             else -> emptySet()
         }
-        standard.append("==== 标准字段 ====\n")
+        appendDetailSection(out, "标准信息")
         val keys = item.keys()
         var standardCount = 0
         while (keys.hasNext()) {
             val key = keys.next()
             if (key.startsWith("_")) continue
-            val value = formatDetailValue(item.opt(key))
-            if (key in known) {
-                row(standard, key, value)
+            if (key in standardKeys) {
+                appendDetailRow(out, key, formatDetailValue(item.opt(key)))
                 standardCount++
-            } else {
-                row(extensions, key, value)
             }
         }
-        if (standardCount == 0) standard.append("无可解析的标准字段\n")
-        if (extensions.isNotEmpty()) {
-            standard.append("\n==== 扩展数据 ====\n").append(extensions)
+        if (standardCount == 0) appendDetailRow(out, "状态", "无法解析为标准字段")
+        when (type) {
+            "wifi" -> appendDetailTable(out, "Wi-Fi 网络", item.optJSONArray("networks"), listOf("ssid", "bssid", "frequency_mhz", "channel", "rssi", "security", "hidden", "timestamp"))
+            "ble" -> appendDetailTable(out, "Bluetooth 设备", item.optJSONArray("devices"), listOf("address", "address_type", "name", "is_connected", "is_paired", "rssi", "tx_power", "manufacturer_id", "manufacturer_data", "service_uuids", "service_data", "raw", "rawHex", "rawLength", "timestamp"))
+            "cell" -> {
+                appendDetailTable(out, "服务小区", item.optJSONObject("serving")?.let { JSONArray().put(it) }, cellDetailColumns())
+                appendDetailTable(out, "邻区", item.optJSONArray("neighbors"), cellDetailColumns())
+                appendDetailTable(out, "基站条目", item.optJSONArray("entries"), cellDetailColumns())
+            }
+            "gps" -> appendDetailTable(out, "GPS 轨迹点", item.optJSONArray("points"), listOf("timestamp", "latitude", "longitude", "altitude_m", "accuracy_m"))
+            "gnss" -> appendDetailTable(out, "GNSS 卫星", item.optJSONArray("satellites"), listOf("type", "svid", "azimuth_deg", "elevation_deg", "frequency_mhz", "snr_db", "almanac", "ephemeris", "used"))
+            "sensor" -> {
+                val samples = JSONArray()
+                item.optJSONArray("samples")?.let { copyDetailArray(samples, it) }
+                item.optJSONArray("readings")?.let { copyDetailArray(samples, it) }
+                appendDetailTable(out, "Sensor 采样记录", samples, listOf("timestamp", "sensor", "sensor_type", "value", "unit", "x", "y", "z"))
+            }
         }
-        standard.append("\n==== 传输信息 ====\n")
-        row(standard, "timestamp", item.optLong("_timestamp", 0L).takeIf { it > 0L }?.toString() ?: "未知")
-        row(standard, "sequence", item.optLong("_sequence", 0L).toString())
-        return standard.toString().trim()
+        appendDetailSection(out, "传输信息")
+        appendDetailRow(out, "timestamp", item.optLong("_timestamp", 0L).takeIf { it > 0L }?.toString() ?: "未知")
+        appendDetailRow(out, "sequence", item.optLong("_sequence", 0L).toString())
+        val extension = JSONObject()
+        val allKeys = item.keys()
+        while (allKeys.hasNext()) {
+            val key = allKeys.next()
+            if (!key.startsWith("_") && key !in standardKeys) extension.put(key, item.opt(key))
+        }
+        if (extension.length() > 0) {
+            appendDetailSection(out, "扩展数据")
+            val extKeys = extension.keys()
+            while (extKeys.hasNext()) {
+                val key = extKeys.next()
+                appendDetailRow(out, key, formatDetailValue(extension.opt(key)))
+            }
+        }
+        return out.toString().trim()
     }
 
-    private fun formatDetailValue(value: Any?): String {
-        return when (value) {
-            JSONObject.NULL, null -> "null"
-            is JSONObject -> {
-                val keys = value.keys()
-                val rows = mutableListOf<String>()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    rows += "$key=${formatDetailValue(value.opt(key))}"
-                }
-                if (rows.isEmpty()) "{}" else rows.joinToString("; ")
-            }
-            is JSONArray -> {
-                if (value.length() == 0) "[]"
-                else (0 until value.length()).joinToString("; ") { index ->
-                    "#${index + 1} ${formatDetailValue(value.opt(index))}"
-                }
-            }
-            else -> value.toString()
+    private fun cellDetailColumns() = listOf("radio", "type", "mcc", "mnc", "lac", "tac", "cid", "nci", "pci", "arfcn", "nrarfcn", "rssi", "rsrp", "rsrq", "asu", "registered")
+
+    private fun appendDetailSection(out: StringBuilder, title: String) {
+        if (out.isNotEmpty()) out.append("\n")
+        out.append("========== ").append(title).append(" ==========\n")
+    }
+
+    private fun appendDetailRow(out: StringBuilder, key: String, value: String) {
+        out.append(String.format("%-18s | %s\n", key, value))
+    }
+
+    private fun appendDetailTable(out: StringBuilder, title: String, rows: JSONArray?, columns: List<String>) {
+        appendDetailSection(out, title)
+        if (rows == null || rows.length() == 0) {
+            out.append("无记录\n")
+            return
         }
+        out.append("序号 | ").append(columns.joinToString(" | ")).append("\n")
+        out.append("-----+").append(columns.joinToString("+") { "----------" }).append("\n")
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index)
+            if (row == null) {
+                appendDetailRow(out, "#${index + 1}", formatDetailValue(rows.opt(index)))
+                continue
+            }
+            out.append("#${index + 1} | ")
+                .append(columns.joinToString(" | ") { formatDetailValue(row.opt(it)) })
+                .append("\n")
+            val extras = JSONObject()
+            val keys = row.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key !in columns) extras.put(key, row.opt(key))
+            }
+            if (extras.length() > 0) {
+                appendDetailRow(out, "  扩展", formatDetailValue(extras))
+            }
+        }
+    }
+
+    private fun copyDetailArray(target: JSONArray, source: JSONArray) {
+        for (index in 0 until source.length()) target.put(source.opt(index))
+    }
+
+
+    private fun formatDetailValue(value: Any?): String = when (value) {
+        JSONObject.NULL, null -> "暂无"
+        is JSONObject -> value.toString(2).replace("\n", " ")
+        is JSONArray -> value.toString(2).replace("\n", " ")
+        else -> value.toString()
     }
 
     private fun summarize(type: String, json: JSONObject?): String {
