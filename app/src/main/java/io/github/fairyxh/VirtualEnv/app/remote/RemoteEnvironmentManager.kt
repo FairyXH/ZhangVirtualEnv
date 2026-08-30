@@ -395,10 +395,32 @@ class RemoteEnvironmentManager(context: Context) {
         }
         if (!localSnapshots.containsKey(type)) {
             localSnapshots[type] = runCatching {
-                ApiClient.getEnvStatus(type).data?.optJSONObject("data")
+                if (type == "gps") ApiClient.getLocationStatus().data
+                else ApiClient.getEnvStatus(type).data?.optJSONObject("data")
             }.getOrNull()
         }
-        val envType = if (type == "ble") "ble" else type
+        if (type == "gps") {
+            val latitude = data.optDouble("latitude", Double.NaN)
+            val longitude = data.optDouble("longitude", Double.NaN)
+            if (latitude.isNaN() || longitude.isNaN()) {
+                throw IllegalArgumentException("remote gps payload lacks latitude/longitude")
+            }
+            val set = ApiClient.setLocation(
+                latitude,
+                longitude,
+                data.optDouble("speed_mps", 0.0).toFloat(),
+                data.optDouble("bearing_deg", 0.0).toFloat(),
+            )
+            if (set.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                throw IllegalStateException("apply remote gps failed: ${set.message}")
+            }
+            val enabled = ApiClient.setLocationEnabled(true)
+            if (enabled.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                throw IllegalStateException("enable remote gps failed: ${enabled.message}")
+            }
+            return
+        }
+        val envType = type
         val normalized = when (type) {
             "ble" -> JSONObject(data.toString()).apply {
                 if (!has("devices")) put("devices", JSONArray())
@@ -408,6 +430,12 @@ class RemoteEnvironmentManager(context: Context) {
             }
             "cell" -> JSONObject(data.toString()).apply {
                 if (!has("entries")) put("entries", JSONArray())
+            }
+            "gnss" -> JSONObject(data.toString()).apply {
+                if (!has("satellites")) put("satellites", JSONArray())
+            }
+            "sensor" -> JSONObject(data.toString()).apply {
+                if (!has("samples") && !has("readings")) put("samples", JSONArray())
             }
             else -> JSONObject(data.toString())
         }
@@ -426,8 +454,20 @@ class RemoteEnvironmentManager(context: Context) {
     private fun restoreLocalType(type: String) {
         val local = localSnapshots[type] ?: return
         runCatching {
-            ApiClient.setEnvData(type, local)
-            ApiClient.setEnvEnabled(type, true)
+            if (type == "gps") {
+                val set = ApiClient.setLocation(
+                    local.optDouble("latitude", 0.0),
+                    local.optDouble("longitude", 0.0),
+                    local.optDouble("speed", 0.0).toFloat(),
+                    local.optDouble("bearing", 0.0).toFloat(),
+                )
+                if (set.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                    ApiClient.setLocationEnabled(local.optBoolean("enabled", false))
+                }
+            } else {
+                ApiClient.setEnvData(type, local)
+                ApiClient.setEnvEnabled(type, true)
+            }
         }.onFailure { ZLog.w("Remote", "restore local $type failed: ${it.message}") }
     }
 

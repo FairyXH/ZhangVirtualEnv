@@ -425,6 +425,9 @@
     <string name="remote_env_ble">Bluetooth</string>
     <string name="remote_env_wifi">WiFi</string>
     <string name="remote_env_cell">Cell</string>
+    <string name="remote_env_gps">GPS</string>
+    <string name="remote_env_gnss">GNSS</string>
+    <string name="remote_env_sensor">Sensor</string>
     <string name="remote_env_simulation">模拟</string>
     <string name="remote_env_no_server">请先保存服务器</string>
     <string name="env_pending">待开发</string>

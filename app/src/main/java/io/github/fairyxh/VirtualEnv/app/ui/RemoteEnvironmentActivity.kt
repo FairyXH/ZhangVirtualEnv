@@ -48,7 +48,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private var state by mutableStateOf("未连接")
     private var useRemote by mutableStateOf(false)
     private var nowMs by mutableLongStateOf(System.currentTimeMillis())
-    private var typeEnabled by mutableStateOf(mapOf("ble" to false, "wifi" to false, "cell" to false))
+    private var typeEnabled by mutableStateOf(RemoteEnvironmentManager.SUPPORTED_TYPES.associateWith { false })
     private var editingId by mutableStateOf<String?>(null)
     private var name by mutableStateOf("")
     private var url by mutableStateOf("")
@@ -190,6 +190,9 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                     DataCard("ble", getString(R.string.remote_env_ble), backdrop)
                     DataCard("wifi", getString(R.string.remote_env_wifi), backdrop)
                     DataCard("cell", getString(R.string.remote_env_cell), backdrop)
+                    DataCard("gps", getString(R.string.remote_env_gps), backdrop)
+                    DataCard("gnss", getString(R.string.remote_env_gnss), backdrop)
+                    DataCard("sensor", getString(R.string.remote_env_sensor), backdrop)
                 }
             }
         }
@@ -331,6 +334,9 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             "ble" -> arrayObjectLines(item.optJSONArray("devices"))
             "wifi" -> arrayObjectLines(item.optJSONArray("networks"))
             "cell" -> arrayObjectLines(item.optJSONArray("entries"))
+            "gps" -> arrayObjectLines(item.optJSONArray("points"))
+            "gnss" -> arrayObjectLines(item.optJSONArray("satellites"))
+            "sensor" -> arrayObjectLines(item.optJSONArray("samples") ?: item.optJSONArray("readings"))
             else -> emptyList()
         }
         if (lines.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textTertiary, 12.sp))
@@ -385,6 +391,9 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             "ble" -> "发现 ${json.optJSONArray("devices")?.length() ?: 0} 个设备"
             "wifi" -> "发现 ${json.optJSONArray("networks")?.length() ?: 0} 个 AP"
             "cell" -> "发现 ${json.optJSONArray("entries")?.length() ?: 0} 个基站"
+            "gps" -> "收到 ${json.optJSONArray("points")?.length() ?: 0} 个位置点"
+            "gnss" -> "收到 ${json.optJSONArray("satellites")?.length() ?: 0} 颗卫星"
+            "sensor" -> "收到 ${(json.optJSONArray("samples") ?: json.optJSONArray("readings"))?.length() ?: 0} 条读数"
             else -> getString(R.string.remote_env_empty)
         }
     }

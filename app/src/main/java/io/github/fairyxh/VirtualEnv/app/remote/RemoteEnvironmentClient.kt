@@ -40,6 +40,12 @@ data class RemoteDevice(
     val lastDataByType: Map<String, Long> = emptyMap(),
 )
 
+private fun canonicalRemoteType(value: String): String = when (value) {
+    "bluetooth", "ble", "bluetooth_data" -> "ble"
+    "cellular" -> "cell"
+    else -> value
+}
+
 class RemoteServerRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("remote_environment", Context.MODE_PRIVATE)
     private val keyServers = "servers"
@@ -213,9 +219,10 @@ class RemoteWebSocketClient(
                         normalizeRemoteBleRaw(payload)
                         payload.put("_timestamp", message.optLong("timestamp", 0L))
                         payload.put("_sequence", message.optLong("sequence", 0L))
+                        val dataType = canonicalRemoteType(message.optString("data_type"))
                         onData(
                             message.optString("device_id"),
-                            message.optString("data_type"),
+                            dataType,
                             payload
                         )
                     }
