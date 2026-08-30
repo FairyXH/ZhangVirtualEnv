@@ -264,6 +264,13 @@ class LocationSimFragment : Fragment() {
             ) {
                 val fullMapHeight = maxHeight
                 val colors = glassColors()
+                var remoteLocationTick by remember { mutableStateOf(0) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        remoteLocationTick++
+                        kotlinx.coroutines.delay(250L)
+                    }
+                }
                 val remoteGps = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
                     RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                 Column(

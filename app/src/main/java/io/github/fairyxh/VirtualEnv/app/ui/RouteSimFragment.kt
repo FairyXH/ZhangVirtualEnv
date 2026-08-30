@@ -257,10 +257,10 @@ class RouteSimFragment : Fragment() {
             ) {
                 val fullMapHeight = maxHeight
                 val colors = glassColors()
-                var remotePageTick by remember { mutableStateOf(0) }
+                var remoteRouteTick by remember { mutableStateOf(0) }
                 LaunchedEffect(Unit) {
                     while (true) {
-                        remotePageTick++
+                        remoteRouteTick++
                         delay(250L)
                     }
                 }
