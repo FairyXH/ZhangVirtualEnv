@@ -193,6 +193,7 @@ class ApiServer(
                 path == "/api/location/status" && method == "GET" -> locationStatus()
                 path == "/api/location/set" && method == "POST" -> locationSet(body)
                 path == "/api/location/enable" && method == "POST" -> locationEnable(body)
+                path == "/api/remote/gps" && method == "POST" -> remoteGps(body)
                 path == "/api/system/info" && method == "GET" -> systemInfo()
                 path == "/api/route/create" && method == "POST" -> routeCreate(body)
                 path == "/api/route/list" && method == "GET" -> routeList()
@@ -885,6 +886,14 @@ class ApiServer(
         backend.setLocationEnabled(enabled)
         ZLog.i(TAG_SCOPE, "location enable=$enabled")
         return ApiResult.ok("ok", backend.locationState().toJson())
+    }
+
+    private fun remoteGps(body: String): ApiResult {
+        return if (backend.applyRemoteGps(JSONObject(body))) {
+            ApiResult.ok("remote gps applied", backend.locationStatusJson())
+        } else {
+            ApiResult.error("invalid remote gps payload", 422)
+        }
     }
 
     private fun systemInfo(): ApiResult {

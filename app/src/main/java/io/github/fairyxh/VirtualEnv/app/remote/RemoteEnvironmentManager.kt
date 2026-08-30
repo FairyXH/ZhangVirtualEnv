@@ -400,23 +400,9 @@ class RemoteEnvironmentManager(context: Context) {
             }.getOrNull()
         }
         if (type == "gps") {
-            val latitude = data.optDouble("latitude", Double.NaN)
-            val longitude = data.optDouble("longitude", Double.NaN)
-            if (latitude.isNaN() || longitude.isNaN()) {
-                throw IllegalArgumentException("remote gps payload lacks latitude/longitude")
-            }
-            val set = ApiClient.setLocation(
-                latitude,
-                longitude,
-                data.optDouble("speed_mps", 0.0).toFloat(),
-                data.optDouble("bearing_deg", 0.0).toFloat(),
-            )
-            if (set.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                throw IllegalStateException("apply remote gps failed: ${set.message}")
-            }
-            val enabled = ApiClient.setLocationEnabled(true)
-            if (enabled.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                throw IllegalStateException("enable remote gps failed: ${enabled.message}")
+            val applied = ApiClient.applyRemoteGps(data)
+            if (applied.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
+                throw IllegalStateException("apply remote gps failed: ${applied.message}")
             }
             return
         }

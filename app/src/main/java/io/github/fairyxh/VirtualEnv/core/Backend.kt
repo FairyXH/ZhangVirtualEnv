@@ -539,6 +539,41 @@ class Backend private constructor(private val dataDir: File) {
         configManager.setPoint(latitude, longitude, speed, bearing)
     }
 
+    /** Apply one remote GPS frame as a static fix or a speed-controlled track. */
+    fun applyRemoteGps(data: org.json.JSONObject): Boolean {
+        if (!moduleEnabled) return false
+        val points = data.optJSONArray("points")
+        val speedMps = data.optDouble("speed_mps", data.optDouble("speedMps", 0.0)).coerceAtLeast(0.0)
+        if (points != null && points.length() >= 2) {
+            val normalized = org.json.JSONArray()
+            for (index in 0 until points.length()) {
+                val point = points.optJSONObject(index) ?: continue
+                val latitude = point.optDouble("latitude", point.optDouble("lat", Double.NaN))
+                val longitude = point.optDouble("longitude", point.optDouble("lon", Double.NaN))
+                if (!latitude.isNaN() && !longitude.isNaN()) {
+                    normalized.put(org.json.JSONObject().apply {
+                        put("lat", latitude)
+                        put("lon", longitude)
+                    })
+                }
+            }
+            if (normalized.length() >= 2) {
+                setLocationEnabled(false)
+                routeEngine.start(normalized.toString(), speedMps.coerceAtLeast(0.1) * 3.6, 0)
+                ZLog.i(TAG_SCOPE, "remote GPS track applied points=${normalized.length()} speedMps=$speedMps")
+                return true
+            }
+        }
+        val latitude = data.optDouble("latitude", Double.NaN)
+        val longitude = data.optDouble("longitude", Double.NaN)
+        if (latitude.isNaN() || longitude.isNaN()) return false
+        routeEngine.stop()
+        setLocationPoint(latitude, longitude, speedMps.toFloat(), data.optDouble("bearing_deg", data.optDouble("bearing", 0.0)).toFloat())
+        setLocationEnabled(true)
+        ZLog.i(TAG_SCOPE, "remote GPS fix applied ${latitude},${longitude} speedMps=$speedMps")
+        return true
+    }
+
     /** App 开关虚拟定位（经 ApiServer 调用）。开启时与路线模拟互斥：先停路线。 */
     fun setLocationEnabled(enabled: Boolean) {
         if (enabled && !moduleEnabled) {

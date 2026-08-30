@@ -65,6 +65,9 @@ object ApiClient {
         return post("/api/location/enable", body)
     }
 
+    /** Submit a remote GPS fix or track to the system-side location engine. */
+    fun applyRemoteGps(data: JSONObject): ApiResult = post("/api/remote/gps", data)
+
     fun getSystemInfo(): ApiResult = get("/api/system/info")
 
     fun createRoute(name: String, points: List<com.amap.api.maps.model.LatLng>): ApiResult {
