@@ -429,6 +429,7 @@
     <string name="remote_env_gnss">GNSS</string>
     <string name="remote_env_sensor">Sensor</string>
     <string name="remote_env_simulation">模拟</string>
+    <string name="remote_location_enabled">已开启远程环境</string>
     <string name="remote_env_no_server">请先保存服务器</string>
     <string name="env_pending">待开发</string>
     <string name="env_status_active">使用中</string>

@@ -249,16 +249,22 @@ class RouteSimFragment : Fragment() {
             BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
+                    .pointerInteropFilter {
+                        RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
+                    }
                     .onGloballyPositioned { rootLeft = it.positionInRoot() }
             ) {
                 val fullMapHeight = maxHeight
                 val colors = glassColors()
+                val remoteGps = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                    RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                 Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(
                             rememberScrollState(),
-                            enabled = !fragment.mapFullscreen && !fragment.mapTouchActive
+                            enabled = !remoteGps && !fragment.mapFullscreen && !fragment.mapTouchActive
                         )
                         .padding(
                             if (fragment.mapFullscreen) {
@@ -269,6 +275,12 @@ class RouteSimFragment : Fragment() {
                         ),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (remoteGps) {
+                        BasicText(
+                            getString(R.string.remote_location_enabled),
+                            style = TextStyle(color = Color(0xFF42A5F5), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        )
+                    }
                     if (!fragment.mapFullscreen) {
                     BasicText(
                         getString(R.string.route_title),
@@ -1061,6 +1073,12 @@ class RouteSimFragment : Fragment() {
 
     /** 开关打开：以当前选中的已保存路线启动路线模拟。 */
     private fun enableRouteSimulation() {
+        if (RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")) {
+            Toast.makeText(requireContext(), getString(R.string.remote_location_enabled), Toast.LENGTH_SHORT).show()
+            updateSwitchState(true)
+            return
+        }
         if (currentRouteId <= 0) {
             Toast.makeText(requireContext(), R.string.route_select_first, Toast.LENGTH_SHORT).show()
             updateSwitchState(false)
@@ -1238,6 +1256,11 @@ class RouteSimFragment : Fragment() {
      */
     private fun locateCurrentPosition() {
         val context = requireContext()
+        if (RemoteEnvironmentRuntime.get(context).isUseRemote() &&
+            RemoteEnvironmentRuntime.get(context).isTypeEnabled("gps")) {
+            Toast.makeText(context, getString(R.string.remote_location_enabled), Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!AmapPrivacyManager.isAgreed(context)) {
             Toast.makeText(context, R.string.route_privacy_prompt, Toast.LENGTH_LONG).show()
             return

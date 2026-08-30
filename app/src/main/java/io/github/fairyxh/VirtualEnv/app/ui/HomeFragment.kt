@@ -1379,9 +1379,12 @@ class HomeFragment : Fragment() {
             return
         }
         val locData = loc.data
+        val remoteGps = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
         val mode = locData?.optString("mode", "none") ?: "none"
         val singleEnabled = locData?.optBoolean("singleEnabled", false) == true
         val locText = when {
+            remoteGps -> getString(R.string.env_remote_title)
             mode == "route" -> getString(R.string.route_status_running, route.data?.optInt("points", 0) ?: 0)
             singleEnabled -> getString(R.string.location_enabled)
             else -> getString(R.string.location_disabled)
@@ -1390,7 +1393,7 @@ class HomeFragment : Fragment() {
 
         val routeData = route.data
         val routeRunning = routeData?.optBoolean("running", false) == true
-        val routeText = if (routeRunning) {
+        val routeText = if (remoteGps) getString(R.string.env_remote_title) else if (routeRunning) {
             if (routeData?.optBoolean("paused", false) == true) getString(R.string.float_route_paused)
             else getString(R.string.route_status_running, routeData.optInt("points", 0))
         } else {

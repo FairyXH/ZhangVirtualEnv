@@ -256,16 +256,22 @@ class LocationSimFragment : Fragment() {
             BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
+                    .pointerInteropFilter {
+                        RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
+                    }
                     .onGloballyPositioned { rootLeft = it.positionInRoot() }
             ) {
                 val fullMapHeight = maxHeight
                 val colors = glassColors()
+                val remoteGps = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                    RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                 Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(
                             rememberScrollState(),
-                            enabled = !fragment.mapFullscreen && !fragment.mapTouchActive
+                            enabled = !remoteGps && !fragment.mapFullscreen && !fragment.mapTouchActive
                         )
                         .padding(
                             if (fragment.mapFullscreen) {
@@ -276,6 +282,12 @@ class LocationSimFragment : Fragment() {
                         ),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (remoteGps) {
+                        BasicText(
+                            getString(R.string.remote_location_enabled),
+                            style = TextStyle(color = Color(0xFF42A5F5), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        )
+                    }
                     if (!fragment.mapFullscreen) {
                 BasicText(
                     getString(R.string.location_title),
@@ -1386,6 +1398,11 @@ class LocationSimFragment : Fragment() {
      * 直接传送到输入坐标（不保存到列表）：设置坐标并启用单点虚拟定位。
      */
     private fun teleportToPoint() {
+        if (RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")) {
+            Toast.makeText(requireContext(), getString(R.string.remote_location_enabled), Toast.LENGTH_SHORT).show()
+            return
+        }
         val lat = latitudeText.toDoubleOrNull()
         val lon = longitudeText.toDoubleOrNull()
         if (lat == null || lon == null) {
@@ -1586,6 +1603,11 @@ class LocationSimFragment : Fragment() {
      */
     private fun locateCurrentPosition() {
         val context = requireContext()
+        if (RemoteEnvironmentRuntime.get(context).isUseRemote() &&
+            RemoteEnvironmentRuntime.get(context).isTypeEnabled("gps")) {
+            Toast.makeText(context, getString(R.string.remote_location_enabled), Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!AmapPrivacyManager.isAgreed(context)) {
             Toast.makeText(context, R.string.route_privacy_prompt, Toast.LENGTH_LONG).show()
             return
