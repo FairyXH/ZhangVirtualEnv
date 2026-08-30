@@ -35,6 +35,7 @@ import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassPill
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassToggle
+import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassTextDialog
 import io.github.fairyxh.VirtualEnv.app.ui.glass.glassColors
 import org.json.JSONArray
 import org.json.JSONObject
@@ -53,6 +54,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     private var name by mutableStateOf("")
     private var url by mutableStateOf("")
     private var token by mutableStateOf("")
+    private var detailDialog by mutableStateOf<Pair<String, String>?>(null)
     private companion object {
         const val SERVER_PAGE_SIZE = 5
         const val DEVICE_PAGE_SIZE = 5
@@ -99,6 +101,9 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             }
         }
         GlassBackdropHost(Modifier.fillMaxSize()) { backdrop ->
+            detailDialog?.let { (title, text) ->
+                GlassTextDialog(title = title, text = text, onDismiss = { detailDialog = null })
+            }
             val colors = glassColors()
             Column(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -317,36 +322,23 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
                         BasicText(title, style = TextStyle(colors.textPrimary, 16.sp, FontWeight.Medium))
                         BasicText(summarize(type, item), style = TextStyle(colors.textSecondary, 12.sp))
                     }
+                    if (item != null) {
+                        GlassPill(
+                            onClick = { detailDialog = title to formatRemoteDetails(type, item) },
+                            backdrop = backdrop,
+                            selected = false,
+                            containerColor = colors.accent.copy(alpha = 0.16f),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            BasicText("详情", Modifier.padding(horizontal = 12.dp), style = TextStyle(colors.accent, 12.sp))
+                        }
+                    }
                     GlassToggle(selected = { enabled }, onSelect = { value ->
                         typeEnabled = typeEnabled + (type to value)
                         manager.setTypeEnabled(type, value)
                     }, backdrop = backdrop)
                 }
-                if (item != null) GuiData(type, item)
             }
-        }
-    }
-
-    @Composable
-    private fun GuiData(type: String, item: JSONObject) {
-        val colors = glassColors()
-        val lines = when (type) {
-            "ble" -> arrayObjectLines(item.optJSONArray("devices"))
-            "wifi" -> arrayObjectLines(item.optJSONArray("networks"))
-            "cell" -> arrayObjectLines(item.optJSONArray("entries"))
-            "gps" -> arrayObjectLines(item.optJSONArray("points"))
-            "gnss" -> arrayObjectLines(item.optJSONArray("satellites"))
-            "sensor" -> arrayObjectLines(item.optJSONArray("samples") ?: item.optJSONArray("readings"))
-            else -> emptyList()
-        }
-        if (lines.isEmpty()) BasicText(getString(R.string.remote_env_empty), style = TextStyle(colors.textTertiary, 12.sp))
-        BasicText(
-            "更新时间：${item.optLong("_timestamp", 0L).takeIf { it > 0L }?.let { formatAge(it, nowMs) } ?: "未知"} · 序号：${item.optLong("_sequence", 0L)}",
-            style = TextStyle(colors.textTertiary, 11.sp)
-        )
-        lines.take(DATA_PREVIEW_SIZE).forEach { line -> BasicText(line, style = TextStyle(colors.textSecondary, 12.sp)) }
-        if (lines.size > DATA_PREVIEW_SIZE) {
-            BasicText("仅显示前 $DATA_PREVIEW_SIZE 条，共 ${lines.size} 条", style = TextStyle(colors.textTertiary, 11.sp))
         }
     }
 
@@ -385,6 +377,67 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
         }
     }
 
+    private fun formatRemoteDetails(type: String, item: JSONObject): String {
+        val standard = StringBuilder()
+        val extensions = StringBuilder()
+        fun row(target: StringBuilder, key: String, value: String) {
+            target.append(String.format("%-22s | %s\n", key, value))
+        }
+        val known = when (type) {
+            "ble" -> setOf("scan_started_at", "scan_finished_at", "technology", "is_enabled", "devices")
+            "wifi" -> setOf("scan_started_at", "scan_finished_at", "interface", "is_connected", "gateway", "dns_servers", "ip_address", "networks")
+            "cell" -> setOf("observed_at", "network_type", "sim_slot", "is_connected", "registered", "serving", "neighbors", "entries")
+            "gps" -> setOf("fix_at", "provider", "latitude", "longitude", "altitude_m", "accuracy_m", "speed_mps", "bearing_deg", "satellites", "fix_quality", "mocked", "points")
+            "gnss" -> setOf("fix_at", "constellation", "satellites")
+            "sensor" -> setOf("sensor", "unit", "sampling_hz", "samples", "readings")
+            else -> emptySet()
+        }
+        standard.append("==== 标准字段 ====\n")
+        val keys = item.keys()
+        var standardCount = 0
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key.startsWith("_")) continue
+            val value = formatDetailValue(item.opt(key))
+            if (key in known) {
+                row(standard, key, value)
+                standardCount++
+            } else {
+                row(extensions, key, value)
+            }
+        }
+        if (standardCount == 0) standard.append("无可解析的标准字段\n")
+        if (extensions.isNotEmpty()) {
+            standard.append("\n==== 扩展数据 ====\n").append(extensions)
+        }
+        standard.append("\n==== 传输信息 ====\n")
+        row(standard, "timestamp", item.optLong("_timestamp", 0L).takeIf { it > 0L }?.toString() ?: "未知")
+        row(standard, "sequence", item.optLong("_sequence", 0L).toString())
+        return standard.toString().trim()
+    }
+
+    private fun formatDetailValue(value: Any?): String {
+        return when (value) {
+            JSONObject.NULL, null -> "null"
+            is JSONObject -> {
+                val keys = value.keys()
+                val rows = mutableListOf<String>()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    rows += "$key=${formatDetailValue(value.opt(key))}"
+                }
+                if (rows.isEmpty()) "{}" else rows.joinToString("; ")
+            }
+            is JSONArray -> {
+                if (value.length() == 0) "[]"
+                else (0 until value.length()).joinToString("; ") { index ->
+                    "#${index + 1} ${formatDetailValue(value.opt(index))}"
+                }
+            }
+            else -> value.toString()
+        }
+    }
+
     private fun summarize(type: String, json: JSONObject?): String {
         if (json == null) return getString(R.string.remote_env_empty)
         return when (type) {
@@ -397,6 +450,7 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
             else -> getString(R.string.remote_env_empty)
         }
     }
+
 
     private fun loadServer(server: RemoteServerConfig) {
         editingId = server.id
