@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -113,6 +114,13 @@ class EnvFragment : Fragment() {
             modifier = Modifier
                 .fillMaxSize()
         ) { backdrop ->
+            val remoteManager = RemoteEnvironmentRuntime.get(requireContext())
+            LaunchedEffect(Unit) {
+                while (true) {
+                    remoteEnvironmentEnabled = remoteManager.isUseRemote()
+                    kotlinx.coroutines.delay(250L)
+                }
+            }
             val detail = detailType
             if (detail != null) {
                 EnvDetailPanel(
@@ -146,9 +154,8 @@ class EnvFragment : Fragment() {
                 EnvRemoteCard(backdrop = backdrop) {
                     startActivity(android.content.Intent(requireContext(), RemoteEnvironmentActivity::class.java))
                 }
-                val remoteManager = RemoteEnvironmentRuntime.get(requireContext())
                 items.forEach { item ->
-                    val remoteControlled = remoteManager.isUseRemote() && remoteManager.isTypeEnabled(item.type)
+                    val remoteControlled = remoteEnvironmentEnabled && remoteManager.isUseRemote() && remoteManager.isTypeEnabled(item.type)
                     EnvCard(
                         item = item,
                         backdrop = backdrop,

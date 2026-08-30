@@ -257,6 +257,13 @@ class RouteSimFragment : Fragment() {
             ) {
                 val fullMapHeight = maxHeight
                 val colors = glassColors()
+                var remotePageTick by remember { mutableStateOf(0) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        remotePageTick++
+                        delay(250L)
+                    }
+                }
                 val remoteGps = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
                     RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                 Column(
