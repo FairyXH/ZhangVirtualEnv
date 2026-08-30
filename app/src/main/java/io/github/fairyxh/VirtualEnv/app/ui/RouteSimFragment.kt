@@ -69,6 +69,7 @@ import com.amap.api.maps.model.PolylineOptions
 import io.github.fairyxh.VirtualEnv.R
 import io.github.fairyxh.VirtualEnv.app.AmapPrivacyManager
 import io.github.fairyxh.VirtualEnv.app.ApiClient
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.MainActivity
 import io.github.fairyxh.VirtualEnv.app.location.AmapLocationHelper
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
@@ -501,6 +502,8 @@ class RouteSimFragment : Fragment() {
                     containerColor = colors.bgSecondary.copy(alpha = 0.45f)
                 ) {
                     Column(Modifier.padding(16.dp)) {
+                        val remoteEnabled = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -520,16 +523,25 @@ class RouteSimFragment : Fragment() {
                                 selected = { switchChecked },
                                 onSelect = { checked ->
                                     if (updatingSwitch) return@GlassToggle
+                                    if (remoteEnabled) {
+                                        Toast.makeText(requireContext(), "已启用远程环境", Toast.LENGTH_SHORT).show()
+                                        return@GlassToggle
+                                    }
                                     if (checked) fragment.enableRouteSimulation() else fragment.disableRouteSimulation()
                                 },
-                                backdrop = backdrop
+                                backdrop = backdrop,
+                                enabled = !remoteEnabled,
+                                onDisabledClick = { Toast.makeText(requireContext(), "已启用远程环境", Toast.LENGTH_SHORT).show() }
+                            )
+                            if (remoteEnabled) {
+                                BasicText("已启用远程环境", Modifier.padding(top = 4.dp), style = TextStyle(color = androidx.compose.ui.graphics.Color(0xFF42A5F5), fontSize = 12.sp))
+                            }
+                            BasicText(
+                                statusText,
+                                Modifier.padding(top = 10.dp),
+                                style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
                         }
-                        BasicText(
-                            statusText,
-                            Modifier.padding(top = 10.dp),
-                            style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
-                        )
                         // 循环播放：到达终点自动回到起点开始新一轮
                         Row(
                             Modifier.padding(top = 12.dp).fillMaxWidth(),

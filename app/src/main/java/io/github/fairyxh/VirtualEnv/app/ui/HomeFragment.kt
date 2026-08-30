@@ -460,7 +460,7 @@ class HomeFragment : Fragment() {
                                 BasicText(
                                     value,
                                     style = TextStyle(
-                                        color = if (remoteEnvironmentEnabled && label in setOf(getString(R.string.env_cell_title), getString(R.string.env_wifi_title), getString(R.string.env_ble_title))) Color(0xFF42A5F5) else colors.textPrimary,
+                                        color = if (value == "远程环境") Color(0xFF42A5F5) else colors.textPrimary,
                                         fontSize = 12.sp
                                     )
                                 )
@@ -1416,7 +1416,8 @@ class HomeFragment : Fragment() {
             "sim" to getString(R.string.env_sim_title)
         ).forEach { (key, label) ->
             val enabled = envData?.optJSONObject(key)?.optBoolean("enabled", false) == true
-            val isRemoteControlled = remoteEnvironmentEnabled && key in setOf("cell", "wifi", "ble")
+            val remoteManager = RemoteEnvironmentRuntime.get(requireContext())
+            val isRemoteControlled = remoteManager.isUseRemote() && remoteManager.isTypeEnabled(key)
             featureStatusRows.add(
                 label to if (isRemoteControlled) "远程环境" else getString(if (enabled) R.string.location_enabled else R.string.location_disabled)
             )

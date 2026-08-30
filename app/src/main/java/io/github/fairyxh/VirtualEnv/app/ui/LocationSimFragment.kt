@@ -74,6 +74,7 @@ import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.cell.CellSignalCalculator
 import io.github.fairyxh.VirtualEnv.app.location.AmapLocationHelper
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
+import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassField
@@ -517,6 +518,8 @@ class LocationSimFragment : Fragment() {
                     containerColor = colors.bgSecondary.copy(alpha = 0.45f)
                 ) {
                     Column(Modifier.padding(16.dp)) {
+                        val remoteEnabled = RemoteEnvironmentRuntime.get(requireContext()).isUseRemote() &&
+                            RemoteEnvironmentRuntime.get(requireContext()).isTypeEnabled("gps")
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -536,6 +539,10 @@ class LocationSimFragment : Fragment() {
                                 selected = { enableChecked },
                                 onSelect = { checked ->
                                     if (updatingFromBackend) return@GlassToggle
+                                    if (remoteEnabled) {
+                                        Toast.makeText(requireContext(), "已启用远程环境", Toast.LENGTH_SHORT).show()
+                                        return@GlassToggle
+                                    }
                                     executor.execute {
                                         val result = ApiClient.setLocationEnabled(checked)
                                         requireActivity().runOnUiThread {
@@ -544,8 +551,13 @@ class LocationSimFragment : Fragment() {
                                         }
                                     }
                                 },
-                                backdrop = backdrop
+                                backdrop = backdrop,
+                                enabled = !remoteEnabled,
+                                onDisabledClick = { Toast.makeText(requireContext(), "已启用远程环境", Toast.LENGTH_SHORT).show() }
                             )
+                            if (remoteEnabled) {
+                                BasicText("已启用远程环境", Modifier.padding(top = 4.dp), style = TextStyle(color = androidx.compose.ui.graphics.Color(0xFF42A5F5), fontSize = 12.sp))
+                            }
                         }
                         BasicText(
                             statusText,
