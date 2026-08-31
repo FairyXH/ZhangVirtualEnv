@@ -573,8 +573,8 @@ class Backend private constructor(private val dataDir: File) {
             ZLog.i(TAG_SCOPE, "remote GPS track applied points=${points.size} speedMps=$speedMps")
             return true
         }
-        val latitude = data.optCoordinate("latitude", "lat")
-        val longitude = data.optCoordinate("longitude", "lon", "lng")
+        val latitude = data.optCoordinate("latitude", "lat") ?: points.firstOrNull()?.first
+        val longitude = data.optCoordinate("longitude", "lon", "lng") ?: points.firstOrNull()?.second
         if (latitude == null || longitude == null) return false
         val currentPoint = latitude to longitude
         val appended = routeEngine.appendPoint(latitude, longitude, speedMps * 3.6)
