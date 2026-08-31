@@ -393,6 +393,9 @@ class RemoteEnvironmentManager(context: Context) {
             ZLog.i("Remote", "module master switch is off; defer remote apply type=$type")
             return
         }
+        if (type == "gps") {
+            data.put("_gnssSourceEnabled", remoteEnabled["gnss"] == true)
+        }
         if (!localSnapshots.containsKey(type)) {
             localSnapshots[type] = runCatching {
                 if (type == "gps") ApiClient.getLocationStatus().data
@@ -418,6 +421,7 @@ class RemoteEnvironmentManager(context: Context) {
                 if (!has("entries")) put("entries", JSONArray())
             }
             "gnss" -> JSONObject(data.toString()).apply {
+                put("_remoteSource", true)
                 if (!has("satellites")) put("satellites", JSONArray())
             }
             "sensor" -> JSONObject(data.toString()).apply {
@@ -426,6 +430,9 @@ class RemoteEnvironmentManager(context: Context) {
             else -> JSONObject(data.toString())
         }
         try {
+            if (type == "gps") {
+                data.put("_gnssSourceEnabled", remoteEnabled["gnss"] == true)
+            }
             val result = ApiClient.setEnvData(envType, normalized)
             if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                 throw IllegalStateException("apply remote $type failed: ${result.message}")

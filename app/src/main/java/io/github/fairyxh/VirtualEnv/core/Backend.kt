@@ -489,6 +489,11 @@ class Backend private constructor(private val dataDir: File) {
     fun setEnvAutoManaged(type: String, auto: Boolean): Boolean {
         val engine = envEngine(type) ?: return false
         engine.setAutoManaged(auto)
+        if (type == "gnss" && auto) {
+            // Local GNSS simulation takes ownership when the remote GNSS source is disabled.
+            remoteGnssSourceEnabled = false
+            updateSimulatedGnssFromLocation()
+        }
         persistEnvState(type)
         ZLog.i(TAG_SCOPE, "env type=$type autoManaged=$auto")
         return true
@@ -553,9 +558,28 @@ class Backend private constructor(private val dataDir: File) {
     @Volatile
     private var lastRemoteGpsSequence = Long.MIN_VALUE
 
+    /** 当前远程数据源是否声明提供 GNSS；false 时 GPS 是本地 GNSS 模拟的输入。 */
+    @Volatile
+    private var remoteGnssSourceEnabled = false
+
+    fun setRemoteGnssSourceEnabled(enabled: Boolean) {
+        remoteGnssSourceEnabled = enabled
+        if (!enabled) updateSimulatedGnssFromLocation()
+        ZLog.i(TAG_SCOPE, "remote GNSS source enabled=$enabled")
+    }
+
+    /** GNSS 数据源关闭时，让每个远程 GPS 点刷新同一位置快照派生的本地 GNSS。 */
+    private fun updateSimulatedGnssFromLocation() {
+        if (!moduleEnabled || remoteGnssSourceEnabled || !gnssEngine.isEnabled()) return
+        gnssEngine.setAutoManaged(true)
+        val location = currentLocation() ?: return
+        ZLog.d(TAG_SCOPE, "local GNSS simulation refreshed from GPS lat=${location.latitude} lon=${location.longitude}")
+    }
+
     /** Apply one remote GPS frame as a static fix or a speed-controlled track. */
     fun applyRemoteGps(data: org.json.JSONObject): Boolean {
         if (!moduleEnabled) return false
+        data.optBoolean("_gnssSourceEnabled", remoteGnssSourceEnabled).let { remoteGnssSourceEnabled = it }
         val sequence = data.optLong("_sequence", data.optLong("sequence", Long.MIN_VALUE))
         if (sequence != Long.MIN_VALUE && sequence <= lastRemoteGpsSequence) {
             ZLog.d(TAG_SCOPE, "remote GPS duplicate ignored sequence=$sequence")
@@ -570,6 +594,7 @@ class Backend private constructor(private val dataDir: File) {
             // RouteEngine consumes km/h; missing optional GPS fields must not demote a valid track to a fix.
             routeEngine.start(points.toRemoteRouteJson(), speedMps * 3.6, 0)
             lastRemoteGpsSequence = sequence
+            updateSimulatedGnssFromLocation()
             ZLog.i(TAG_SCOPE, "remote GPS track applied points=${points.size} speedMps=$speedMps")
             return true
         }
@@ -581,6 +606,7 @@ class Backend private constructor(private val dataDir: File) {
         if (appended) {
             pendingRemoteRoutePoint = currentPoint
             lastRemoteGpsSequence = sequence
+            updateSimulatedGnssFromLocation()
             ZLog.i(TAG_SCOPE, "remote GPS waypoint appended ${latitude},${longitude} speedMps=$speedMps")
             return true
         }
@@ -590,6 +616,7 @@ class Backend private constructor(private val dataDir: File) {
             routeEngine.start(listOf(previousPoint, currentPoint).toRemoteRouteJson(), speedMps * 3.6, 0)
             pendingRemoteRoutePoint = currentPoint
             lastRemoteGpsSequence = sequence
+            updateSimulatedGnssFromLocation()
             ZLog.i(TAG_SCOPE, "remote GPS streamed route started speedMps=$speedMps")
             return true
         }
@@ -603,6 +630,7 @@ class Backend private constructor(private val dataDir: File) {
         pendingRemoteRoutePoint = currentPoint
         setLocationEnabled(true)
         lastRemoteGpsSequence = sequence
+        updateSimulatedGnssFromLocation()
         ZLog.i(TAG_SCOPE, "remote GPS first waypoint applied ${latitude},${longitude} speedMps=$speedMps")
         return true
     }
@@ -1251,6 +1279,12 @@ class Backend private constructor(private val dataDir: File) {
 
     /** 直接设置指定类型的虚拟环境数据（经 ApiServer 调用，/api/<type>/set）。 */
     fun setEnvData(type: String, data: org.json.JSONObject): Boolean {
+        if (type == "gnss" && data.has("_remoteSource")) {
+            remoteGnssSourceEnabled = data.optBoolean("_remoteSource", false)
+            data.remove("_remoteSource")
+            gnssEngine.setAutoManaged(!remoteGnssSourceEnabled)
+            if (!remoteGnssSourceEnabled) updateSimulatedGnssFromLocation()
+        }
         when (type) {
             "wifi" -> wifiEngine.update(data)
             "cell" -> cellEngine.update(data)
@@ -1364,7 +1398,13 @@ class Backend private constructor(private val dataDir: File) {
             "wifi" -> wifiEngine.setEnabled(enabled)
             "cell" -> cellEngine.setEnabled(enabled)
             "ble" -> bleEngine.setEnabled(enabled)
-            "gnss" -> gnssEngine.setEnabled(enabled)
+            "gnss" -> {
+                gnssEngine.setEnabled(enabled)
+                if (enabled) {
+                    gnssEngine.setAutoManaged(!remoteGnssSourceEnabled)
+                    if (!remoteGnssSourceEnabled) updateSimulatedGnssFromLocation()
+                }
+            }
             "sensor" -> {
                 sensorEngine.setEnabled(enabled)
                 notifySensorBackendConfigChanged()
