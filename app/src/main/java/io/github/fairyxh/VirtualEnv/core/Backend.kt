@@ -29,6 +29,7 @@ class Backend private constructor(private val dataDir: File) {
     companion object {
         private const val TAG_SCOPE = "Backend"
         private const val DIR_NAME = "zve"
+        private const val DEFAULT_REMOTE_ROUTE_SPEED_MPS = 1.4
 
         /** 采集拆分轨道快照的来源标记（追加在 remark 中，用于关联与识别）。 */
         const val TRACK_SOURCE_TAG = "（来自环境采集）"
@@ -535,43 +536,119 @@ class Backend private constructor(private val dataDir: File) {
 
     /** App 设置单点位置（经 ApiServer 调用）。 */
     fun setLocationPoint(latitude: Double, longitude: Double, speed: Float, bearing: Float) {
+        resetRemoteGpsSession()
         locationEngine.setPoint(latitude, longitude, speed, bearing)
         configManager.setPoint(latitude, longitude, speed, bearing)
     }
 
+    private fun resetRemoteGpsSession() {
+        pendingRemoteRoutePoint = null
+        lastRemoteGpsSequence = Long.MIN_VALUE
+    }
+
+    /** Pending first point for collectors that stream one GPS waypoint per frame. */
+    @Volatile
+    private var pendingRemoteRoutePoint: Pair<Double, Double>? = null
+
+    @Volatile
+    private var lastRemoteGpsSequence = Long.MIN_VALUE
+
     /** Apply one remote GPS frame as a static fix or a speed-controlled track. */
     fun applyRemoteGps(data: org.json.JSONObject): Boolean {
         if (!moduleEnabled) return false
-        val points = data.optJSONArray("points")
-        val speedMps = data.optDouble("speed_mps", data.optDouble("speedMps", 0.0)).coerceAtLeast(0.0)
-        if (points != null && points.length() >= 2) {
-            val normalized = org.json.JSONArray()
-            for (index in 0 until points.length()) {
-                val point = points.optJSONObject(index) ?: continue
-                val latitude = point.optDouble("latitude", point.optDouble("lat", Double.NaN))
-                val longitude = point.optDouble("longitude", point.optDouble("lon", Double.NaN))
-                if (!latitude.isNaN() && !longitude.isNaN()) {
-                    normalized.put(org.json.JSONObject().apply {
-                        put("lat", latitude)
-                        put("lon", longitude)
-                    })
-                }
-            }
-            if (normalized.length() >= 2) {
-                setLocationEnabled(false)
-                routeEngine.start(normalized.toString(), speedMps.coerceAtLeast(0.1) * 3.6, 0)
-                ZLog.i(TAG_SCOPE, "remote GPS track applied points=${normalized.length()} speedMps=$speedMps")
-                return true
+        val sequence = data.optLong("_sequence", data.optLong("sequence", Long.MIN_VALUE))
+        if (sequence != Long.MIN_VALUE && sequence <= lastRemoteGpsSequence) {
+            ZLog.d(TAG_SCOPE, "remote GPS duplicate ignored sequence=$sequence")
+            return true
+        }
+        val speedMps = data.optDouble("speed_mps", data.optDouble("speedMps", DEFAULT_REMOTE_ROUTE_SPEED_MPS))
+            .takeIf { it.isFinite() && it > 0.0 } ?: DEFAULT_REMOTE_ROUTE_SPEED_MPS
+        val points = extractRemoteGpsPoints(data)
+        if (points.size >= 2) {
+            pendingRemoteRoutePoint = null
+            setLocationEnabled(false)
+            // RouteEngine consumes km/h; missing optional GPS fields must not demote a valid track to a fix.
+            routeEngine.start(points.toRemoteRouteJson(), speedMps * 3.6, 0)
+            lastRemoteGpsSequence = sequence
+            ZLog.i(TAG_SCOPE, "remote GPS track applied points=${points.size} speedMps=$speedMps")
+            return true
+        }
+        val latitude = data.optCoordinate("latitude", "lat")
+        val longitude = data.optCoordinate("longitude", "lon", "lng")
+        if (latitude == null || longitude == null) return false
+        val currentPoint = latitude to longitude
+        val appended = routeEngine.appendPoint(latitude, longitude, speedMps * 3.6)
+        if (appended) {
+            pendingRemoteRoutePoint = currentPoint
+            lastRemoteGpsSequence = sequence
+            ZLog.i(TAG_SCOPE, "remote GPS waypoint appended ${latitude},${longitude} speedMps=$speedMps")
+            return true
+        }
+        val previousPoint = pendingRemoteRoutePoint
+        if (previousPoint != null && previousPoint != currentPoint) {
+            setLocationEnabled(false)
+            routeEngine.start(listOf(previousPoint, currentPoint).toRemoteRouteJson(), speedMps * 3.6, 0)
+            pendingRemoteRoutePoint = currentPoint
+            lastRemoteGpsSequence = sequence
+            ZLog.i(TAG_SCOPE, "remote GPS streamed route started speedMps=$speedMps")
+            return true
+        }
+        routeEngine.stop()
+        setLocationPoint(
+            latitude,
+            longitude,
+            speedMps.toFloat(),
+            data.optDouble("bearing_deg", data.optDouble("bearing", 0.0)).toFloat()
+        )
+        pendingRemoteRoutePoint = currentPoint
+        setLocationEnabled(true)
+        lastRemoteGpsSequence = sequence
+        ZLog.i(TAG_SCOPE, "remote GPS first waypoint applied ${latitude},${longitude} speedMps=$speedMps")
+        return true
+    }
+
+    /**
+     * Accept the canonical GPS points array and compatible route wrappers. The server's
+     * optional altitude/accuracy/timestamp fields are intentionally ignored by the route
+     * engine; latitude and longitude are the only required fields for route playback.
+     */
+    private fun extractRemoteGpsPoints(data: org.json.JSONObject): List<Pair<Double, Double>> {
+        val arrays = listOfNotNull(
+            data.optJSONArray("points"),
+            data.optJSONArray("track"),
+            data.optJSONObject("route")?.optJSONArray("points")
+        )
+        val source = arrays.firstOrNull { it.length() > 0 } ?: return emptyList()
+        return (0 until source.length()).mapNotNull { index ->
+            val point = source.optJSONObject(index) ?: return@mapNotNull null
+            val latitude = point.optCoordinate("latitude", "lat") ?: return@mapNotNull null
+            val longitude = point.optCoordinate("longitude", "lon", "lng") ?: return@mapNotNull null
+            if (latitude in -90.0..90.0 && longitude in -180.0..180.0) {
+                latitude to longitude
+            } else {
+                null
             }
         }
-        val latitude = data.optDouble("latitude", Double.NaN)
-        val longitude = data.optDouble("longitude", Double.NaN)
-        if (latitude.isNaN() || longitude.isNaN()) return false
-        routeEngine.stop()
-        setLocationPoint(latitude, longitude, speedMps.toFloat(), data.optDouble("bearing_deg", data.optDouble("bearing", 0.0)).toFloat())
-        setLocationEnabled(true)
-        ZLog.i(TAG_SCOPE, "remote GPS fix applied ${latitude},${longitude} speedMps=$speedMps")
-        return true
+    }
+
+    private fun org.json.JSONObject.optCoordinate(vararg keys: String): Double? {
+        for (key in keys) {
+            if (!has(key) || isNull(key)) continue
+            val value = optDouble(key, Double.NaN)
+            if (value.isFinite()) return value
+        }
+        return null
+    }
+
+    private fun List<Pair<Double, Double>>.toRemoteRouteJson(): String {
+        val array = org.json.JSONArray()
+        forEach { (latitude, longitude) ->
+            array.put(org.json.JSONObject().apply {
+                put("lat", latitude)
+                put("lon", longitude)
+            })
+        }
+        return array.toString()
     }
 
     /** App 开关虚拟定位（经 ApiServer 调用）。开启时与路线模拟互斥：先停路线。 */
@@ -917,6 +994,7 @@ class Backend private constructor(private val dataDir: File) {
         loop: Boolean? = null,
         smoothReturn: Boolean? = null
     ): org.json.JSONObject? {
+        resetRemoteGpsSession()
         val route = databaseManager.getRoute(id) ?: return null
         if (!moduleEnabled) {
             ZLog.w(TAG_SCOPE, "startRoute ignored id=$id: module master OFF")

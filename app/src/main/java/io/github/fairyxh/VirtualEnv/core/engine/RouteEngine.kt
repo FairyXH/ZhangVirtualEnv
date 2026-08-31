@@ -98,6 +98,28 @@ class RouteEngine(
         ZLog.i("Core", "RouteEngine paused at segment=${s.segmentIndex} progress=${s.progress}")
     }
 
+    /** Append a live waypoint without resetting the current route cursor. */
+    fun appendPoint(latitude: Double, longitude: Double, speedKmh: Double = 0.0): Boolean {
+        while (true) {
+            val current = state.get()
+            if (!current.enabled || current.points.size < 2) return false
+            val next = latitude to longitude
+            if (current.points.last() == next) return true
+            val now = SystemClock.elapsedRealtime()
+            val updated = current.copy(
+                running = true,
+                points = current.points + next,
+                speedMps = if (speedKmh > 0.0) (speedKmh / 3.6).coerceAtLeast(0.1) else current.speedMps,
+                lastTime = now,
+                updateTime = now
+            )
+            if (state.compareAndSet(current, updated)) {
+                ZLog.i("Core", "RouteEngine appended point count=${updated.points.size} speedKmh=${updated.speedMps * 3.6}")
+                return true
+            }
+        }
+    }
+
     /** 暂停后继续（不重置游标）。 */
     fun resume() {
         val s = state.get()
