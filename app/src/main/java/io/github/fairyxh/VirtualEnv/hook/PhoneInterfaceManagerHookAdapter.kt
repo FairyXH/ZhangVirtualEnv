@@ -76,8 +76,7 @@ class PhoneInterfaceManagerHookAdapter(
             val ok = registrar.register(method) { chain ->
                 // 严格放行：只有虚拟定位**且基站模拟已开启**才接管；否则走原始真实链路
                 if (!virtualLocationEnabled() || cache.currentCell() == null) {
-                    chain.proceed()
-                    return@register null
+                    return@register chain.proceed()
                 }
                 try {
                     val callback = chain.getArg(1)

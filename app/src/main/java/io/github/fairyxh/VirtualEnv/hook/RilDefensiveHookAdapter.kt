@@ -87,7 +87,6 @@ class RilDefensiveHookAdapter(
                     }
                 }
                 chain.proceed()
-                null
             }
             if (ok) {
                 hooked++

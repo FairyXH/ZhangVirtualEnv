@@ -159,7 +159,6 @@ class GnssDataBlockHookAdapter(
                     }
                 }
                 chain.proceed()
-                null
             }
             if (ok) {
                 ZLog.i(TAG_SCOPE, "hooked old-api GpsStatus.create")
@@ -316,8 +315,7 @@ class GnssDataBlockHookAdapter(
         val ok = registrar.register(method) { chain ->
             val listener = chain.getArg(0)
             if (listener == null) {
-                chain.proceed()
-                return@register null
+                return@register chain.proceed()
             }
             if (virtualLocationEnabled()) {
                 try {
@@ -374,7 +372,6 @@ class GnssDataBlockHookAdapter(
                 ZLog.w(TAG_SCOPE, "GnssStatus unregister hook failed", t)
             }
             chain.proceed()
-            null
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.unregisterGnssStatusCallback")
@@ -486,8 +483,7 @@ class GnssDataBlockHookAdapter(
         val ok = registrar.register(method) { chain ->
             val listener = chain.getArg(0)
             if (listener == null) {
-                chain.proceed()
-                return@register null
+                return@register chain.proceed()
             }
             if (virtualLocationEnabled()) {
                 try {
@@ -541,7 +537,6 @@ class GnssDataBlockHookAdapter(
                 ZLog.w(TAG_SCOPE, "GnssNmea unregister hook failed", t)
             }
             chain.proceed()
-            null
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.unregisterGnssNmeaCallback")
@@ -676,10 +671,13 @@ class GnssDataBlockHookAdapter(
         val ok = registrar.register(method) { chain ->
             if (virtualLocationEnabled()) {
                 ZLog.d(TAG_SCOPE, "blocked $methodName (virtual location)")
-                return@register null // void 方法：不 proceed，等于不注册 listener
+                // 不 proceed 等于不注册 listener：void 返回 null，boolean 返回 false（注册失败）
+                return@register when (method.returnType) {
+                    java.lang.Boolean.TYPE -> false
+                    else -> null
+                }
             }
             chain.proceed()
-            null
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $MANAGER_CLASS.$methodName")

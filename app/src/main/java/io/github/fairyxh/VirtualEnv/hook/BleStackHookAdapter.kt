@@ -187,7 +187,6 @@ class BleStackHookAdapter(
                     val helper = chain.getThisObject()
                     val scannerId = (chain.getArg(0) as? Int) ?: -1
                     deliverVirtual(helper, scannerId) ?: chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
@@ -233,7 +232,6 @@ class BleStackHookAdapter(
                         val scannerId = (chain.getArg(0) as? Int) ?: -1
                         logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
                         deliverVirtual(controller, scannerId) ?: chain.proceed()
-                        null
                     }
                     if (ok) {
                         hooked++

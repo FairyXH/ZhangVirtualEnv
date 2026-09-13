@@ -35,7 +35,6 @@ class CellObserveHookAdapter(
             // 先取真实小区参数（推送前，未虚拟化），再走原逻辑
             HookObserver.recordCellList(chain.getArg(1))
             chain.proceed()
-            null
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $CLASS_NAME.notifyCellInfoForSubscriber (observe)")

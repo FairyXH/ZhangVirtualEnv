@@ -92,7 +92,9 @@ class VirtualEnvEntry : XposedModule() {
             }
             val registrar = HookRegistrar { executable, interceptor ->
                 val ok = try {
-                    hook(executable).intercept(interceptor)
+                    // 统一包装：回调返回值按目标返回类型安全化，防止 null 被 Hook 桥
+                    // 解包成基本类型时抛 NPE 杀死宿主进程（详见 HookSupport.safeHookResult）
+                    hook(executable).intercept(HookSupport.guardInterceptor(executable, interceptor))
                     true
                 } catch (t: Throwable) {
                     ZLog.e(TAG_SCOPE, "app hook register failed: ${executable.declaringClass.name}.${executable.name}", t)
@@ -322,7 +324,9 @@ class VirtualEnvEntry : XposedModule() {
             // 安装 Hook Adapter
             val registrar = HookRegistrar { executable, interceptor ->
                 val ok = try {
-                    hook(executable).intercept(interceptor)
+                    // 统一包装：回调返回值按目标返回类型安全化，防止 null 被 Hook 桥
+                    // 解包成基本类型时抛 NPE 杀死 system_server（详见 HookSupport.safeHookResult）
+                    hook(executable).intercept(HookSupport.guardInterceptor(executable, interceptor))
                     true
                 } catch (t: Throwable) {
                     ZLog.e(TAG_SCOPE, "hook register failed: ${executable.declaringClass.name}.${executable.name}", t)

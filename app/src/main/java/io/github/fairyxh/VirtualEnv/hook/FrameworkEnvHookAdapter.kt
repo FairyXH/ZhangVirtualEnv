@@ -112,8 +112,10 @@ class FrameworkEnvHookAdapter(
                     } catch (t: Throwable) {
                         ZLog.w(TAG_SCOPE, "step register hook failed", t)
                     }
+                    // 未接管（类型不支持 / 模拟未开启）：执行真实注册并**返回原返回值**。
+                    // 注意：registerListener 返回 boolean；丢弃返回值返回 null 会让 Hook 桥
+                    // 解包 null 时抛 NPE，直接杀掉宿主进程（真机实测 GMS / com.android.bluetooth）。
                     chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
@@ -131,7 +133,6 @@ class FrameworkEnvHookAdapter(
                         ZLog.w(TAG_SCOPE, "step unregister hook failed", t)
                     }
                     chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
@@ -228,7 +229,6 @@ class FrameworkEnvHookAdapter(
                     } catch (_: Throwable) {
                     }
                     chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
@@ -385,7 +385,6 @@ class FrameworkEnvHookAdapter(
                     ZLog.w(TAG_SCOPE, "startScan(1) hook failed", t)
                 }
                 chain.proceed()
-                null
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(ScanCallback)")
         }
@@ -400,7 +399,6 @@ class FrameworkEnvHookAdapter(
                     ZLog.w(TAG_SCOPE, "startScan(3) hook failed", t)
                 }
                 chain.proceed()
-                null
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(List,ScanSettings,ScanCallback)")
         }

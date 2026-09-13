@@ -372,7 +372,6 @@ class LocationHookAdapter(
                 ZLog.w(TAG_SCOPE, "unregisterLocationListener hook failed", t)
             }
             chain.proceed()
-            null
         }
         if (ok) {
             ZLog.i(TAG_SCOPE, "hooked $className.unregisterLocationListener")

@@ -131,7 +131,6 @@ class OplusServiceStartBypass(
                     }
                 }
                 chain.proceed()
-                null
             }
             if (ok) hooked++
         }

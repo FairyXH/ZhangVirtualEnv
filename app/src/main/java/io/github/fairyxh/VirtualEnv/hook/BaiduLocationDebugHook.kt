@@ -342,7 +342,6 @@ class BaiduLocationDebugHook(
                         ZLog.w(TAG_SCOPE, "collector[$tag].f() hook failed", t)
                     }
                     chain.proceed()
-                    null
                 }
                 if (ok) hooked++
             }
@@ -386,7 +385,6 @@ class BaiduLocationDebugHook(
                     ZLog.w(TAG_SCOPE, "delivery hook failed", t)
                 }
                 chain.proceed()
-                null
             }
             if (ok) hooked++
         }

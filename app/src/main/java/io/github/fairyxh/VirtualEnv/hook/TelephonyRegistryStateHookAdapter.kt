@@ -43,7 +43,6 @@ class TelephonyRegistryStateHookAdapter(
                         ZLog.w(TAG_SCOPE, "TelephonyRegistry signal adaptation failed, fallback", t)
                     }
                     chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
@@ -69,7 +68,6 @@ class TelephonyRegistryStateHookAdapter(
                         ZLog.w(TAG_SCOPE, "TelephonyRegistry service-state adaptation failed, fallback", t)
                     }
                     chain.proceed()
-                    null
                 }
                 if (ok) {
                     hooked++
