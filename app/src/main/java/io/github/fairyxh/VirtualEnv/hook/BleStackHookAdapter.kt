@@ -347,7 +347,14 @@ class BleStackHookAdapter(
                         } catch (_: Throwable) {
                             null
                         }
-                        if (startVirtualDiscovery(service, caller)) {
+                        // 虚拟发现异常必须放行真实发现：Hook 失败不得阻断宿主行为
+                        val virtual = try {
+                            startVirtualDiscovery(service, caller)
+                        } catch (t: Throwable) {
+                            ZLog.w(TAG_SCOPE, "start virtual discovery failed, fallback real", t)
+                            false
+                        }
+                        if (virtual) {
                             return@register true
                         }
                         chain.proceed()
@@ -363,7 +370,11 @@ class BleStackHookAdapter(
                 ?.let { method ->
                     val ok = registrar.register(method) { chain ->
                         if (virtualDiscoveryActive.get()) {
-                            finishVirtualDiscovery(chain.getThisObject())
+                            try {
+                                finishVirtualDiscovery(chain.getThisObject())
+                            } catch (t: Throwable) {
+                                ZLog.w(TAG_SCOPE, "finish virtual discovery failed", t)
+                            }
                             return@register true
                         }
                         chain.proceed()
