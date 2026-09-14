@@ -57,8 +57,12 @@ class GnssDataBlockHookAdapter(
             !backend.isSuspended() &&
             (backend.locationEngine.isEnabled() || backend.routeEngine.isRunning())
 
+    /** GNSS 模拟未开启时不得注入或阻断任何卫星、NMEA、测量数据。 */
+    private fun virtualGnssEnabled(): Boolean =
+        virtualLocationEnabled() && backend.gnssEngine.currentData() != null
+
     private fun shouldBlockOriginal(): Boolean =
-        virtualLocationEnabled() && backend.isScanBlockingEnabled()
+        virtualGnssEnabled() && backend.isScanBlockingEnabled()
 
     private val statusExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ZVE-GnssInject").apply { isDaemon = true }
@@ -258,7 +262,7 @@ class GnssDataBlockHookAdapter(
         takeoverMonitor.scheduleWithFixedDelay(
             {
                 try {
-                    val enabled = virtualLocationEnabled()
+                    val enabled = virtualGnssEnabled()
                     if (enabled) {
                         // 启用边沿：对未接管但已注册的 listener 启动虚拟投递
                         allStatusListeners.forEach { (listener, injected) ->
@@ -340,7 +344,7 @@ class GnssDataBlockHookAdapter(
                 try {
                     allStatusListeners[listener] = false
                     chain.proceed()
-                    if (virtualLocationEnabled()) startStatusInject(listener)
+                    if (virtualGnssEnabled()) startStatusInject(listener)
                     ZLog.d(TAG_SCOPE, "GnssStatus registered (real) ${listener.javaClass.name}")
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssStatus real register failed", t)
@@ -398,7 +402,7 @@ class GnssDataBlockHookAdapter(
 
     private fun deliverVirtualStatus(listener: Any) {
         try {
-            if (!virtualLocationEnabled()) return
+            if (!virtualGnssEnabled()) return
             val status = buildVirtualGnssStatus() ?: return
             val method = findCallbackMethod(
                 listener,
@@ -506,7 +510,7 @@ class GnssDataBlockHookAdapter(
                 try {
                     allNmeaListeners[listener] = false
                     chain.proceed()
-                    if (virtualLocationEnabled()) startNmeaInject(listener)
+                    if (virtualGnssEnabled()) startNmeaInject(listener)
                     ZLog.d(TAG_SCOPE, "GnssNmea registered (real) ${listener.javaClass.name}")
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "GnssNmea real register failed", t)
@@ -564,7 +568,7 @@ class GnssDataBlockHookAdapter(
 
     private fun deliverVirtualNmea(listener: Any) {
         try {
-            if (!virtualLocationEnabled()) return
+            if (!virtualGnssEnabled()) return
             val loc = backend.currentLocation() ?: return
             val nmea = buildVirtualNmea(loc.latitude, loc.longitude) ?: return
             val method = findCallbackMethod(listener, "onNmeaReceived") ?: return
