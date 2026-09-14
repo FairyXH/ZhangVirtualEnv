@@ -48,25 +48,33 @@ object ApiClient {
 
     fun getStatus(): ApiResult = get("/api/status")
 
-    fun getLocationStatus(): ApiResult = get("/api/location/status")
+    fun getLocationStatus(suppressTransportFailure: Boolean = false): ApiResult =
+        get("/api/location/status", suppressTransportFailure)
 
-    fun setLocation(latitude: Double, longitude: Double, speed: Float, bearing: Float): ApiResult {
+    fun setLocation(
+        latitude: Double,
+        longitude: Double,
+        speed: Float,
+        bearing: Float,
+        suppressTransportFailure: Boolean = false,
+    ): ApiResult {
         val body = JSONObject().apply {
             put("latitude", latitude)
             put("longitude", longitude)
             put("speed", speed)
             put("bearing", bearing)
         }
-        return post("/api/location/set", body)
+        return post("/api/location/set", body, suppressTransportFailure)
     }
 
-    fun setLocationEnabled(enabled: Boolean): ApiResult {
+    fun setLocationEnabled(enabled: Boolean, suppressTransportFailure: Boolean = false): ApiResult {
         val body = JSONObject().apply { put("enabled", enabled) }
-        return post("/api/location/enable", body)
+        return post("/api/location/enable", body, suppressTransportFailure)
     }
 
     /** Submit a remote GPS fix or track to the system-side location engine. */
-    fun applyRemoteGps(data: JSONObject): ApiResult = post("/api/remote/gps", data)
+    fun applyRemoteGps(data: JSONObject): ApiResult =
+        post("/api/remote/gps", data, suppressTransportFailure = true)
 
     fun getSystemInfo(): ApiResult = get("/api/system/info")
 
@@ -233,12 +241,16 @@ object ApiClient {
     }
 
     /** 单类型开关：关闭时 Hook 放行真实数据（数据保留），开启时恢复。 */
-    fun setEnvEnabled(type: String, enabled: Boolean): ApiResult {
+    fun setEnvEnabled(
+        type: String,
+        enabled: Boolean,
+        suppressTransportFailure: Boolean = false,
+    ): ApiResult {
         val body = JSONObject().apply {
             put("type", type)
             put("enabled", enabled)
         }
-        return post("/api/env/enable", body)
+        return post("/api/env/enable", body, suppressTransportFailure)
     }
 
     /** 自动托管开关：开启后该类型 Hook 忽略用户配置，使用模块自动生成的最优配置。 */
@@ -272,9 +284,13 @@ object ApiClient {
     fun resumeEnv(): ApiResult = post("/api/env/resume", JSONObject())
 
     /** 直接设置指定环境类型的虚拟数据（cell/wifi/bluetooth/sensor/gnss）。 */
-    fun setEnvData(type: String, data: org.json.JSONObject): ApiResult {
+    fun setEnvData(
+        type: String,
+        data: org.json.JSONObject,
+        suppressTransportFailure: Boolean = false,
+    ): ApiResult {
         val body = JSONObject().apply { put("data", data) }
-        return post("/api/${envPath(type)}/set", body)
+        return post("/api/${envPath(type)}/set", body, suppressTransportFailure)
     }
 
     /** 设置基站自动托管缓存（OpenCellID 查询结果；data=null 表示附近无基站 → 空基站）。 */
@@ -285,13 +301,15 @@ object ApiClient {
     }
 
     /** 查询指定环境类型的虚拟数据状态。 */
-    fun getEnvStatus(type: String): ApiResult = get("/api/${envPath(type)}/status")
+    fun getEnvStatus(type: String, suppressTransportFailure: Boolean = false): ApiResult =
+        get("/api/${envPath(type)}/status", suppressTransportFailure)
 
     /** 当前生效 Profile 信息（排障用）。 */
     fun getProfileStatus(): ApiResult = get("/api/profile/status")
 
     /** 模块总开关状态。 */
-    fun getModuleStatus(): ApiResult = get("/api/module/status")
+    fun getModuleStatus(suppressTransportFailure: Boolean = false): ApiResult =
+        get("/api/module/status", suppressTransportFailure)
 
     /** 发布/读取当前 Consumer 远程环境模拟模式，供独立检测器选择判定路径。 */
     fun setRemoteSimulation(enabled: Boolean, deviceId: String = "", serverId: String = ""): ApiResult {
@@ -433,8 +451,8 @@ object ApiClient {
     /** 导入模块整体配置（整体覆盖并立即生效）。 */
     fun importConfig(json: JSONObject): ApiResult = post("/api/config/import", json)
 
-    private fun get(path: String): ApiResult {
-        return request("GET", path, null)
+    private fun get(path: String, suppressTransportFailure: Boolean = false): ApiResult {
+        return request("GET", path, null, suppressTransportFailure)
     }
 
     private fun post(path: String, body: JSONObject?, suppressTransportFailure: Boolean = false): ApiResult {

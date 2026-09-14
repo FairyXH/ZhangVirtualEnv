@@ -217,7 +217,13 @@ class RemoteEnvironmentManager(context: Context) {
         socket = null
         heartbeatTask?.cancel(false)
         heartbeatTask = null
-        if (restoreLocal) restoreLocalTypes() else localSnapshots.clear()
+        synchronized(stateLock) { pendingRemote.clear() }
+        val snapshots = synchronized(stateLock) {
+            localSnapshots.toMap().also { localSnapshots.clear() }
+        }
+        if (restoreLocal && snapshots.isNotEmpty()) {
+            writeExecutor.execute { restoreLocalTypes(snapshots) }
+        }
         if (useRemote) prepareRemoteTypesWithoutData()
         activeConfig = null
         activeDeviceId = null
@@ -304,7 +310,8 @@ class RemoteEnvironmentManager(context: Context) {
 
     fun refreshModuleEnabled() {
         writeExecutor.execute {
-            val enabled = ApiClient.getModuleStatus().data?.optBoolean("enabled", true) ?: true
+            val enabled = ApiClient.getModuleStatus(suppressTransportFailure = true)
+                .data?.optBoolean("enabled", true) ?: true
             setModuleEnabled(enabled)
         }
     }
@@ -379,9 +386,9 @@ class RemoteEnvironmentManager(context: Context) {
                     else -> JSONObject()
                 }
                 runCatching {
-                    val result = ApiClient.setEnvData(type, empty)
+                    val result = ApiClient.setEnvData(type, empty, suppressTransportFailure = true)
                     if (result.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                        ApiClient.setEnvEnabled(type, true)
+                        ApiClient.setEnvEnabled(type, true, suppressTransportFailure = true)
                     }
                 }.onFailure { ZLog.w("Remote", "clear disconnected remote type failed: $type", it) }
             }
@@ -396,11 +403,17 @@ class RemoteEnvironmentManager(context: Context) {
         if (type == "gps") {
             data.put("_gnssSourceEnabled", remoteEnabled["gnss"] == true)
         }
-        if (!localSnapshots.containsKey(type)) {
-            localSnapshots[type] = runCatching {
-                if (type == "gps") ApiClient.getLocationStatus().data
-                else ApiClient.getEnvStatus(type).data?.optJSONObject("data")
-            }.getOrNull()
+        synchronized(stateLock) {
+            if (!localSnapshots.containsKey(type)) {
+                localSnapshots[type] = runCatching {
+                    if (type == "gps") {
+                        ApiClient.getLocationStatus(suppressTransportFailure = true).data
+                    } else {
+                        ApiClient.getEnvStatus(type, suppressTransportFailure = true)
+                            .data?.optJSONObject("data")
+                    }
+                }.getOrNull()
+            }
         }
         if (type == "gps") {
             val applied = ApiClient.applyRemoteGps(data)
@@ -433,19 +446,19 @@ class RemoteEnvironmentManager(context: Context) {
             if (type == "gps") {
                 data.put("_gnssSourceEnabled", remoteEnabled["gnss"] == true)
             }
-            val result = ApiClient.setEnvData(envType, normalized)
+            val result = ApiClient.setEnvData(envType, normalized, suppressTransportFailure = true)
             if (result.code != io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
                 throw IllegalStateException("apply remote $type failed: ${result.message}")
             }
-            ApiClient.setEnvEnabled(envType, true)
+            ApiClient.setEnvEnabled(envType, true, suppressTransportFailure = true)
         } catch (t: Throwable) {
             ZLog.w("Remote", "apply remote $type exception: ${t.message}")
             throw t
         }
     }
 
-    private fun restoreLocalType(type: String) {
-        val local = localSnapshots[type] ?: return
+    private fun restoreLocalType(type: String, local: JSONObject?) {
+        local ?: return
         runCatching {
             if (type == "gps") {
                 val set = ApiClient.setLocation(
@@ -453,20 +466,23 @@ class RemoteEnvironmentManager(context: Context) {
                     local.optDouble("longitude", 0.0),
                     local.optDouble("speed", 0.0).toFloat(),
                     local.optDouble("bearing", 0.0).toFloat(),
+                    suppressTransportFailure = true,
                 )
                 if (set.code == io.github.fairyxh.VirtualEnv.core.model.ApiResult.CODE_OK) {
-                    ApiClient.setLocationEnabled(local.optBoolean("enabled", false))
+                    ApiClient.setLocationEnabled(
+                        local.optBoolean("enabled", false),
+                        suppressTransportFailure = true,
+                    )
                 }
             } else {
-                ApiClient.setEnvData(type, local)
-                ApiClient.setEnvEnabled(type, true)
+                ApiClient.setEnvData(type, local, suppressTransportFailure = true)
+                ApiClient.setEnvEnabled(type, true, suppressTransportFailure = true)
             }
         }.onFailure { ZLog.w("Remote", "restore local $type failed: ${it.message}") }
     }
 
-    private fun restoreLocalTypes() {
-        localSnapshots.keys.toList().forEach(::restoreLocalType)
-        localSnapshots.clear()
+    private fun restoreLocalTypes(snapshots: Map<String, JSONObject?>) {
+        snapshots.forEach(::restoreLocalType)
     }
 
     private fun persistState() {
