@@ -47,6 +47,7 @@ fun GlassButton(
     content: @Composable RowScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
+    val useBackdropEffects = AppBackground.useWallpaper && AppBackground.wallpaperBitmap != null
 
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
@@ -58,9 +59,11 @@ fun GlassButton(
                 backdrop = backdrop,
                 shape = { Capsule() },
                 effects = {
-                    vibrancy()
-                    blur(2f.dp.toPx())
-                    lens(12f.dp.toPx(), 24f.dp.toPx())
+                    if (useBackdropEffects) {
+                        vibrancy()
+                        blur(2f.dp.toPx())
+                        lens(12f.dp.toPx(), 24f.dp.toPx())
+                    }
                 },
                 layerBlock = if (isInteractive) {
                     {

@@ -42,6 +42,7 @@ fun GlassPill(
     content: @Composable BoxScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
+    val useBackdropEffects = AppBackground.useWallpaper && AppBackground.wallpaperBitmap != null
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
     }
@@ -53,9 +54,11 @@ fun GlassPill(
                 backdrop = backdrop,
                 shape = { Capsule() },
                 effects = {
-                    vibrancy()
-                    blur(6f.dp.toPx())
-                    lens(10f.dp.toPx(), 16f.dp.toPx())
+                    if (useBackdropEffects) {
+                        vibrancy()
+                        blur(6f.dp.toPx())
+                        lens(10f.dp.toPx(), 16f.dp.toPx())
+                    }
                 },
                 highlight = {
                     if (selected) Highlight.Default.copy(alpha = 0.7f) else null

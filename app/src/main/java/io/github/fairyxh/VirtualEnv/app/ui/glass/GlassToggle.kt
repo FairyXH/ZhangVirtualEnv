@@ -59,6 +59,7 @@ fun GlassToggle(
     onDisabledClick: (() -> Unit)? = null
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val useBackdropEffects = AppBackground.useWallpaper && AppBackground.wallpaperBitmap != null
     val accentColor =
         if (isLightTheme) Color(0xFF34C759)
         else Color(0xFF30D158)
@@ -175,13 +176,15 @@ fun GlassToggle(
                     ),
                     shape = { Capsule() },
                     effects = {
-                        val progress = dampedDragAnimation.pressProgress
-                        blur(8f.dp.toPx() * (1f - progress))
-                        lens(
-                            5f.dp.toPx() * progress,
-                            10f.dp.toPx() * progress,
-                            chromaticAberration = true
-                        )
+                        if (useBackdropEffects) {
+                            val progress = dampedDragAnimation.pressProgress
+                            blur(8f.dp.toPx() * (1f - progress))
+                            lens(
+                                5f.dp.toPx() * progress,
+                                10f.dp.toPx() * progress,
+                                chromaticAberration = true
+                            )
+                        }
                     },
                     highlight = {
                         val progress = dampedDragAnimation.pressProgress

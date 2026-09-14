@@ -84,6 +84,7 @@ fun GlassBottomTabs(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val useBackdropEffects = AppBackground.useWallpaper && AppBackground.wallpaperBitmap != null
     val colors = glassColors()
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
@@ -188,10 +189,10 @@ fun GlassBottomTabs(
                     backdrop = backdrop,
                     shape = { Capsule() },
                     effects = {
-                        vibrancy()
-                        // 胶囊保持全透：磨砂玻璃由底栏背景层（LiquidBottomBar 的
-                        // 采样层全宽 drawBackdrop）承担，这里只保留透镜折射
-                        lens(24f.dp.toPx(), 24f.dp.toPx())
+                        if (useBackdropEffects) {
+                            vibrancy()
+                            lens(24f.dp.toPx(), 24f.dp.toPx())
+                        }
                     },
                     layerBlock = {
                         val progress = dampedDragAnimation.pressProgress
@@ -226,13 +227,15 @@ fun GlassBottomTabs(
                         backdrop = backdrop,
                         shape = { Capsule() },
                         effects = {
-                            val progress = dampedDragAnimation.pressProgress
-                            vibrancy()
-                            blur(8f.dp.toPx())
-                            lens(
-                                24f.dp.toPx() * progress,
-                                24f.dp.toPx() * progress
-                            )
+                            if (useBackdropEffects) {
+                                val progress = dampedDragAnimation.pressProgress
+                                vibrancy()
+                                blur(8f.dp.toPx())
+                                lens(
+                                    24f.dp.toPx() * progress,
+                                    24f.dp.toPx() * progress
+                                )
+                            }
                         },
                         highlight = {
                             val progress = dampedDragAnimation.pressProgress
@@ -277,12 +280,14 @@ fun GlassBottomTabs(
                     backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
                     shape = { Capsule() },
                     effects = {
-                        val progress = dampedDragAnimation.pressProgress
-                        lens(
-                            10f.dp.toPx() * progress,
-                            14f.dp.toPx() * progress,
-                            chromaticAberration = true
-                        )
+                        if (useBackdropEffects) {
+                            val progress = dampedDragAnimation.pressProgress
+                            lens(
+                                10f.dp.toPx() * progress,
+                                14f.dp.toPx() * progress,
+                                chromaticAberration = true
+                            )
+                        }
                     },
                     highlight = {
                         val progress = dampedDragAnimation.pressProgress

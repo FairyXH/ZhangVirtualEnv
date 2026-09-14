@@ -44,6 +44,7 @@ fun GlassCard(
     content: @Composable BoxScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
+    val useBackdropEffects = AppBackground.useWallpaper && AppBackground.wallpaperBitmap != null
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
     }
@@ -54,9 +55,11 @@ fun GlassCard(
                 backdrop = backdrop,
                 shape = { RoundedRectangle(cornerRadius) },
                 effects = {
-                    vibrancy()
-                    blur(blurRadius)
-                    lens(refractionHeight, refractionAmount)
+                    if (useBackdropEffects) {
+                        vibrancy()
+                        blur(blurRadius)
+                        lens(refractionHeight, refractionAmount)
+                    }
                 },
                 highlight = {
                     Highlight.Default.copy(alpha = 0.9f)
