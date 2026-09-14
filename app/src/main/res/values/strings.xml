@@ -50,6 +50,9 @@
     <string name="home_saved_title">已保存采集</string>
     <string name="home_saved_select_hint">点击来选择采集</string>
     <string name="home_saved_empty">暂无已保存采集</string>
+    <string name="home_saved_prev">上一页</string>
+    <string name="home_saved_next">下一页</string>
+    <string name="home_saved_page">第 %1$d/%2$d 页 · 共 %3$d 条</string>
 
     <!-- 配置状态预设 -->
     <string name="home_preset_title">配置状态</string>

@@ -47,6 +47,7 @@ import io.github.fairyxh.VirtualEnv.app.remote.RemoteEnvironmentRuntime
 import io.github.fairyxh.VirtualEnv.app.cell.CellRepository
 import io.github.fairyxh.VirtualEnv.app.collect.EnvironmentCollector
 import io.github.fairyxh.VirtualEnv.app.collect.VrenvTransfer
+import io.github.fairyxh.VirtualEnv.app.location.AmapAddressHelper
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassBackdropHost
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassButton
 import io.github.fairyxh.VirtualEnv.app.ui.glass.GlassCard
@@ -83,6 +84,7 @@ class HomeFragment : Fragment() {
         private const val KEY_COLLECT_NAME = "collect_name"
         private const val KEY_COLLECT_REMARK = "collect_remark"
         private const val REQ_PERMISSIONS = 1001
+        private const val SAVED_PAGE_SIZE = 8
 
         private val REQUIRED_PERMISSIONS: Array<String>
             get() {
@@ -143,6 +145,7 @@ class HomeFragment : Fragment() {
     /** OpenCellID 贡献上传结果（采集/录像模式共用，显示在对应结果下方）。 */
     private var collectContributeResult by mutableStateOf<String?>(null)
     private var collectName by mutableStateOf("")
+    private var collectNameIsAutomatic by mutableStateOf(true)
     private var detailDialog by mutableStateOf<Pair<String, String>?>(null)
     private var collectRemark by mutableStateOf("")
     private var collectButtonEnabled by mutableStateOf(true)
@@ -167,6 +170,7 @@ class HomeFragment : Fragment() {
     private var playbackLoop by mutableStateOf(true)
 
     private val savedItems = mutableStateListOf<SavedItem>()
+    private var savedPage by mutableStateOf(0)
     private var selectedItem: SavedItem? = null
 
     /** 已保存采集卡导入导出选择模式（复选框单选，一次只处理一份）。 */
@@ -244,6 +248,7 @@ class HomeFragment : Fragment() {
         recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
         recordingInterval = prefs.getString(KEY_RECORDING_INTERVAL, "3") ?: "3"
         collectName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        collectNameIsAutomatic = true
         collectRemark = prefs.getString(KEY_COLLECT_REMARK, "") ?: ""
         playbackStatus = getString(R.string.home_playback_idle)
         collectRecordingMode = false
@@ -667,7 +672,10 @@ class HomeFragment : Fragment() {
                             }
                             GlassField(
                                 value = collectName,
-                                onValueChange = { collectName = it },
+                                onValueChange = {
+                                    collectName = it
+                                    collectNameIsAutomatic = false
+                                },
                                 backdrop = backdrop,
                                 modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
                                 placeholder = getString(R.string.home_collect_name_hint)
@@ -1031,7 +1039,9 @@ class HomeFragment : Fragment() {
                                 style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                             )
                         } else {
-                            savedItems.forEach { item ->
+                            val totalPages = (savedItems.size + SAVED_PAGE_SIZE - 1) / SAVED_PAGE_SIZE
+                            val page = savedPage.coerceIn(0, totalPages - 1)
+                            savedItems.drop(page * SAVED_PAGE_SIZE).take(SAVED_PAGE_SIZE).forEach { item ->
                                 SavedItemRow(
                                     item = item,
                                     selected = selectedItem?.kind == item.kind && selectedItem?.id == item.id,
@@ -1043,6 +1053,35 @@ class HomeFragment : Fragment() {
                                     onDetail = { fragment.showSavedDetail(item) },
                                     onDelete = { fragment.deleteItem(item) }
                                 )
+                            }
+                            Row(
+                                Modifier.padding(top = 10.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassButton(
+                                    onClick = { savedPage = (page - 1).coerceAtLeast(0) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.width(88.dp),
+                                    isInteractive = false,
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                                ) {
+                                    BasicText(getString(R.string.home_saved_prev), style = TextStyle(colors.textPrimary, 12.sp))
+                                }
+                                BasicText(
+                                    getString(R.string.home_saved_page, page + 1, totalPages, savedItems.size),
+                                    Modifier.weight(1f),
+                                    style = TextStyle(colors.textTertiary, 12.sp)
+                                )
+                                GlassButton(
+                                    onClick = { savedPage = (page + 1).coerceAtMost(totalPages - 1) },
+                                    backdrop = backdrop,
+                                    modifier = Modifier.width(88.dp),
+                                    isInteractive = false,
+                                    surfaceColor = colors.bgSecondary.copy(alpha = 0.5f)
+                                ) {
+                                    BasicText(getString(R.string.home_saved_next), style = TextStyle(colors.textPrimary, 12.sp))
+                                }
                             }
                         }
                     }
@@ -1515,6 +1554,7 @@ class HomeFragment : Fragment() {
                     collectButtonEnabled = true
                     saveCollectEnabled = true
                     collectResult = summarize(result)
+                    fillAutomaticCollectName(result)
                     ZLog.i(
                         TAG_SCOPE,
                         "collect done: ${result.length()} hookObserve=${observe?.length() ?: -1}"
@@ -1525,6 +1565,19 @@ class HomeFragment : Fragment() {
     }
 
     // ---------- 保存采集（collect 包 + 轨道拆分） ----------
+
+    private fun fillAutomaticCollectName(result: JSONObject) {
+        if (!collectNameIsAutomatic || !isAdded) return
+        val location = result.optJSONObject("location") ?: return
+        val latitude = location.optDouble("latitude", Double.NaN)
+        val longitude = location.optDouble("longitude", Double.NaN)
+        AmapAddressHelper.reverseGeocode(requireContext(), latitude, longitude) { address ->
+            if (!isAdded || !collectNameIsAutomatic || address.isNullOrBlank()) return@reverseGeocode
+            requireActivity().runOnUiThread {
+                if (collectNameIsAutomatic) collectName = address
+            }
+        }
+    }
 
     private fun saveCollect() {
         val name = collectName.trim()
@@ -2009,6 +2062,7 @@ class HomeFragment : Fragment() {
                         )
                     }
                 }
+                savedPage = savedPage.coerceIn(0, ((savedItems.size - 1).coerceAtLeast(0)) / SAVED_PAGE_SIZE)
                 val restored = savedItems.firstOrNull {
                     it.kind == savedPlaybackKind && it.id == savedPlaybackId
                 }
@@ -2425,6 +2479,7 @@ class HomeFragment : Fragment() {
     /** 保存/录制成功后重置默认名称（时间命名）。 */
     private fun resetDefaultNames() {
         collectName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_collect_title))
+        collectNameIsAutomatic = true
         collectRemark = ""
         recordingName = io.github.fairyxh.VirtualEnv.util.DefaultNames.timeName(getString(R.string.home_recording_title))
     }
