@@ -1109,9 +1109,8 @@ class Backend private constructor(private val dataDir: File) {
         ZLog.i(TAG_SCOPE, "settings jitterEnabled=$enabled")
     }
 
-    /** 模块生效时的原始数据总闸门；总开关关闭后必须恢复真实数据。 */
-    fun isScanBlockingEnabled(): Boolean =
-        moduleEnabled && configManager.isScanBlockingEnabled()
+    /** 开启后模拟数据独占对应数据源；关闭后允许真实数据与模拟数据并存。 */
+    fun isScanBlockingEnabled(): Boolean = configManager.isScanBlockingEnabled()
 
     fun setScanBlockingEnabled(enabled: Boolean) {
         configManager.setScanBlockingEnabled(enabled)
@@ -1716,7 +1715,6 @@ class Backend private constructor(private val dataDir: File) {
     /** 当前虚拟环境状态（App 展示用）。 */
     fun envStatusJson(): org.json.JSONObject {
         return org.json.JSONObject().apply {
-            put("moduleEnabled", moduleEnabled)
             put("wifi", wifiEngine.statusJson())
             put("cell", cellEngine.statusJson())
             put("ble", bleEngine.statusJson())

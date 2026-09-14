@@ -49,7 +49,6 @@ class EnvStateCache(
     private var lastSensorTickMs: Long = 0L
     private var jitterEnabled: Boolean = true
     private var scanBlockingEnabled: Boolean = true
-    private var moduleEnabled: Boolean = true
 
     /** system_server 侧传感器后端状态（全局模式是否已生效）。 */
     private var sensorBackendStatus: io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus? = null
@@ -72,7 +71,6 @@ class EnvStateCache(
         try {
             val data = rawGet("/api/env/status") ?: return
             synchronized(lock) {
-                moduleEnabled = data.optBoolean("moduleEnabled", true)
                 // 单类型开关：enabled=false 时 Hook 放行真实数据（数据保留在引擎内）
                 wifi = data.optJSONObject("wifi")
                     ?.takeIf { it.optBoolean("enabled", false) }
@@ -188,9 +186,7 @@ class EnvStateCache(
     fun currentSim(): JSONObject? = synchronized(lock) { sim }
 
     /** 模拟开启时是否只向目标应用提供虚拟扫描数据。 */
-    fun isScanBlockingEnabled(): Boolean = synchronized(lock) {
-        moduleEnabled && scanBlockingEnabled
-    }
+    fun isScanBlockingEnabled(): Boolean = synchronized(lock) { scanBlockingEnabled }
 
     /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
     fun isSensorStreamActive(): Boolean = synchronized(lock) {
