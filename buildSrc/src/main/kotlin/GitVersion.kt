@@ -94,6 +94,9 @@ object GitVersion {
     ) {
         val file =
             File(VERSION_FILE)
+        if (readSavedVersion() == version) {
+            return
+        }
         val properties =
             Properties()
         properties.setProperty(

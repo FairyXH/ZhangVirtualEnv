@@ -24,12 +24,36 @@ android {
         }
     }
 
+    val releaseStoreFile = providers.environmentVariable("ZVE_RELEASE_STORE_FILE").orNull
+    val releaseStorePassword = providers.environmentVariable("ZVE_RELEASE_STORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("ZVE_RELEASE_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("ZVE_RELEASE_KEY_PASSWORD").orNull
+    val releaseRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+
+    if (releaseRequested) {
+        require(!releaseStoreFile.isNullOrBlank()) { "ZVE_RELEASE_STORE_FILE is required" }
+        require(!releaseStorePassword.isNullOrBlank()) { "ZVE_RELEASE_STORE_PASSWORD is required" }
+        require(!releaseKeyAlias.isNullOrBlank()) { "ZVE_RELEASE_KEY_ALIAS is required" }
+        require(!releaseKeyPassword.isNullOrBlank()) { "ZVE_RELEASE_KEY_PASSWORD is required" }
+    }
+
+    signingConfigs {
+        create("release") {
+            releaseStoreFile?.let { storeFile = file(it) }
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles("proguard-rules.pro")
-            signingConfig = signingConfigs["debug"]
+            signingConfig = signingConfigs["release"]
         }
     }
 
