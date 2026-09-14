@@ -391,17 +391,11 @@ class WifiServiceHookAdapter(
     private fun hookStartScan(clazz: Class<*>) {
         val method = findMethod(clazz, "startScan", 2) ?: return
         val ok = registrar.register(method) { chain ->
-            val original = chain.proceed()
-            try {
-                if (virtualLocationEnabled()) {
-                    ZLog.d(TAG_SCOPE, "WifiService.startScan -> false (virtual location)")
-                    false
-                } else {
-                    original
-                }
-            } catch (t: Throwable) {
-                ZLog.w(TAG_SCOPE, "WifiService.startScan virtual failed, fallback", t)
-                original
+            if (backend.wifiEngine.currentData() != null && backend.isScanBlockingEnabled()) {
+                ZLog.d(TAG_SCOPE, "WifiService.startScan -> false (wifi simulation exclusive)")
+                false
+            } else {
+                chain.proceed()
             }
         }
         if (ok) ZLog.i(TAG_SCOPE, "hooked WifiServiceImpl.startScan")
