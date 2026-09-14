@@ -111,6 +111,7 @@ class BleStackHookAdapter(
                 }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
+                        val blockRealScan = shouldBlockRealScan()
                         val binder = chain.getThisObject()
                         val scannerId = (chain.getArg(0) as? Int) ?: -1
                         // 从 binder 取 GattService → TransitionalScanHelper（用于解析 scannerMap）
@@ -121,9 +122,9 @@ class BleStackHookAdapter(
                             null
                         }
                         if (helper != null) {
-                            val delivered = deliverVirtual(helper, scannerId)
-                            if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed()
-                        } else {
+                            deliverVirtual(helper, scannerId)
+                        }
+                        if (!blockRealScan) {
                             chain.proceed()
                         }
                         null
@@ -149,6 +150,7 @@ class BleStackHookAdapter(
                 }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
+                        val blockRealScan = shouldBlockRealScan()
                         val binder = chain.getThisObject()
                         val scannerId = (chain.getArg(0) as? Int) ?: -1
                         // 从 binder 取 ScanController → TransitionalScanHelper（用于解析 scannerMap）
@@ -159,9 +161,9 @@ class BleStackHookAdapter(
                             null
                         }
                         if (helper != null) {
-                            val delivered = deliverVirtual(helper, scannerId)
-                            if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed()
-                        } else {
+                            deliverVirtual(helper, scannerId)
+                        }
+                        if (!blockRealScan) {
                             chain.proceed()
                         }
                         null
@@ -186,10 +188,11 @@ class BleStackHookAdapter(
             }
             .forEach { method ->
                 val ok = registrar.register(method) { chain ->
+                    val blockRealScan = shouldBlockRealScan()
                     val helper = chain.getThisObject()
                     val scannerId = (chain.getArg(0) as? Int) ?: -1
                     val delivered = deliverVirtual(helper, scannerId)
-                    if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed() else delivered
+                    if (blockRealScan) delivered else chain.proceed()
                 }
                 if (ok) {
                     hooked++
@@ -231,11 +234,12 @@ class BleStackHookAdapter(
                 }
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
+                        val blockRealScan = shouldBlockRealScan()
                         val controller = chain.getThisObject()
                         val scannerId = (chain.getArg(0) as? Int) ?: -1
                         logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
                         val delivered = deliverVirtual(controller, scannerId)
-                        if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed() else delivered
+                        if (blockRealScan) delivered else chain.proceed()
                     }
                     if (ok) {
                         hooked++
@@ -322,6 +326,9 @@ class BleStackHookAdapter(
         }
     }
 
+    private fun shouldBlockRealScan(): Boolean =
+        cache.currentBle() != null && cache.isScanBlockingEnabled()
+
     /**
      * 经典 BR/EDR 与双模设备发现虚拟化（Oplus 15 蓝牙栈）。
      *
@@ -344,6 +351,7 @@ class BleStackHookAdapter(
                 .firstOrNull { it.parameterCount == 1 && it.parameterTypes[0].simpleName == "AttributionSource" }
                 ?.let { method ->
                     val ok = registrar.register(method) { chain ->
+                        val blockRealScan = shouldBlockRealScan()
                         val service = chain.getThisObject()
                         val caller = try {
                             val attr = chain.getArg(0)
@@ -358,11 +366,7 @@ class BleStackHookAdapter(
                             ZLog.w(TAG_SCOPE, "start virtual discovery failed, fallback real", t)
                             false
                         }
-                        if (virtual) {
-                            if (cache.isScanBlockingEnabled()) return@register true
-                            return@register chain.proceed()
-                        }
-                        chain.proceed()
+                        if (blockRealScan) true else chain.proceed()
                     }
                     if (ok) {
                         hooked++

@@ -96,14 +96,16 @@ class FrameworkEnvHookAdapter(
             .forEach { method ->
                 if (method.parameterTypes[1].simpleName != "Sensor") return@forEach
                 val ok = registrar.register(method) { chain ->
+                    val blockRealSensor =
+                        cache.isSensorStreamActive() && cache.isScanBlockingEnabled()
                     try {
                         val listener = chain.getArg(0)
                         val sensor = chain.getArg(1)
                         val type = sensor.javaClass.getMethod("getType").invoke(sensor) as? Int ?: -1
                         val taken = sensorManager.onListenerRegistered(listener, sensor, type)
-                        if (taken && cache.isScanBlockingEnabled()) {
+                        if (blockRealSensor) {
                             // 注入器接管：屏蔽真实传感器（不 proceed 原注册，真实事件不再到达）
-                            ZLog.d(TAG_SCOPE, "registerListener type=$type intercepted (virtual active)")
+                            ZLog.d(TAG_SCOPE, "registerListener type=$type intercepted (virtual active, injected=$taken)")
                             return@register when (method.returnType) {
                                 java.lang.Boolean.TYPE -> true
                                 else -> null
@@ -377,9 +379,11 @@ class FrameworkEnvHookAdapter(
         if (oneParam != null) {
             val ok = registrar.register(oneParam) { chain ->
                 val callback = chain.getArg(0)
+                val blockRealScan =
+                    cache.currentBle() != null && cache.isScanBlockingEnabled()
                 try {
                     if (deliverVirtualBle(callback) == true) {
-                        if (cache.isScanBlockingEnabled()) return@register null
+                        if (blockRealScan) return@register null
                         return@register chain.proceed()
                     }
                     // 未启用/未就绪：暂存回调，配置就绪后补投递虚拟结果；同时放行真实扫描
@@ -388,6 +392,7 @@ class FrameworkEnvHookAdapter(
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "startScan(1) hook failed", t)
                 }
+                if (blockRealScan) return@register null
                 chain.proceed()
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(ScanCallback)")
@@ -395,9 +400,11 @@ class FrameworkEnvHookAdapter(
         if (threeParam != null) {
             val ok = registrar.register(threeParam) { chain ->
                 val callback = chain.getArg(2)
+                val blockRealScan =
+                    cache.currentBle() != null && cache.isScanBlockingEnabled()
                 try {
                     if (deliverVirtualBle(callback) == true) {
-                        if (cache.isScanBlockingEnabled()) return@register null
+                        if (blockRealScan) return@register null
                         return@register chain.proceed()
                     }
                     pendingBleCallbacks.add(callback)
@@ -405,6 +412,7 @@ class FrameworkEnvHookAdapter(
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "startScan(3) hook failed", t)
                 }
+                if (blockRealScan) return@register null
                 chain.proceed()
             }
             if (ok) ZLog.i(TAG_SCOPE, "hooked BluetoothLeScanner.startScan(List,ScanSettings,ScanCallback)")
