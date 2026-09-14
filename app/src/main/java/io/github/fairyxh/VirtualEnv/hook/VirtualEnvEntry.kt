@@ -337,7 +337,13 @@ class VirtualEnvEntry : XposedModule() {
             }
             LocationHookAdapter(backend, registrar).install(param.classLoader)
             // WiFi 服务端 Hook：全局阻断第三方地图读取真实 WiFi 扫描/连接信息进行网络定位
-            WifiServiceHookAdapter(backend, registrar).install(param.classLoader)
+            val wifiServiceHook = WifiServiceHookAdapter(backend, registrar)
+            wifiServiceHook.install(param.classLoader)
+            WifiScannerServiceHookAdapter(
+                backend,
+                registrar,
+                wifiServiceHook::buildVirtualScanResults,
+            ).install()
             // 蓝牙适配器身份虚拟化：BluetoothAdapter.getAddress/getName/getState/isEnabled（全局）
             val btHooked = BluetoothIdentityHookAdapter(backend, registrar).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] bluetooth identity hooks installed hooked=$btHooked")

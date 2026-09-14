@@ -147,7 +147,7 @@ class WifiServiceHookAdapter(
      * 构造虚拟扫描结果列表；未配置虚拟 WiFi 时返回空列表（阻断网络定位数据源）。
      * 返回元素类型为 android.net.wifi.ScanResult。
      */
-    private fun buildVirtualScanResults(data: JSONObject?): List<Any> {
+    internal fun buildVirtualScanResults(data: JSONObject?): List<Any> {
         if (data == null) return emptyList()
         val networks = data.optJSONArray("networks") ?: return emptyList()
         val resultClass = try {
