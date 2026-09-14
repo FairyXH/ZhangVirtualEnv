@@ -295,7 +295,11 @@ class RemoteEnvironmentManager(context: Context) {
         if (useRemote && enabled) {
             latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
         } else if (!enabled) {
-            writeExecutor.execute { restoreLocalType(type) }
+            val local = synchronized(stateLock) {
+                pendingRemote.remove(type)
+                localSnapshots.remove(type)
+            }
+            writeExecutor.execute { restoreLocalType(type, local) }
         }
     }
 
