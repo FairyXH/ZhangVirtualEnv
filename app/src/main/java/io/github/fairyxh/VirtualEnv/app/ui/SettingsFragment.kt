@@ -147,6 +147,7 @@ class SettingsFragment : Fragment() {
     private var launcherHidden by mutableStateOf(false)
     private var showDeveloperNotice by mutableStateOf(false)
     private var jitterEnabled by mutableStateOf(true)
+    private var scanBlockingEnabled by mutableStateOf(true)
     private var hookStatusSummary by mutableStateOf("")
     private var hookStatusDetail by mutableStateOf("")
     /** 运行日志卡片：崩溃记录 + 最近日志预览 + 刷新计数。 */
@@ -165,6 +166,18 @@ class SettingsFragment : Fragment() {
                 ZLog.w(TAG_SCOPE, "set jitter setting failed: ${t.message}")
             }
         }.start()
+    }
+
+    private fun setScanBlockingSwitch(enabled: Boolean) {
+        scanBlockingEnabled = enabled
+        Thread {
+            runCatching { ApiClient.setScanBlockingSetting(enabled) }
+                .onFailure { ZLog.w(TAG_SCOPE, "set scan blocking failed: ${it.message}") }
+        }.apply {
+            name = "ZVE-ScanBlockingSetting"
+            isDaemon = true
+            start()
+        }
     }
 
     private var envTestRunningState by mutableStateOf(false)
@@ -712,6 +725,28 @@ class SettingsFragment : Fragment() {
                         GlassToggle(
                             selected = { fragment.jitterEnabled },
                             onSelect = { fragment.setJitterSwitch(it) },
+                            backdrop = backdrop,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                    }
+                }
+
+                GlassCard(
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = colors.bgSecondary.copy(alpha = 0.45f)
+                ) {
+                    Row(
+                        Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            SectionTitle(getString(R.string.settings_scan_block_title))
+                            SectionDesc(getString(R.string.settings_scan_block_desc))
+                        }
+                        GlassToggle(
+                            selected = { fragment.scanBlockingEnabled },
+                            onSelect = { fragment.setScanBlockingSwitch(it) },
                             backdrop = backdrop,
                             modifier = Modifier.padding(start = 12.dp)
                         )
@@ -2534,7 +2569,11 @@ class SettingsFragment : Fragment() {
                 val result = ApiClient.getJitterSetting()
                 if (result.code == 0) {
                     val enabled = result.data?.optBoolean("jitterEnabled", true) ?: true
-                    activity?.runOnUiThread { jitterEnabled = enabled }
+                    val blockScanning = result.data?.optBoolean("scanBlockingEnabled", true) ?: true
+                    activity?.runOnUiThread {
+                        jitterEnabled = enabled
+                        scanBlockingEnabled = blockScanning
+                    }
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "load jitter setting failed: ${t.message}")

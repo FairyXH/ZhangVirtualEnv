@@ -183,6 +183,13 @@ object ApiClient {
         return post("/api/settings/jitter", body)
     }
 
+    fun getScanBlockingSetting(): ApiResult = get("/api/settings/scan-block")
+
+    fun setScanBlockingSetting(enabled: Boolean): ApiResult {
+        val body = JSONObject().apply { put("enabled", enabled) }
+        return post("/api/settings/scan-block", body)
+    }
+
     // ---------- LocationPoint ----------
 
     fun createLocationPoint(name: String, remark: String, latitude: Double, longitude: Double): ApiResult {

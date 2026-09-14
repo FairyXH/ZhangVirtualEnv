@@ -245,6 +245,8 @@
     <string name="settings_appearance_desc">使用桌面壁纸作为 App 背景图</string>
     <string name="settings_sim_title">随机抖动</string>
     <string name="settings_sim_jitter_desc">位置模拟 / 路线模拟叠加随机 GPS 抖动（更真实；关闭后坐标稳定）</string>
+    <string name="settings_scan_block_title">屏蔽扫描</string>
+    <string name="settings_scan_block_desc">开启后屏蔽基站、WiFi、蓝牙、传感器、GNSS、SIM 等原始信息，仅提供虚拟环境数据；关闭后两类数据混合</string>
     <string name="dialog_close">关闭</string>
     <string name="settings_appearance_permission_denied">需要照片/文件权限才能使用壁纸背景</string>
     <string name="map_fullscreen">全屏</string>

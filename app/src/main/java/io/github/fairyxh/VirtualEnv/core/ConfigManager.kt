@@ -24,6 +24,7 @@ class ConfigManager(private val configDir: File) {
         private const val KEY_BEARING = "bearing"
         private const val KEY_SETTINGS = "settings"
         private const val KEY_JITTER_ENABLED = "jitterEnabled"
+        private const val KEY_SCAN_BLOCKING_ENABLED = "scanBlockingEnabled"
         private const val KEY_MODULE = "module"
         private const val KEY_MODULE_ENABLED = "enabled"
     }
@@ -58,6 +59,14 @@ class ConfigManager(private val configDir: File) {
 
     fun setJitterEnabled(enabled: Boolean) {
         update(KEY_SETTINGS) { it.put(KEY_JITTER_ENABLED, enabled) }
+    }
+
+    /** 模拟开启时是否屏蔽同类真实扫描数据；默认开启以保持虚拟环境隔离。 */
+    fun isScanBlockingEnabled(): Boolean =
+        load().optJSONObject(KEY_SETTINGS)?.optBoolean(KEY_SCAN_BLOCKING_ENABLED, true) ?: true
+
+    fun setScanBlockingEnabled(enabled: Boolean) {
+        update(KEY_SETTINGS) { it.put(KEY_SCAN_BLOCKING_ENABLED, enabled) }
     }
 
     fun isLocationEnabled(): Boolean = load().optJSONObject(KEY_LOCATION)?.optBoolean(KEY_ENABLED, false) ?: false

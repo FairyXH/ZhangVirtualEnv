@@ -48,6 +48,7 @@ class EnvStateCache(
     private var stepCounter: Long = 0L
     private var lastSensorTickMs: Long = 0L
     private var jitterEnabled: Boolean = true
+    private var scanBlockingEnabled: Boolean = true
 
     /** system_server 侧传感器后端状态（全局模式是否已生效）。 */
     private var sensorBackendStatus: io.github.fairyxh.VirtualEnv.core.sensor.SensorBackendStatus? = null
@@ -125,6 +126,7 @@ class EnvStateCache(
             val settings = rawGet("/api/settings/jitter") ?: return
             synchronized(lock) {
                 jitterEnabled = settings.optBoolean("jitterEnabled", true)
+                scanBlockingEnabled = settings.optBoolean("scanBlockingEnabled", true)
             }
         } catch (t: Throwable) {
             ZLog.w(TAG_SCOPE, "refresh settings cache failed: ${t.message}")
@@ -182,6 +184,9 @@ class EnvStateCache(
 
     /** 当前虚拟 SIM 数据；未启用时 null。 */
     fun currentSim(): JSONObject? = synchronized(lock) { sim }
+
+    /** 模拟开启时是否只向目标应用提供虚拟扫描数据。 */
+    fun isScanBlockingEnabled(): Boolean = synchronized(lock) { scanBlockingEnabled }
 
     /** 传感器模拟是否处于活动状态（步频模拟或传感器连续流/事件流数据）。 */
     fun isSensorStreamActive(): Boolean = synchronized(lock) {

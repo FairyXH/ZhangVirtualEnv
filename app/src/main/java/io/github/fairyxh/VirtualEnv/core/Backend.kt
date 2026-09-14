@@ -1109,9 +1109,18 @@ class Backend private constructor(private val dataDir: File) {
         ZLog.i(TAG_SCOPE, "settings jitterEnabled=$enabled")
     }
 
+    /** 开启后模拟数据独占对应数据源；关闭后允许真实数据与模拟数据并存。 */
+    fun isScanBlockingEnabled(): Boolean = configManager.isScanBlockingEnabled()
+
+    fun setScanBlockingEnabled(enabled: Boolean) {
+        configManager.setScanBlockingEnabled(enabled)
+        ZLog.i(TAG_SCOPE, "settings scanBlockingEnabled=$enabled")
+    }
+
     fun settingsStatusJson(): org.json.JSONObject {
         return org.json.JSONObject().apply {
             put("jitterEnabled", configManager.isJitterEnabled())
+            put("scanBlockingEnabled", configManager.isScanBlockingEnabled())
         }
     }
 

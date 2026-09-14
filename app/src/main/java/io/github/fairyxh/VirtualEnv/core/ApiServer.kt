@@ -211,6 +211,8 @@ class ApiServer(
                 path == "/api/joystick/reset" && method == "POST" -> joystickReset()
                 path == "/api/settings/jitter" && method == "GET" -> settingsJitter()
                 path == "/api/settings/jitter" && method == "POST" -> settingsJitter(body)
+                path == "/api/settings/scan-block" && method == "GET" -> settingsScanBlock()
+                path == "/api/settings/scan-block" && method == "POST" -> settingsScanBlock(body)
                 path == "/api/location-point/create" && method == "POST" -> locationPointCreate(body)
                 path == "/api/location-point/list" && method == "GET" -> locationPointList()
                 path == "/api/location-point/use" && method == "POST" -> locationPointUse(body)
@@ -413,6 +415,16 @@ class ApiServer(
             val json = JSONObject(body)
             if (json.has("enabled")) {
                 backend.setJitterEnabled(json.optBoolean("enabled", true))
+            }
+        }
+        return ApiResult.ok("ok", backend.settingsStatusJson())
+    }
+
+    private fun settingsScanBlock(body: String? = null): ApiResult {
+        if (body != null) {
+            val json = JSONObject(body)
+            if (json.has("enabled")) {
+                backend.setScanBlockingEnabled(json.optBoolean("enabled", true))
             }
         }
         return ApiResult.ok("ok", backend.settingsStatusJson())
