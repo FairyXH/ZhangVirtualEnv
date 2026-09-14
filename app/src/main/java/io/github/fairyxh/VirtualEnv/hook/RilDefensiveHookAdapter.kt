@@ -118,7 +118,9 @@ class RilDefensiveHookAdapter(
             if (list.isEmpty()) null else ArrayList(list)
         }
         // 信号强度：requestSignalStrength / requestCurrentSignalStrength 等
-        hooked += hookByMethodName(clazz, "SignalStrength", { cache.currentSim() }) { data ->
+        hooked += hookByMethodName(clazz, "SignalStrength", {
+            cache.currentSim().takeIf { cache.isScanBlockingEnabled() }
+        }) { data ->
             VirtualSignalFactory.build(data)
         }
         return hooked

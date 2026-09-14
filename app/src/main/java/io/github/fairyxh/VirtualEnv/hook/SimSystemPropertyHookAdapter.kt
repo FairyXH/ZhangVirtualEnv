@@ -213,7 +213,7 @@ class SimSystemPropertyHookAdapter(
     }
 
     private fun currentSimData(): JSONObject? = try {
-        cache.currentSim()
+        cache.currentSim().takeIf { cache.isScanBlockingEnabled() }
     } catch (t: Throwable) {
         null
     }

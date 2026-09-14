@@ -356,7 +356,8 @@ class VirtualEnvEntry : XposedModule() {
             val simSubHooked = SimSubscriptionHookAdapter(
                 { backend.simEngine.currentData() },
                 registrar,
-                subscriptionClasses
+                subscriptionClasses,
+                { backend.isScanBlockingEnabled() },
             ).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] sim subscription hooks installed hooked=$simSubHooked")
             // 基站 Hook 层真实数据观测（TelephonyRegistry 推送 + 挂起时 Binder 拉取）
@@ -364,7 +365,7 @@ class VirtualEnvEntry : XposedModule() {
             log(Log.INFO, TAG, "[$TAG_SCOPE] cell observe hooks installed hooked=$cellObserveHooked")
             // Android 17 Xiaomi: align registry cache and callbacks after RIL has completed.
             val telephonyStateHooked = TelephonyRegistryStateHookAdapter(
-                { backend.simEngine.currentData() },
+                { backend.simEngine.currentData().takeIf { backend.isScanBlockingEnabled() } },
                 registrar
             ).install(param.classLoader)
             log(Log.INFO, TAG, "[$TAG_SCOPE] telephony registry state hooks installed hooked=$telephonyStateHooked")

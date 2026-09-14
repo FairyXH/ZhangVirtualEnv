@@ -122,9 +122,14 @@ class WifiServiceHookAdapter(
                 val pkg = if (chain.args.isNotEmpty()) chain.getArg(0) as? String else null
                 if (virtual != null) {
                     // WiFi 模拟开关打开：直接覆盖真实扫描结果（空配置也返回空列表）
-                    val list = buildVirtualScanResults(virtual)
+                    val virtualList = buildVirtualScanResults(virtual)
+                    val list = if (backend.isScanBlockingEnabled()) {
+                        virtualList
+                    } else {
+                        extractSliceList(original) + virtualList
+                    }
                     val slice = newParceledListSlice(method.returnType, list)
-                    logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> virtual ${list.size} networks")
+                    logCallOnce("scan|$pkg", "WifiService.getScanResults pkg=$pkg -> ${if (backend.isScanBlockingEnabled()) "virtual" else "mixed"} ${list.size} networks")
                     slice
                 } else {
                     // WiFi 模拟未开启：直接放行真实扫描结果（不自作主张阻断）
@@ -206,6 +211,14 @@ class WifiServiceHookAdapter(
                 .newInstance(list, false)
         }
         return ctor.newInstance(list)
+    }
+
+    private fun extractSliceList(slice: Any?): List<Any> {
+        if (slice == null) return emptyList()
+        return runCatching {
+            @Suppress("UNCHECKED_CAST")
+            (slice.javaClass.getMethod("getList").invoke(slice) as? List<Any>).orEmpty()
+        }.getOrDefault(emptyList())
     }
 
     // ---------- getConnectionInfo(String, String): WifiInfo ----------

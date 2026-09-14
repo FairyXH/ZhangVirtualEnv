@@ -82,6 +82,9 @@ class PhoneInterfaceManagerHookAdapter(
                     val callback = chain.getArg(1)
                     val pkg = chain.getArg(2) as? String ?: "?"
                     val cells = buildVirtualCells()
+                    if (!cache.isScanBlockingEnabled()) {
+                        chain.proceed()
+                    }
                     invokeCellInfoCallback(callback, cells)
                     ZLog.i(TAG_SCOPE, "PhoneInterfaceManager.requestCellInfoUpdate pkg=$pkg -> virtual ${cells.size} cells")
                 } catch (t: Throwable) {
@@ -157,13 +160,14 @@ class PhoneInterfaceManagerHookAdapter(
             if (entries.length() == 0) {
                 // 空基站配置：尊重 0 基站，返回空列表（不 fallback CDMA）
                 logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> empty (0 cells configured)")
-                return@register emptyList<Any>()
+                return@register if (cache.isScanBlockingEnabled()) emptyList<Any>() else original
             }
             try {
                 val list = VirtualCellFactory.buildCellInfoList(cellData, cache.locationLat(), cache.locationLon())
                 if (list.isNotEmpty()) {
-                    logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> virtual ${list.size} cells from config")
-                    return@register list
+                    val result = mixCellLists(original, list)
+                    logCallOnce("all|$pkg", "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> ${if (cache.isScanBlockingEnabled()) "virtual" else "mixed"} ${result.size} cells")
+                    return@register result
                 }
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo config build failed, fallback cdma", t)
@@ -180,7 +184,7 @@ class PhoneInterfaceManagerHookAdapter(
                         "all|$pkg",
                         "PhoneInterfaceManager.getAllCellInfo pkg=$pkg -> $cellCount virtual cells (${cache.locationLat()},${cache.locationLon()})"
                     )
-                    cells
+                    mixCellLists(original, cells)
                 } else {
                     ZLog.w(TAG_SCOPE, "PhoneInterfaceManager.getAllCellInfo virtual cell build failed, fallback empty")
                     emptyList<Any>()
@@ -192,6 +196,14 @@ class PhoneInterfaceManagerHookAdapter(
         }
         if (ok) ZLog.i(TAG_SCOPE, "hooked PhoneInterfaceManager.getAllCellInfo")
         return if (ok) 1 else 0
+    }
+
+    private fun mixCellLists(original: Any?, virtual: List<Any>): List<Any> {
+        if (cache.isScanBlockingEnabled()) return virtual
+        return buildList {
+            (original as? List<*>)?.filterNotNull()?.forEach(::add)
+            addAll(virtual)
+        }
     }
 
     // ---------- getCellLocation(String, String): CellIdentity ----------
@@ -209,6 +221,7 @@ class PhoneInterfaceManagerHookAdapter(
             // 基站模拟未开启 → 放行真实 CellIdentity
             if (cache.currentCell() == null) return@register original
             if (!virtualLocationEnabled()) return@register original
+            if (!cache.isScanBlockingEnabled()) return@register original
             try {
                 val identity = VirtualCellFactory.buildCellIdentityCdma(cache.locationLat(), cache.locationLon())
                 if (identity != null) {
@@ -241,6 +254,7 @@ class PhoneInterfaceManagerHookAdapter(
             // 基站模拟未开启 → 放行真实邻区
             if (cache.currentCell() == null) return@register original
             if (!virtualLocationEnabled()) return@register original
+            if (!cache.isScanBlockingEnabled()) return@register original
             try {
                 ZLog.d(TAG_SCOPE, "PhoneInterfaceManager.getNeighboringCellInfo -> empty (virtual location)")
                 emptyList<Any>()

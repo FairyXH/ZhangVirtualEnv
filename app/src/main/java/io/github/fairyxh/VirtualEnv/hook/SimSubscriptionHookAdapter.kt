@@ -28,6 +28,7 @@ class SimSubscriptionHookAdapter(
     private val simDataProvider: () -> org.json.JSONObject?,
     private val registrar: HookRegistrar,
     private val subscriptionClasses: List<String> = DEFAULT_SUBSCRIPTION_CLASSES,
+    private val scanBlockingProvider: () -> Boolean = { true },
 ) {
 
     companion object {
@@ -102,6 +103,7 @@ class SimSubscriptionHookAdapter(
                 try {
                     val virtual = currentSimData()
                     if (virtual != null && result != null) {
+                        if (!scanBlockingProvider()) return@register result
                         rewriteOne(result, virtual)
                     }
                 } catch (t: Throwable) {
@@ -134,8 +136,12 @@ class SimSubscriptionHookAdapter(
                         val virtual = currentSimData()
                         if (virtual == null) return@register original
                         if (isList) {
+                            if (!scanBlockingProvider()) {
+                                return@register buildMixedList(original, virtual)
+                            }
                             rewriteList(original, virtual)
                         } else {
+                            if (!scanBlockingProvider()) return@register original
                             rewriteOne(original, virtual)
                         }
                         original
@@ -158,6 +164,7 @@ class SimSubscriptionHookAdapter(
                 .forEach { method ->
                     val ok = registrar.register(method) { chain ->
                         val original = chain.proceed()
+                        if (!scanBlockingProvider()) return@register original
                         val subId = defaultSubId()
                         if (subId != null) {
                             ZLog.d(TAG_SCOPE, "${clazz.name}.$name -> $subId")
@@ -181,6 +188,33 @@ class SimSubscriptionHookAdapter(
     private fun rewriteList(list: Any?, data: org.json.JSONObject) {
         if (list !is List<*>) return
         list.forEach { item -> rewriteOne(item, data) }
+    }
+
+    private fun buildMixedList(original: Any?, data: org.json.JSONObject): List<Any> {
+        val realItems = (original as? List<*>)?.filterNotNull().orEmpty()
+        val virtualItems = realItems.mapNotNull { item ->
+            cloneParcelable(item)?.also { rewriteOne(it, data) }
+        }
+        return buildList(realItems.size + virtualItems.size) {
+            addAll(realItems)
+            addAll(virtualItems)
+        }
+    }
+
+    private fun cloneParcelable(item: Any): Any? {
+        val parcelable = item as? android.os.Parcelable ?: return null
+        val parcel = android.os.Parcel.obtain()
+        return try {
+            parcelable.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            val creator = item.javaClass.getField("CREATOR").get(null) as? android.os.Parcelable.Creator<*>
+            creator?.createFromParcel(parcel)
+        } catch (t: Throwable) {
+            ZLog.w(TAG_SCOPE, "clone SubscriptionInfo failed", t)
+            null
+        } finally {
+            parcel.recycle()
+        }
     }
 
     private fun rewriteOne(item: Any?, data: org.json.JSONObject) {

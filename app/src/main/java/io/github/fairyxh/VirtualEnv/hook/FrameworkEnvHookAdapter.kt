@@ -101,7 +101,7 @@ class FrameworkEnvHookAdapter(
                         val sensor = chain.getArg(1)
                         val type = sensor.javaClass.getMethod("getType").invoke(sensor) as? Int ?: -1
                         val taken = sensorManager.onListenerRegistered(listener, sensor, type)
-                        if (taken) {
+                        if (taken && cache.isScanBlockingEnabled()) {
                             // 注入器接管：屏蔽真实传感器（不 proceed 原注册，真实事件不再到达）
                             ZLog.d(TAG_SCOPE, "registerListener type=$type intercepted (virtual active)")
                             return@register when (method.returnType) {
@@ -171,8 +171,9 @@ class FrameworkEnvHookAdapter(
                         )
                     }
                 }
-                ZLog.d(TAG_SCOPE, "getAllCellInfo -> virtual ${list.size} cells")
-                return@register list
+                val result = mergeWithOriginal(original, list)
+                ZLog.d(TAG_SCOPE, "getAllCellInfo -> ${if (cache.isScanBlockingEnabled()) "virtual" else "mixed"} ${result.size} cells")
+                return@register result
             } catch (t: Throwable) {
                 ZLog.w(TAG_SCOPE, "build virtual cells failed, fallback", t)
             }
@@ -204,7 +205,7 @@ class FrameworkEnvHookAdapter(
                         val callback = callbackClass?.let { findCallbackArg(chain, it) }
                         if (callback != null) {
                             startGnssInject(callback)
-                            if (cache.currentGnss() != null) {
+                            if (cache.currentGnss() != null && cache.isScanBlockingEnabled()) {
                                 return@register true // registerGnssStatusCallback 返回 Boolean
                             }
                         }
@@ -377,7 +378,10 @@ class FrameworkEnvHookAdapter(
             val ok = registrar.register(oneParam) { chain ->
                 val callback = chain.getArg(0)
                 try {
-                    if (deliverVirtualBle(callback) == true) return@register null
+                    if (deliverVirtualBle(callback) == true) {
+                        if (cache.isScanBlockingEnabled()) return@register null
+                        return@register chain.proceed()
+                    }
                     // 未启用/未就绪：暂存回调，配置就绪后补投递虚拟结果；同时放行真实扫描
                     pendingBleCallbacks.add(callback)
                     ZLog.d(TAG_SCOPE, "startScan(1) -> pending virtual ble")
@@ -392,7 +396,10 @@ class FrameworkEnvHookAdapter(
             val ok = registrar.register(threeParam) { chain ->
                 val callback = chain.getArg(2)
                 try {
-                    if (deliverVirtualBle(callback) == true) return@register null
+                    if (deliverVirtualBle(callback) == true) {
+                        if (cache.isScanBlockingEnabled()) return@register null
+                        return@register chain.proceed()
+                    }
                     pendingBleCallbacks.add(callback)
                     ZLog.d(TAG_SCOPE, "startScan(3) -> pending virtual ble")
                 } catch (t: Throwable) {
@@ -526,9 +533,9 @@ class FrameworkEnvHookAdapter(
             if (virtual != null) {
                 try {
                     val list = buildWifiResults(virtual)
-                    // 启用即覆盖：即使空配置也返回空列表，绝不放行真实 WiFi
-                    ZLog.d(TAG_SCOPE, "getScanResults -> virtual ${list.size} networks")
-                    return@register list
+                    val result = mergeWithOriginal(original, list)
+                    ZLog.d(TAG_SCOPE, "getScanResults -> ${if (cache.isScanBlockingEnabled()) "virtual" else "mixed"} ${result.size} networks")
+                    return@register result
                 } catch (t: Throwable) {
                     ZLog.w(TAG_SCOPE, "build virtual wifi failed, fallback", t)
                 }
@@ -569,6 +576,16 @@ class FrameworkEnvHookAdapter(
             ZLog.d(TAG_SCOPE, "WiFi payload networks=${networks.length()} emitted=${it.size}")
         }
     }
+
+    private fun mergeWithOriginal(original: Any?, virtual: List<Any>): List<Any> {
+        if (cache.isScanBlockingEnabled()) return virtual
+        val mixed = ArrayList<Any>((original as? List<*>)?.size.orZero() + virtual.size)
+        (original as? List<*>)?.filterNotNull()?.forEach(mixed::add)
+        mixed.addAll(virtual)
+        return mixed
+    }
+
+    private fun Int?.orZero(): Int = this ?: 0
 
     /** 设置空的 InformationElement[]，避免 Oplus 统计 NPE。
      *  Oplus 15 字段名为 informationElements（无 m 前缀，JADX 真机确认），

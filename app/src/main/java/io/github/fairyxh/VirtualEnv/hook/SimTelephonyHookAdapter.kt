@@ -375,7 +375,10 @@ class SimTelephonyHookAdapter(
     // ---------- 解析 ----------
 
     /** 当前启用 SIM 的 data JSON（含 slots）；未启用返回 null。 */
-    private fun currentSimData(): JSONObject? = cache.currentSim()
+    // 单值 Telephony API 无法同时表达两套身份；混合模式优先放行原始身份，
+    // 可枚举的 SubscriptionInfo 列表由 system_server 适配器追加虚拟副本。
+    private fun currentSimData(): JSONObject? =
+        if (cache.isScanBlockingEnabled()) cache.currentSim() else null
 
     /** 按 slotIndex 匹配的 SIM 槽配置；参数里没有索引时使用默认（第一个启用）槽。 */
     private fun resolveSlot(chain: Any): JSONObject? {

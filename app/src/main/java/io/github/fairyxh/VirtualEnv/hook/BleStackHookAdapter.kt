@@ -121,7 +121,8 @@ class BleStackHookAdapter(
                             null
                         }
                         if (helper != null) {
-                            deliverVirtual(helper, scannerId) ?: chain.proceed()
+                            val delivered = deliverVirtual(helper, scannerId)
+                            if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed()
                         } else {
                             chain.proceed()
                         }
@@ -158,7 +159,8 @@ class BleStackHookAdapter(
                             null
                         }
                         if (helper != null) {
-                            deliverVirtual(helper, scannerId) ?: chain.proceed()
+                            val delivered = deliverVirtual(helper, scannerId)
+                            if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed()
                         } else {
                             chain.proceed()
                         }
@@ -186,7 +188,8 @@ class BleStackHookAdapter(
                 val ok = registrar.register(method) { chain ->
                     val helper = chain.getThisObject()
                     val scannerId = (chain.getArg(0) as? Int) ?: -1
-                    deliverVirtual(helper, scannerId) ?: chain.proceed()
+                    val delivered = deliverVirtual(helper, scannerId)
+                    if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed() else delivered
                 }
                 if (ok) {
                     hooked++
@@ -231,7 +234,8 @@ class BleStackHookAdapter(
                         val controller = chain.getThisObject()
                         val scannerId = (chain.getArg(0) as? Int) ?: -1
                         logSink?.invoke(4, "ZVirtualEnv", "[Hook] ble android16 ScanController.startScan id=$scannerId invoked")
-                        deliverVirtual(controller, scannerId) ?: chain.proceed()
+                        val delivered = deliverVirtual(controller, scannerId)
+                        if (delivered != true || !cache.isScanBlockingEnabled()) chain.proceed() else delivered
                     }
                     if (ok) {
                         hooked++
@@ -355,7 +359,8 @@ class BleStackHookAdapter(
                             false
                         }
                         if (virtual) {
-                            return@register true
+                            if (cache.isScanBlockingEnabled()) return@register true
+                            return@register chain.proceed()
                         }
                         chain.proceed()
                     }
@@ -375,7 +380,7 @@ class BleStackHookAdapter(
                             } catch (t: Throwable) {
                                 ZLog.w(TAG_SCOPE, "finish virtual discovery failed", t)
                             }
-                            return@register true
+                            if (cache.isScanBlockingEnabled()) return@register true
                         }
                         chain.proceed()
                     }
@@ -390,7 +395,7 @@ class BleStackHookAdapter(
                     .firstOrNull { it.parameterCount == 1 }
                     ?.let { method ->
                         val ok = registrar.register(method) { chain ->
-                            if (virtualDiscoveryActive.get()) {
+                            if (virtualDiscoveryActive.get() && cache.isScanBlockingEnabled()) {
                                 ZLog.d(TAG_SCOPE, "deviceFoundCallback suppressed (virtual discovery active)")
                                 return@register null
                             }
