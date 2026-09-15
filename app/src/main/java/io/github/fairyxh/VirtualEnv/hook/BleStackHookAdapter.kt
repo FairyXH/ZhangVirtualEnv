@@ -122,13 +122,10 @@ class BleStackHookAdapter(
                         } catch (_: Throwable) {
                             null
                         }
-                        if (helper != null) {
-                            deliverVirtual(helper, scannerId, chain.getArg(1))
+                        val delivered = helper?.let {
+                            deliverVirtual(it, scannerId, chain.getArg(1))
                         }
-                        if (!blockRealScan) {
-                            chain.proceed()
-                        }
-                        null
+                        if (!blockRealScan || delivered != true) chain.proceed() else null
                     }
                     if (ok) {
                         hooked++
@@ -161,13 +158,10 @@ class BleStackHookAdapter(
                         } catch (_: Throwable) {
                             null
                         }
-                        if (helper != null) {
-                            deliverVirtual(helper, scannerId, chain.getArg(1))
+                        val delivered = helper?.let {
+                            deliverVirtual(it, scannerId, chain.getArg(1))
                         }
-                        if (!blockRealScan) {
-                            chain.proceed()
-                        }
-                        null
+                        if (!blockRealScan || delivered != true) chain.proceed() else null
                     }
                     if (ok) {
                         hooked++
