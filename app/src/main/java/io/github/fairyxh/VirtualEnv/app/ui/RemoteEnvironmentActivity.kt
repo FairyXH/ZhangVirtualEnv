@@ -529,4 +529,10 @@ class RemoteEnvironmentActivity : ComponentActivity(), RemoteEnvironmentManager.
     override fun onDevicesChanged(value: List<RemoteDevice>) { runOnUiThread { devices = value } }
     override fun onDeviceSelected(value: String?) { runOnUiThread { selectedDeviceId = value } }
     override fun onDataChanged(value: Map<String, JSONObject>) { runOnUiThread { data = value } }
+    override fun onConfigurationChanged(useRemote: Boolean, typeEnabled: Map<String, Boolean>) {
+        runOnUiThread {
+            this.useRemote = useRemote
+            this.typeEnabled = typeEnabled
+        }
+    }
 }

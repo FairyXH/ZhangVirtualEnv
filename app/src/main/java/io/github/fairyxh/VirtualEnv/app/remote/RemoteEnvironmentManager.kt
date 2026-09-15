@@ -57,6 +57,10 @@ class RemoteEnvironmentManager(context: Context) {
     private var activeDeviceId: String?
         get() = prefs.getString("active_device_id", null)
         set(value) { prefs.edit().putString("active_device_id", value).apply() }
+    private var lastSelectedDeviceId: String?
+        get() = prefs.getString("last_selected_device_id", null)
+        set(value) { prefs.edit().putString("last_selected_device_id", value).apply() }
+    private var pendingCapabilityDefaultsDeviceId: String? = null
     private var useRemote = false
     private val localSnapshots = mutableMapOf<String, JSONObject?>()
     private var activeServerId: String?
@@ -80,6 +84,7 @@ class RemoteEnvironmentManager(context: Context) {
         fun onDevicesChanged(devices: List<RemoteDevice>)
         fun onDeviceSelected(deviceId: String?)
         fun onDataChanged(data: Map<String, JSONObject>)
+        fun onConfigurationChanged(useRemote: Boolean, typeEnabled: Map<String, Boolean>)
     }
 
     fun servers(): List<RemoteServerConfig> = repository.list()
@@ -99,6 +104,7 @@ class RemoteEnvironmentManager(context: Context) {
             currentListener.onDevicesChanged(currentDevices)
             currentListener.onDeviceSelected(activeDeviceId)
             currentListener.onDataChanged(latest.toMap())
+            currentListener.onConfigurationChanged(useRemote, remoteEnabled.toMap())
         }
     }
 
@@ -145,11 +151,12 @@ class RemoteEnvironmentManager(context: Context) {
             emitState(currentState)
             return
         }
-        val savedDeviceId = activeDeviceId
+        val savedDeviceId = activeDeviceId ?: lastSelectedDeviceId
         disconnect(restoreLocal = false)
         activeConfig = config
         activeServerId = config.id
         activeDeviceId = savedDeviceId
+        pendingCapabilityDefaultsDeviceId = savedDeviceId
         persistState()
         publishRemoteSimulationMode()
         emitState("连接中")
@@ -182,9 +189,18 @@ class RemoteEnvironmentManager(context: Context) {
                         lastObservedDeviceDataAt[device.deviceId] = device.lastData
                     }
                 }
-                if (activeDeviceId != null && devices.none { it.deviceId == activeDeviceId }) {
+                if (activeDeviceId != null &&
+                    pendingCapabilityDefaultsDeviceId != activeDeviceId &&
+                    devices.none { it.deviceId == activeDeviceId }
+                ) {
                     activeDeviceId = null
                     listener?.onDeviceSelected(null)
+                }
+                pendingCapabilityDefaultsDeviceId?.let { pendingId ->
+                    devices.firstOrNull { it.deviceId == pendingId }?.let { device ->
+                        applyDeviceCapabilityDefaults(device)
+                        pendingCapabilityDefaultsDeviceId = null
+                    }
                 }
                 listener?.onDevicesChanged(devices)
             },
@@ -235,9 +251,14 @@ class RemoteEnvironmentManager(context: Context) {
         listener?.onDevicesChanged(currentDevices)
         listener?.onDeviceSelected(null)
         listener?.onDataChanged(emptyMap())
+        notifyConfigurationChanged()
     }
 
     fun selectDevice(deviceId: String) {
+        selectDevice(deviceId, applyCapabilityDefaults = true)
+    }
+
+    private fun selectDevice(deviceId: String, applyCapabilityDefaults: Boolean) {
         val old = activeDeviceId
         if (old != null && old != deviceId) {
             socket?.unsubscribe(old, PROTOCOL_TYPES)
@@ -245,6 +266,11 @@ class RemoteEnvironmentManager(context: Context) {
         }
         lastForcedRefreshAt = 0L
         activeDeviceId = deviceId
+        lastSelectedDeviceId = deviceId
+        if (applyCapabilityDefaults) {
+            currentDevices.firstOrNull { it.deviceId == deviceId }?.let(::applyDeviceCapabilityDefaults)
+                ?: run { pendingCapabilityDefaultsDeviceId = deviceId }
+        }
         socket?.subscribe(deviceId, PROTOCOL_TYPES)
         publishRemoteSimulationMode()
         listener?.onDeviceSelected(deviceId)
@@ -262,20 +288,34 @@ class RemoteEnvironmentManager(context: Context) {
         persistState()
         if (!enabled) {
             SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
+            persistState()
             disconnect()
             publishRemoteSimulationMode()
             listener?.onState("本地环境模拟正常工作")
             return
         }
+        val selectedId = activeDeviceId ?: lastSelectedDeviceId
+        if (selectedId != null) {
+            activeDeviceId = selectedId
+            currentDevices.firstOrNull { it.deviceId == selectedId }?.let(::applyDeviceCapabilityDefaults)
+                ?: run {
+                    SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
+                    pendingCapabilityDefaultsDeviceId = selectedId
+                    persistState()
+                }
+        } else {
+            SUPPORTED_TYPES.forEach { remoteEnabled[it] = false }
+            persistState()
+        }
         publishRemoteSimulationMode()
         listener?.onState("远程环境模拟启用")
-        SUPPORTED_TYPES.forEach { type ->
-            remoteEnabled[type] = true
+        remoteEnabled.filterValues { it }.keys.forEach { type ->
             latest[type]?.let { data -> synchronized(stateLock) { pendingRemote[type] = JSONObject(data.toString()) } }
         }
         if (socket?.isOpen() != true) {
             prepareRemoteTypesWithoutData()
         }
+        notifyConfigurationChanged()
     }
 
     private fun publishRemoteSimulationMode() {
@@ -301,6 +341,7 @@ class RemoteEnvironmentManager(context: Context) {
             }
             writeExecutor.execute { restoreLocalType(type, local) }
         }
+        notifyConfigurationChanged()
     }
 
     fun setModuleEnabled(enabled: Boolean) {
@@ -376,13 +417,26 @@ class RemoteEnvironmentManager(context: Context) {
                     "sourceAt=$sourceDataAt"
             )
             // Use the exact same manager path as tapping the selected device button.
-            selectDevice(selectedId)
+            selectDevice(selectedId, applyCapabilityDefaults = false)
         }
+    }
+
+    private fun applyDeviceCapabilityDefaults(device: RemoteDevice) {
+        val supported = device.capabilities.mapTo(mutableSetOf()) { capability ->
+            when (capability.lowercase()) {
+                "bluetooth", "bluetooth_data", "ble" -> "ble"
+                "cellular" -> "cell"
+                else -> capability.lowercase()
+            }
+        }
+        SUPPORTED_TYPES.forEach { type -> remoteEnabled[type] = type in supported }
+        persistState()
+        notifyConfigurationChanged()
     }
 
     private fun prepareRemoteTypesWithoutData() {
         writeExecutor.execute {
-            SUPPORTED_TYPES.forEach { type ->
+            SUPPORTED_TYPES.filter { remoteEnabled[it] == true }.forEach { type ->
                 val empty = when (type) {
                     "ble" -> JSONObject().put("devices", JSONArray())
                     "wifi" -> JSONObject().put("networks", JSONArray())
@@ -504,6 +558,10 @@ class RemoteEnvironmentManager(context: Context) {
         }
         currentState = value
         listener?.onState(value)
+    }
+
+    private fun notifyConfigurationChanged() {
+        listener?.onConfigurationChanged(useRemote, remoteEnabled.toMap())
     }
 }
 
